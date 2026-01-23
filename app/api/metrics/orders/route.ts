@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     const revenue = parseFloat(revenueResult.rows[0].revenue || 0)
 
     // Faturamento no período
-    const revenuePeriod = start_date && end_date ? revenue : revenue
+    const revenue_period = start_date && end_date ? revenue : revenue
 
     // Pedidos aguardando pagamento
     const awaitingPaymentResult = await query(
