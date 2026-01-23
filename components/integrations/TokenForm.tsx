@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, X } from "lucide-react"
+import { Loader2, Save, X, ExternalLink } from "lucide-react"
 import type { IntegrationProvider, IntegrationEnvironment, TokenType, IntegrationToken } from "@/lib/integrations-types"
 
 interface TokenFormProps {
@@ -44,6 +44,51 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
     client_secret: '', // Nunca mostrar secret salvo por segurança
     cep_origem: token?.additional_data?.cep_origem || '',
   })
+
+  const [isAuthorizing, setIsAuthorizing] = useState(false)
+
+  const handleAuthorize = async () => {
+    if (!formData.client_id && !token?.additional_data?.client_id) {
+      alert('Configure o Client ID primeiro antes de autorizar')
+      return
+    }
+
+    setIsAuthorizing(true)
+    try {
+      const clientId = formData.client_id || token?.additional_data?.client_id
+      if (!clientId) {
+        throw new Error('Client ID não encontrado')
+      }
+
+      // Primeiro, salvar client_id se ainda não estiver salvo
+      if (!token && formData.client_id) {
+        await onSave({
+          provider,
+          environment: formData.environment,
+          client_id: formData.client_id,
+          cep_origem: formData.cep_origem || undefined,
+        })
+      }
+
+      // Obter URL de autorização
+      const response = await fetch(
+        `/api/integrations/melhor-envio/authorize?environment=${formData.environment}`
+      )
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Erro ao gerar URL de autorização')
+      }
+
+      const data = await response.json()
+      
+      // Redirecionar para URL de autorização
+      window.location.href = data.authorization_url
+    } catch (error: any) {
+      alert(`Erro ao iniciar autorização: ${error.message}`)
+      setIsAuthorizing(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -189,6 +234,39 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
                   }
                 </p>
               </div>
+
+              {/* Botão de autorização OAuth2 */}
+              {(token?.additional_data?.client_id || formData.client_id) && (
+                <div className="space-y-2 pt-2 border-t">
+                  <Label>Autorização OAuth2</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Para obter tokens com todas as permissões (recomendado), autorize o app no Melhor Envio.
+                    Isso solicitará as permissões necessárias (shipping-calculate, shipping-read).
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleAuthorize}
+                    disabled={isAuthorizing || isSaving}
+                    className="w-full"
+                  >
+                    {isAuthorizing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Redirecionando...
+                      </>
+                    ) : (
+                      <>
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Autorizar App no Melhor Envio
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Após autorizar, você será redirecionado de volta e o token será salvo automaticamente.
+                  </p>
+                </div>
+              )}
             </>
           ) : (
             <>

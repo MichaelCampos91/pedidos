@@ -60,7 +60,37 @@ export async function getAllTokens(): Promise<IntegrationToken[]> {
 }
 
 /**
+ * Valida se um token não está mascarado
+ * Tokens mascarados não devem ser salvos no banco
+ */
+function validateTokenNotMasked(tokenValue: string, context: string): void {
+  if (!tokenValue || tokenValue.trim() === '') {
+    throw new Error(`[Sistema] Token não pode estar vazio (${context})`)
+  }
+
+  // Verificar se token está mascarado (contém **** ou começa com ****)
+  if (tokenValue.includes('****') || tokenValue.startsWith('****')) {
+    console.error('[Integrations] Tentativa de salvar token mascarado rejeitada', {
+      context,
+      tokenPreview: tokenValue.substring(0, 20),
+    })
+    throw new Error(`[Sistema] Token não pode estar mascarado. Por favor, forneça o token completo (${context}).`)
+  }
+
+  // Verificar tamanho mínimo (tokens do Melhor Envio geralmente têm mais de 20 caracteres)
+  const cleanToken = tokenValue.trim().replace(/^Bearer\s+/i, '')
+  if (cleanToken.length < 20) {
+    console.warn('[Integrations] Token muito curto', {
+      context,
+      tokenLength: cleanToken.length,
+    })
+    // Não rejeitar, apenas avisar - pode ser um token válido de outro provider
+  }
+}
+
+/**
  * Cria ou atualiza um token
+ * CRÍTICO: Tokens nunca devem ser salvos mascarados no banco
  */
 export async function upsertToken(
   provider: IntegrationProvider,
@@ -70,6 +100,23 @@ export async function upsertToken(
   additionalData?: Record<string, any>,
   expiresAt?: Date | string
 ): Promise<IntegrationToken> {
+  // Validar que token não está mascarado
+  validateTokenNotMasked(tokenValue, `upsertToken(${provider}, ${environment})`)
+
+  // Log de auditoria (sem expor token completo)
+  const tokenPreview = tokenValue.length > 8 
+    ? `${tokenValue.substring(0, 4)}...${tokenValue.substring(tokenValue.length - 4)}`
+    : '****'
+  
+  console.log('[Integrations] Salvando token no banco', {
+    provider,
+    environment,
+    tokenType,
+    tokenLength: tokenValue.length,
+    tokenPreview,
+    hasExpiresAt: !!expiresAt,
+  })
+
   const result = await query(
     `INSERT INTO integration_tokens 
      (provider, environment, token_value, token_type, additional_data, is_active, expires_at)
@@ -93,11 +140,18 @@ export async function upsertToken(
     ]
   )
 
+  console.log('[Integrations] Token salvo com sucesso', {
+    provider,
+    environment,
+    tokenId: result.rows[0].id,
+  })
+
   return result.rows[0] as IntegrationToken
 }
 
 /**
  * Atualiza token e refresh_token (para OAuth2)
+ * CRÍTICO: Valida que access_token não está mascarado antes de salvar
  */
 export async function updateOAuth2Token(
   provider: IntegrationProvider,
@@ -107,6 +161,9 @@ export async function updateOAuth2Token(
   expiresIn: number,
   additionalData?: Record<string, any>
 ): Promise<IntegrationToken> {
+  // Validar que access_token não está mascarado
+  validateTokenNotMasked(accessToken, `updateOAuth2Token(${provider}, ${environment})`)
+
   const expiresAt = new Date(Date.now() + (expiresIn * 1000) - (5 * 60 * 1000)) // 5 min antes
   
   const oauthData: Record<string, any> = {
@@ -115,9 +172,19 @@ export async function updateOAuth2Token(
   }
 
   // Só adicionar refresh_token se fornecido (pode não estar disponível em client_credentials)
+  // Validar refresh_token também se fornecido
   if (refreshToken) {
+    validateTokenNotMasked(refreshToken, `updateOAuth2Token refresh_token(${provider}, ${environment})`)
     oauthData.refresh_token = refreshToken
   }
+
+  console.log('[Integrations] Atualizando token OAuth2', {
+    provider,
+    environment,
+    expiresIn,
+    hasRefreshToken: !!refreshToken,
+    expiresAt,
+  })
 
   return upsertToken(
     provider,

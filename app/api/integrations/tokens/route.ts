@@ -136,6 +136,11 @@ export async function POST(request: NextRequest) {
       // Modo legacy: token direto
       // Verificar se o token não está mascarado
       if (token_value.includes('****') || token_value.startsWith('****')) {
+        console.error('[Integrations] Tentativa de salvar token mascarado rejeitada', {
+          provider,
+          environment,
+          tokenPreview: token_value.substring(0, 20),
+        })
         return NextResponse.json(
           { error: '[Sistema] Token não pode estar mascarado. Por favor, cole o token completo.' },
           { status: 400 }
@@ -144,6 +149,16 @@ export async function POST(request: NextRequest) {
 
       // Limpar o token (remover espaços e "Bearer " se presente)
       const cleanTokenValue = token_value.trim().replace(/^Bearer\s+/i, '')
+
+      // Validação adicional de tamanho mínimo
+      if (cleanTokenValue.length < 20) {
+        console.warn('[Integrations] Token muito curto', {
+          provider,
+          environment,
+          tokenLength: cleanTokenValue.length,
+        })
+        // Não rejeitar, apenas avisar - pode ser um token válido de outro provider
+      }
 
       console.log(`[Integrations] Salvando token (legacy) para ${provider} (${environment})`, {
         tokenLength: cleanTokenValue.length,

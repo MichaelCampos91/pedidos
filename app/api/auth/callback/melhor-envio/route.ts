@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { requireAuth } from '@/lib/auth'
 import { getToken, updateOAuth2Token, type IntegrationEnvironment } from '@/lib/integrations'
-import { getOAuth2Token } from '@/lib/melhor-envio-oauth'
+import { getOAuthBaseUrl } from '@/lib/melhor-envio-oauth'
 
 // Forçar rota dinâmica (usa cookies e autenticação)
 export const dynamic = 'force-dynamic'
@@ -66,9 +66,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const baseUrl = environment === 'sandbox'
-      ? 'https://sandbox.melhorenvio.com.br'
-      : 'https://melhorenvio.com.br'
+    const baseUrl = getOAuthBaseUrl(environment)
+    const tokenEndpoint = `${baseUrl}/oauth/token`
 
     // Trocar código de autorização por tokens
     // URL de callback deve corresponder EXATAMENTE à configurada no app do Melhor Envio
@@ -77,7 +76,12 @@ export async function GET(request: NextRequest) {
     const redirectUri = process.env.MELHOR_ENVIO_REDIRECT_URI 
       || `https://pedidos.lojacenario.com.br/api/auth/callback/melhor-envio`
     
-    console.log('[Melhor Envio OAuth2 Callback] Usando redirect_uri:', redirectUri)
+    console.log('[Melhor Envio OAuth2 Callback] Trocando código por token', {
+      environment,
+      tokenEndpoint,
+      redirectUri,
+      grantType: 'authorization_code',
+    })
     
     const formData = new URLSearchParams()
     formData.append('grant_type', 'authorization_code')
@@ -88,7 +92,7 @@ export async function GET(request: NextRequest) {
       `${existingToken.additional_data.client_id}:${existingToken.additional_data.client_secret}`
     ).toString('base64')
 
-    const response = await fetch(`${baseUrl}/oauth/token`, {
+    const response = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',

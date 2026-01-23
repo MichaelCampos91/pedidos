@@ -13,15 +13,69 @@ export interface OAuth2Credentials {
 }
 
 /**
+ * Retorna a URL base OAuth2 baseada no environment
+ * CRÍTICO: Tokens de sandbox não funcionam em produção e vice-versa
+ */
+export function getOAuthBaseUrl(environment: IntegrationEnvironment): string {
+  const baseUrl = environment === 'sandbox'
+    ? 'https://sandbox.melhorenvio.com.br'
+    : 'https://melhorenvio.com.br'
+  
+  console.log('[Melhor Envio OAuth2] Usando base URL', {
+    environment,
+    baseUrl,
+    oauthEndpoint: `${baseUrl}/oauth/token`,
+  })
+  
+  return baseUrl
+}
+
+/**
+ * Gera URL de autorização OAuth2 para fluxo authorization_code
+ * Inclui scopes necessários para calcular e ler informações de frete
+ */
+export function generateAuthorizationUrl(
+  environment: IntegrationEnvironment,
+  clientId: string,
+  redirectUri: string,
+  scopes: string[] = ['shipping-calculate', 'shipping-read']
+): string {
+  const baseUrl = getOAuthBaseUrl(environment)
+  const authUrl = `${baseUrl}/oauth/authorize`
+  
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: scopes.join(' '),
+    state: environment, // Incluir environment no state para identificar no callback
+  })
+  
+  const fullUrl = `${authUrl}?${params.toString()}`
+  
+  console.log('[Melhor Envio OAuth2] URL de autorização gerada', {
+    environment,
+    authUrl,
+    scopes,
+    redirectUri,
+    state: environment,
+  })
+  
+  return fullUrl
+}
+
+/**
  * Obtém access_token e refresh_token via OAuth2
+ * Usa grant_type=client_credentials (não requer autorização do usuário)
+ * IMPORTANTE: Tokens obtidos via client_credentials podem não ter todas as permissões
+ * Para permissões completas, use o fluxo authorization_code com scopes
  */
 export async function getOAuth2Token(
   credentials: OAuth2Credentials,
   environment: IntegrationEnvironment
 ): Promise<OAuth2TokenResponse> {
-  const baseUrl = environment === 'sandbox'
-    ? 'https://sandbox.melhorenvio.com.br'
-    : 'https://melhorenvio.com.br'
+  const baseUrl = getOAuthBaseUrl(environment)
+  const tokenEndpoint = `${baseUrl}/oauth/token`
 
   const authHeader = Buffer.from(`${credentials.client_id}:${credentials.client_secret}`).toString('base64')
 
@@ -32,7 +86,14 @@ export async function getOAuth2Token(
   formData.append('client_id', credentials.client_id)
   formData.append('client_secret', credentials.client_secret)
 
-  const response = await fetch(`${baseUrl}/oauth/token`, {
+  console.log('[Melhor Envio OAuth2] Obtendo token via client_credentials', {
+    environment,
+    tokenEndpoint,
+    grantType: 'client_credentials',
+    clientIdPreview: `${credentials.client_id.substring(0, 4)}...${credentials.client_id.substring(credentials.client_id.length - 4)}`,
+  })
+
+  const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -49,7 +110,10 @@ export async function getOAuth2Token(
     
     console.error('[Melhor Envio OAuth2] Erro ao obter token', {
       environment,
+      tokenEndpoint,
+      grantType: 'client_credentials',
       status: response.status,
+      statusText: response.statusText,
       error: errorData,
     })
     
@@ -70,8 +134,11 @@ export async function getOAuth2Token(
 
   console.log('[Melhor Envio OAuth2] Token obtido com sucesso', {
     environment,
+    tokenEndpoint,
+    grantType: 'client_credentials',
     expiresIn: data.expires_in,
     tokenType: data.token_type,
+    hasRefreshToken: !!data.refresh_token,
   })
 
   return {
@@ -84,20 +151,27 @@ export async function getOAuth2Token(
 
 /**
  * Renova access_token usando refresh_token
+ * IMPORTANTE: O refresh_token deve ser do mesmo environment (sandbox ou production)
  */
 export async function refreshOAuth2Token(
   refreshToken: string,
   environment: IntegrationEnvironment
 ): Promise<OAuth2TokenResponse> {
-  const baseUrl = environment === 'sandbox'
-    ? 'https://sandbox.melhorenvio.com.br'
-    : 'https://melhorenvio.com.br'
+  const baseUrl = getOAuthBaseUrl(environment)
+  const tokenEndpoint = `${baseUrl}/oauth/token`
 
   const formData = new URLSearchParams()
   formData.append('grant_type', 'refresh_token')
   formData.append('refresh_token', refreshToken)
 
-  const response = await fetch(`${baseUrl}/oauth/token`, {
+  console.log('[Melhor Envio OAuth2] Renovando token via refresh_token', {
+    environment,
+    tokenEndpoint,
+    grantType: 'refresh_token',
+    refreshTokenPreview: refreshToken ? `${refreshToken.substring(0, 4)}...${refreshToken.substring(refreshToken.length - 4)}` : 'vazio',
+  })
+
+  const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -113,7 +187,10 @@ export async function refreshOAuth2Token(
     
     console.error('[Melhor Envio OAuth2] Erro ao renovar token', {
       environment,
+      tokenEndpoint,
+      grantType: 'refresh_token',
       status: response.status,
+      statusText: response.statusText,
       error: errorData,
     })
     
@@ -128,7 +205,10 @@ export async function refreshOAuth2Token(
 
   console.log('[Melhor Envio OAuth2] Token renovado com sucesso', {
     environment,
+    tokenEndpoint,
+    grantType: 'refresh_token',
     expiresIn: data.expires_in,
+    hasNewRefreshToken: !!data.refresh_token,
   })
 
   // Se não retornar refresh_token, tentar usar o antigo ou retornar vazio

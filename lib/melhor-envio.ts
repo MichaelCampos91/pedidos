@@ -10,6 +10,135 @@ function getBaseUrl(environment: IntegrationEnvironment): string {
     : 'https://melhorenvio.com.br/api/v2/me'
 }
 
+/**
+ * Diagnostica erros 401 para identificar a causa específica
+ * Diferencia entre: token inválido/expirado, ambiente errado, falta de escopo/permissão
+ */
+export interface Error401Diagnosis {
+  type: 'invalid_token' | 'wrong_environment' | 'missing_scope' | 'expired_token' | 'unknown'
+  message: string
+  details: {
+    environment: IntegrationEnvironment
+    tokenPreview: string
+    errorMessage?: string
+    suggestion: string
+  }
+}
+
+export async function diagnose401Error(
+  response: Response,
+  environment: IntegrationEnvironment,
+  tokenPreview: string,
+  tokenRecord?: any
+): Promise<Error401Diagnosis> {
+  const errorText = await response.text().catch(() => '')
+  let errorData: any = {}
+  
+  try {
+    errorData = JSON.parse(errorText)
+  } catch {
+    errorData = { message: errorText || response.statusText }
+  }
+
+  const errorMessage = errorData.message || errorData.error || errorText || 'Token não autorizado'
+  const errorMessageLower = errorMessage.toLowerCase()
+
+  // Verificar se é problema de ambiente (token de sandbox usado em produção ou vice-versa)
+  // O Melhor Envio pode retornar mensagens específicas sobre ambiente
+  if (
+    errorMessageLower.includes('sandbox') ||
+    errorMessageLower.includes('ambiente') ||
+    errorMessageLower.includes('environment') ||
+    (tokenRecord && tokenRecord.environment !== environment)
+  ) {
+    return {
+      type: 'wrong_environment',
+      message: `Token de ambiente incorreto. Token configurado para ${tokenRecord?.environment || 'desconhecido'}, mas requisição feita para ${environment}.`,
+      details: {
+        environment,
+        tokenPreview,
+        errorMessage,
+        suggestion: `Use um token configurado para o ambiente ${environment}. Tokens de sandbox não funcionam em produção e vice-versa.`,
+      },
+    }
+  }
+
+  // Verificar se é problema de escopo/permissão
+  // Geralmente indicado por mensagens sobre permissões, escopo, ou quando GET funciona mas POST não
+  if (
+    errorMessageLower.includes('permission') ||
+    errorMessageLower.includes('scope') ||
+    errorMessageLower.includes('escopo') ||
+    errorMessageLower.includes('unauthorized') ||
+    errorMessageLower.includes('forbidden') ||
+    errorMessageLower.includes('não autorizado') ||
+    errorMessageLower.includes('sem permissão')
+  ) {
+    return {
+      type: 'missing_scope',
+      message: 'Token sem permissões/escopos necessários para esta operação.',
+      details: {
+        environment,
+        tokenPreview,
+        errorMessage,
+        suggestion: 'O token pode ter sido gerado via client_credentials sem os escopos necessários. Use o fluxo authorization_code com scopes (shipping-calculate, shipping-read) para obter todas as permissões. Clique em "Autorizar App no Melhor Envio" na página de Integrações.',
+      },
+    }
+  }
+
+  // Verificar se token está expirado
+  if (
+    errorMessageLower.includes('expired') ||
+    errorMessageLower.includes('expirado') ||
+    errorMessageLower.includes('invalid') ||
+    (tokenRecord && tokenRecord.expires_at && isTokenExpired(tokenRecord.expires_at))
+  ) {
+    return {
+      type: 'expired_token',
+      message: 'Token expirado ou inválido.',
+      details: {
+        environment,
+        tokenPreview,
+        errorMessage,
+        suggestion: 'O token expirou. O sistema tentará renovar automaticamente. Se persistir, reautorize o app na página de Integrações.',
+      },
+    }
+  }
+
+  // Verificar se token é inválido/revogado
+  if (
+    errorMessageLower.includes('invalid') ||
+    errorMessageLower.includes('inválido') ||
+    errorMessageLower.includes('revoked') ||
+    errorMessageLower.includes('revogado') ||
+    errorMessageLower.includes('not found') ||
+    errorMessageLower.includes('não encontrado')
+  ) {
+    return {
+      type: 'invalid_token',
+      message: 'Token inválido ou revogado.',
+      details: {
+        environment,
+        tokenPreview,
+        errorMessage,
+        suggestion: 'O token foi revogado ou é inválido. Reconfigure o token na página de Integrações ou reautorize o app.',
+      },
+    }
+  }
+
+  // Caso desconhecido
+  return {
+    type: 'unknown',
+    message: 'Erro de autenticação não identificado.',
+    details: {
+      environment,
+      tokenPreview,
+      errorMessage,
+      suggestion: 'Verifique se o token está correto e tem as permissões necessárias. Tente reautorizar o app na página de Integrações.',
+    },
+  }
+}
+
 export interface ShippingQuoteParams {
   from: {
     postal_code: string
@@ -167,10 +296,23 @@ export async function calculateShipping(
     
     // Tratar erros específicos
     if (response.status === 401) {
-      // Tentar renovar token automaticamente (OAuth2)
-      try {
-        const tokenRecord = await getToken('melhor_envio', environment)
-        if (tokenRecord) {
+      const tokenRecord = await getToken('melhor_envio', environment)
+      const tokenPreview = `${cleanToken.substring(0, 4)}...${cleanToken.substring(cleanToken.length - 4)}`
+      
+      // Diagnosticar o erro 401
+      const diagnosis = await diagnose401Error(response, environment, tokenPreview, tokenRecord)
+      
+      console.error('[Melhor Envio] Erro 401 diagnosticado', {
+        diagnosisType: diagnosis.type,
+        environment,
+        tokenPreview,
+        errorMessage: diagnosis.details.errorMessage,
+        suggestion: diagnosis.details.suggestion,
+      })
+      
+      // Tentar renovar token automaticamente (OAuth2) - apenas se não for problema de ambiente ou escopo
+      if (diagnosis.type !== 'wrong_environment' && diagnosis.type !== 'missing_scope' && tokenRecord) {
+        try {
           const refreshToken = tokenRecord.additional_data?.refresh_token
           const clientId = tokenRecord.additional_data?.client_id
           const clientSecret = tokenRecord.additional_data?.client_secret
@@ -209,7 +351,7 @@ export async function calculateShipping(
             )
             
             // Tentar novamente com novo token
-            console.log('[Melhor Envio] Token renovado, tentando novamente')
+            console.log('[Melhor Envio] Token renovado, tentando novamente após diagnóstico')
             const retryHeaders = {
               ...headers,
               'Authorization': `Bearer ${newTokens.access_token}`,
@@ -227,33 +369,24 @@ export async function calculateShipping(
                 options: retryData.length,
               })
               return retryData
+            } else if (retryResponse.status === 401) {
+              // Se ainda der 401 após refresh, diagnosticar novamente
+              const retryDiagnosis = await diagnose401Error(retryResponse, environment, `${newTokens.access_token.substring(0, 4)}...${newTokens.access_token.substring(newTokens.access_token.length - 4)}`, tokenRecord)
+              console.error('[Melhor Envio] Erro 401 persiste após renovação', {
+                diagnosisType: retryDiagnosis.type,
+                suggestion: retryDiagnosis.details.suggestion,
+              })
+              throw new Error(`${diagnosis.message} ${retryDiagnosis.details.suggestion}`)
             }
           }
+        } catch (refreshError: any) {
+          console.error('[Melhor Envio] Erro ao tentar renovar token:', refreshError)
+          // Continuar com erro original
         }
-      } catch (refreshError: any) {
-        console.error('[Melhor Envio] Erro ao tentar renovar token:', refreshError)
-        // Continuar com erro original
       }
       
-      // Se renovação falhou ou não foi possível, retornar erro
-      console.error('[Melhor Envio] Token rejeitado na cotação', {
-        environment,
-        tokenLength: cleanToken.length,
-        tokenPreview: `${cleanToken.substring(0, 4)}...${cleanToken.substring(cleanToken.length - 4)}`,
-        errorDetails: errorData,
-        suggestion: 'O token pode estar válido para consultas (GET) mas não ter permissões para calcular fretes (POST). Verifique as permissões do token na área de desenvolvedor do Melhor Envio.',
-      })
-      
-      // Mensagem mais específica baseada no erro
-      let errorMessage = '[Melhor Envio] Token inválido ou sem permissões para calcular frete.'
-      if (errorData.message) {
-        errorMessage += ` ${errorData.message}`
-      } else if (errorData.error) {
-        errorMessage += ` ${errorData.error}`
-      }
-      errorMessage += ' Verifique se o token tem as permissões necessárias na área de desenvolvedor do Melhor Envio.'
-      
-      throw new Error(errorMessage)
+      // Retornar erro com diagnóstico detalhado
+      throw new Error(`${diagnosis.message} ${diagnosis.details.suggestion}`)
     }
     
     if (response.status === 422) {
@@ -317,6 +450,14 @@ export async function validateToken(
   try {
     const cleanToken = await getCleanToken(environment)
     const baseUrl = getBaseUrl(environment)
+    const tokenRecord = await getToken('melhor_envio', environment)
+    const tokenPreview = `${cleanToken.substring(0, 4)}...${cleanToken.substring(cleanToken.length - 4)}`
+    
+    console.log('[Melhor Envio] Iniciando validação de token', {
+      environment,
+      tokenPreview,
+      validationSteps: ['GET /shipment/services', 'POST /shipment/calculate'],
+    })
     
     // Primeiro tenta validar com GET /shipment/services
     const servicesResponse = await fetch(`${baseUrl}/shipment/services`, {
@@ -330,7 +471,14 @@ export async function validateToken(
 
     // Se o GET funcionar, também tenta validar com um POST simples para garantir que o token tem permissões para POST
     let canCalculate = false
+    let calculateDiagnosis: Error401Diagnosis | null = null
+    
     if (servicesResponse.ok) {
+      console.log('[Melhor Envio] Validação GET: Token válido para consultas', {
+        environment,
+        status: servicesResponse.status,
+      })
+      
       // Testa se o token funciona para POST também (usando um CEP de teste)
       const testCalculateResponse = await fetch(`${baseUrl}/shipment/calculate`, {
         method: 'POST',
@@ -358,22 +506,30 @@ export async function validateToken(
       canCalculate = testCalculateResponse.ok
 
       if (testCalculateResponse.status === 401) {
-        const errorData = await testCalculateResponse.json().catch(() => ({}))
+        // Diagnosticar erro 401 no POST
+        calculateDiagnosis = await diagnose401Error(testCalculateResponse, environment, tokenPreview, tokenRecord)
+        
         console.error('[Melhor Envio] Validação: Token funciona para GET mas não para POST', {
           environment,
           getStatus: servicesResponse.status,
           postStatus: testCalculateResponse.status,
-          error: errorData,
+          diagnosisType: calculateDiagnosis.type,
+          diagnosisMessage: calculateDiagnosis.message,
         })
+        
         return {
           valid: false,
-          message: '[Melhor Envio] Token válido para consultas mas sem permissão para calcular fretes. Verifique as permissões do token na área de desenvolvedor do Melhor Envio.',
+          message: calculateDiagnosis.message,
           details: {
             status: testCalculateResponse.status,
             canListServices: true,
             canCalculate: false,
             environment,
-            error: errorData,
+            diagnosis: {
+              type: calculateDiagnosis.type,
+              suggestion: calculateDiagnosis.details.suggestion,
+            },
+            error: calculateDiagnosis.details.errorMessage,
           }
         }
       }
@@ -386,21 +542,38 @@ export async function validateToken(
           status: testCalculateResponse.status,
           error: errorData,
         })
+      } else if (testCalculateResponse.ok) {
+        console.log('[Melhor Envio] Validação POST: Token válido para calcular fretes', {
+          environment,
+          status: testCalculateResponse.status,
+        })
       }
     }
 
     const response = servicesResponse
 
     if (response.status === 401) {
-      const errorData = await response.json().catch(() => ({}))
+      // Diagnosticar erro 401 no GET
+      const diagnosis = await diagnose401Error(response, environment, tokenPreview, tokenRecord)
+      
+      console.error('[Melhor Envio] Validação GET: Token inválido', {
+        environment,
+        diagnosisType: diagnosis.type,
+        diagnosisMessage: diagnosis.message,
+      })
+      
       return {
         valid: false,
-        message: `[Melhor Envio] Token inválido ou expirado. Status: ${response.status}. ${errorData.message || 'Verifique se o token está correto e não expirou.'}`,
+        message: diagnosis.message,
         details: {
           status: response.status,
           statusText: response.statusText,
-          error: errorData,
           environment,
+          diagnosis: {
+            type: diagnosis.type,
+            suggestion: diagnosis.details.suggestion,
+          },
+          error: diagnosis.details.errorMessage,
         }
       }
     }
@@ -420,6 +593,14 @@ export async function validateToken(
     }
 
     const data = await response.json().catch(() => null)
+    
+    console.log('[Melhor Envio] Validação concluída com sucesso', {
+      environment,
+      canListServices: true,
+      canCalculate,
+      servicesCount: Array.isArray(data) ? data.length : null,
+    })
+    
     return {
       valid: true,
       message: canCalculate 
@@ -433,6 +614,11 @@ export async function validateToken(
       }
     }
   } catch (error: any) {
+    console.error('[Melhor Envio] Erro na validação de token', {
+      environment,
+      error: error.message,
+    })
+    
     return {
       valid: false,
       message: `[Sistema] Erro ao validar token: ${error.message}`,
