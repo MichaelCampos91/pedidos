@@ -188,3 +188,60 @@ export async function getTransaction(transactionId: string): Promise<PagarmeTran
 
   return response.json()
 }
+
+// Função para validar token do Pagar.me
+export async function validateToken(apiKey: string): Promise<{ valid: boolean; message: string; details?: any }> {
+  try {
+    // Tenta fazer uma chamada simples para validar o token
+    // Usamos o endpoint de listar pedidos com limite mínimo
+    const response = await fetch(`${PAGARME_BASE_URL}/orders?size=1`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (response.status === 401) {
+      const errorData = await response.json().catch(() => ({}))
+      return {
+        valid: false,
+        message: `Token inválido ou expirado. Status: ${response.status}. ${errorData.message || 'Verifique se a API key está correta.'}`,
+        details: {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+        }
+      }
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return {
+        valid: false,
+        message: `Erro ao validar token: ${response.status} ${response.statusText}`,
+        details: {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+        }
+      }
+    }
+
+    return {
+      valid: true,
+      message: 'Token válido',
+      details: {
+        status: response.status,
+      }
+    }
+  } catch (error: any) {
+    return {
+      valid: false,
+      message: `Erro ao validar token: ${error.message}`,
+      details: {
+        error: error.message,
+      }
+    }
+  }
+}

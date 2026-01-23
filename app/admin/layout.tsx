@@ -3,7 +3,7 @@
 import { ProtectedRoute, useAuth } from "@/lib/auth-context"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { LogOut, ShoppingCart, Users, Package, BarChart3, Truck } from "lucide-react"
+import { LogOut, ShoppingCart, Users, Package, BarChart3, Truck, Settings } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -89,6 +89,15 @@ export default function AdminLayout({
                 >
                   <Truck className="h-4 w-4 mr-2" />
                   Frete
+                </Button>
+              </Link>
+              <Link href="/admin/integrations">
+                <Button 
+                  variant="ghost" 
+                  className={`rounded-none border-b-2 ${isActive('/admin/integrations') || pathname?.startsWith('/admin/integrations/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
+                >
+                  <Settings className="h-4 w-4 mr-2" />
+                  Integrações
                 </Button>
               </Link>
             </div>

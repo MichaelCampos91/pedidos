@@ -2,36 +2,100 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { calculateShipping } from '@/lib/melhor-envio'
+import { getToken, updateTokenValidation, type IntegrationEnvironment } from '@/lib/integrations'
+import { generateCacheKey, getCachedQuote, setCachedQuote, cleanupExpiredCache } from '@/lib/shipping-cache'
 
-const MELHOR_ENVIO_CEP_ORIGEM = process.env.MELHOR_ENVIO_CEP_ORIGEM || '16010000'
+// Limpar cache expirado periodicamente
+cleanupExpiredCache()
 
-export async function POST(request: NextRequest) {
-  // Verificar variáveis de ambiente no início
-  const envVars = {
-    MELHOR_ENVIO_TOKEN: process.env.MELHOR_ENVIO_TOKEN,
-    MELHOR_ENVIO_CEP_ORIGEM: process.env.MELHOR_ENVIO_CEP_ORIGEM,
-    JWT_SECRET: process.env.JWT_SECRET,
+// Validações de dimensões conforme regras do Melhor Envio
+const DIMENSIONS_MIN = { width: 2, height: 11, length: 16 } // cm
+const DIMENSIONS_MAX = { width: 105, height: 105, length: 105 } // cm
+const WEIGHT_MIN = 0.1 // kg
+const WEIGHT_MAX = 30 // kg (varia por transportadora, mas 30kg é um limite geral)
+const CUBIC_WEIGHT_FACTOR = 300 // fator de cubagem padrão (kg/m³)
+
+function validateDimensions(width: number, height: number, length: number, weight: number): { valid: boolean; error?: string } {
+  // Validar dimensões mínimas
+  if (width < DIMENSIONS_MIN.width || height < DIMENSIONS_MIN.height || length < DIMENSIONS_MIN.length) {
+    return {
+      valid: false,
+      error: `Dimensões muito pequenas. Mínimo: ${DIMENSIONS_MIN.width}cm x ${DIMENSIONS_MIN.height}cm x ${DIMENSIONS_MIN.length}cm`
+    }
   }
 
+  // Validar dimensões máximas
+  if (width > DIMENSIONS_MAX.width || height > DIMENSIONS_MAX.height || length > DIMENSIONS_MAX.length) {
+    return {
+      valid: false,
+      error: `Dimensões muito grandes. Máximo: ${DIMENSIONS_MAX.width}cm x ${DIMENSIONS_MAX.height}cm x ${DIMENSIONS_MAX.length}cm`
+    }
+  }
+
+  // Validar peso
+  if (weight < WEIGHT_MIN) {
+    return {
+      valid: false,
+      error: `Peso muito baixo. Mínimo: ${WEIGHT_MIN}kg`
+    }
+  }
+
+  if (weight > WEIGHT_MAX) {
+    return {
+      valid: false,
+      error: `Peso muito alto. Máximo: ${WEIGHT_MAX}kg`
+    }
+  }
+
+  // Validar cubicagem (peso cubado)
+  const volume = (width * height * length) / 1000000 // converter para m³
+  const cubicWeight = volume * CUBIC_WEIGHT_FACTOR
+  
+  if (cubicWeight > WEIGHT_MAX) {
+    return {
+      valid: false,
+      error: `Peso cubado muito alto (${cubicWeight.toFixed(2)}kg). Ajuste as dimensões.`
+    }
+  }
+
+  return { valid: true }
+}
+
+async function getCepOrigem(environment: IntegrationEnvironment): Promise<string> {
+  // Tentar obter do token (additional_data)
+  try {
+    const token = await getToken('melhor_envio', environment)
+    if (token?.additional_data?.cep_origem) {
+      return token.additional_data.cep_origem
+    }
+  } catch (error) {
+    console.warn('[Shipping Quote] Erro ao buscar CEP origem do token:', error)
+  }
+
+  // Fallback para variáveis de ambiente
+  const envKey = environment === 'sandbox' 
+    ? 'MELHOR_ENVIO_CEP_ORIGEM_SANDBOX' 
+    : 'MELHOR_ENVIO_CEP_ORIGEM'
+  
+  return process.env[envKey] || process.env.MELHOR_ENVIO_CEP_ORIGEM || '16010000'
+}
+
+export async function POST(request: NextRequest) {
+  // Determinar environment no início para estar disponível no catch
+  let environment: IntegrationEnvironment = 'production'
+  
   try {
     const cookieStore = cookies()
     const cookieToken = cookieStore.get('auth_token')?.value
 
-    // Log detalhado no início
-    console.log('[Shipping Quote] Iniciando cotação', {
-      hasToken: !!envVars.MELHOR_ENVIO_TOKEN,
-      hasCepOrigem: !!envVars.MELHOR_ENVIO_CEP_ORIGEM,
-      hasJwtSecret: !!envVars.JWT_SECRET,
-      cookiePresent: !!cookieToken,
-      tokenLength: envVars.MELHOR_ENVIO_TOKEN?.length || 0,
-    })
-
     // Autenticação
     await requireAuth(request, cookieToken)
-    console.log('[Shipping Quote] Autenticação verificada com sucesso')
 
     const body = await request.json()
-    const { cep_destino, peso, altura, largura, comprimento, valor } = body
+    const { cep_destino, peso, altura, largura, comprimento, valor, produtos } = body
+
+    // Determinar environment
+    environment = (body.environment === 'sandbox' ? 'sandbox' : 'production') as 'sandbox' | 'production'
 
     if (!cep_destino) {
       return NextResponse.json(
@@ -41,29 +105,95 @@ export async function POST(request: NextRequest) {
     }
 
     const cleanCepDestino = cep_destino.replace(/\D/g, '')
-    const cleanCepOrigem = MELHOR_ENVIO_CEP_ORIGEM.replace(/\D/g, '')
 
     if (cleanCepDestino.length !== 8) {
       return NextResponse.json(
-        { error: 'CEP inválido' },
+        { error: 'CEP inválido. O CEP deve ter 8 dígitos.' },
+        { status: 400 }
+      )
+    }
+    const cepOrigemRaw = await getCepOrigem(environment)
+    const cleanCepOrigem = cepOrigemRaw.replace(/\D/g, '')
+
+    if (cleanCepOrigem.length !== 8) {
+      return NextResponse.json(
+        { error: 'CEP de origem inválido. Configure o CEP de origem na página de Integrações.' },
         { status: 400 }
       )
     }
 
-    // Valores padrão se não fornecidos
-    const weight = peso || 0.3 // kg
-    const height = altura || 10 // cm
-    const width = largura || 20 // cm
-    const length = comprimento || 30 // cm
-    const insuranceValue = valor || 100 // R$
+    // Processar produtos (suporta array ou valores únicos para compatibilidade)
+    let productsList: Array<{ id: string; width: number; height: number; length: number; weight: number; insurance_value: number; quantity: number }>
+    
+    if (produtos && Array.isArray(produtos) && produtos.length > 0) {
+      // Validar cada produto
+      for (const produto of produtos) {
+        const validation = validateDimensions(
+          produto.largura || produto.width || 20,
+          produto.altura || produto.height || 10,
+          produto.comprimento || produto.length || 30,
+          produto.peso || produto.weight || 0.3
+        )
+        
+        if (!validation.valid) {
+          return NextResponse.json(
+            { error: `Produto ${produto.id || 'desconhecido'}: ${validation.error}` },
+            { status: 400 }
+          )
+        }
+      }
+      
+      productsList = produtos.map((p: any, index: number) => ({
+        id: p.id || `produto-${index + 1}`,
+        width: p.largura || p.width || 20,
+        height: p.altura || p.height || 10,
+        length: p.comprimento || p.length || 30,
+        weight: p.peso || p.weight || 0.3,
+        insurance_value: p.valor || p.insurance_value || p.valor_seguro || 100,
+        quantity: p.quantidade || p.quantity || 1,
+      }))
+    } else {
+      // Modo legacy: valores únicos
+      const weight = Number(peso) || 0.3
+      const height = Number(altura) || 10
+      const width = Number(largura) || 20
+      const length = Number(comprimento) || 30
+      const insuranceValue = Number(valor) || 100
 
-    console.log('[Shipping Quote] Dados validados', {
-      cepOrigem: cleanCepOrigem,
-      cepDestino: cleanCepDestino,
-      weight,
-      dimensions: { width, height, length },
-      insuranceValue,
-    })
+      // Validar dimensões
+      const validation = validateDimensions(width, height, length, weight)
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: validation.error },
+          { status: 400 }
+        )
+      }
+
+      productsList = [{
+        id: '1',
+        width,
+        height,
+        length,
+        weight,
+        insurance_value: insuranceValue,
+        quantity: 1,
+      }]
+    }
+
+    // Verificar cache
+    const cacheKey = generateCacheKey(cleanCepDestino, productsList, environment)
+    const cachedOptions = getCachedQuote(cacheKey)
+    
+    if (cachedOptions) {
+      console.log('[Shipping Quote] Retornando do cache', { cacheKey })
+      return NextResponse.json({
+        success: true,
+        options: cachedOptions,
+        cached: true,
+      })
+    }
+
+    console.log('[Shipping Quote] Ambiente selecionado:', environment)
 
     // Chamar API do Melhor Envio
     const shippingOptions = await calculateShipping({
@@ -73,26 +203,26 @@ export async function POST(request: NextRequest) {
       to: {
         postal_code: cleanCepDestino,
       },
-      products: [
-        {
-          id: '1',
-          width: width,
-          height: height,
-          length: length,
-          weight: weight,
-          insurance_value: insuranceValue,
-          quantity: 1,
-        },
-      ],
-    })
+      products: productsList,
+    }, environment)
 
-    console.log('[Shipping Quote] Cotação realizada com sucesso', {
-      optionsCount: shippingOptions.length,
-    })
+    // Tratar resposta vazia
+    if (!shippingOptions || shippingOptions.length === 0) {
+      return NextResponse.json({
+        success: true,
+        options: [],
+        message: '[Melhor Envio] Nenhum serviço de entrega disponível para este CEP e dimensões. Tente outro endereço ou ajuste as dimensões do produto.',
+        source: 'integration',
+      })
+    }
+
+    // Armazenar no cache
+    setCachedQuote(cacheKey, shippingOptions)
 
     return NextResponse.json({
       success: true,
       options: shippingOptions,
+      cached: false,
     })
   } catch (error: any) {
     console.error('[Shipping Quote] Erro:', {
@@ -106,22 +236,77 @@ export async function POST(request: NextRequest) {
       return authErrorResponse(error.message, 401)
     }
 
-    // Erro de variável de ambiente
-    if (error.message.includes('não configurada') || error.message.includes('está vazia')) {
+    // Erro de token não configurado
+    if (error.message.includes('não configurado') || error.message.includes('está vazia')) {
       return NextResponse.json({
-        error: error.message,
-        details: 'Verifique as variáveis de ambiente: MELHOR_ENVIO_TOKEN, MELHOR_ENVIO_CEP_ORIGEM',
-        envStatus: {
-          MELHOR_ENVIO_TOKEN: !!envVars.MELHOR_ENVIO_TOKEN,
-          MELHOR_ENVIO_CEP_ORIGEM: !!envVars.MELHOR_ENVIO_CEP_ORIGEM,
-        }
+        error: '[Sistema] ' + error.message,
+        details: 'Configure o token na página de Integrações antes de fazer cotações.',
+        source: 'system',
       }, { status: 500 })
     }
 
-    // Erro da API Melhor Envio
+    // Se for erro 401, atualizar status do token no banco
+    if (error.message.includes('401') || error.message.includes('inválido') || error.message.includes('expirado')) {
+      try {
+        const token = await getToken('melhor_envio', environment)
+        if (token) {
+          await updateTokenValidation(
+            token.id,
+            'invalid',
+            error.message,
+            { lastError: new Date().toISOString(), endpoint: 'calculate' }
+          )
+          console.log('[Shipping Quote] Status do token atualizado para inválido após erro 401')
+        }
+      } catch (updateError) {
+        console.error('[Shipping Quote] Erro ao atualizar status do token:', updateError)
+      }
+    }
+
+    // Tratar erros específicos com mensagens amigáveis e prefixos
+    let errorMessage = error.message || 'Erro ao calcular frete'
+    let userFriendlyMessage = errorMessage
+    let statusCode = 500
+    let errorSource: 'system' | 'integration' = 'system'
+
+    // Erro 422 - Validação (da integração)
+    if (error.message.includes('422') || error.message.includes('Dados inválidos')) {
+      userFriendlyMessage = '[Melhor Envio] Dados inválidos para cotação. Verifique o CEP, dimensões e peso dos produtos.'
+      statusCode = 422
+      errorSource = 'integration'
+    }
+    
+    // Erro 401 - Token (da integração)
+    else if (error.message.includes('401') || error.message.includes('inválido') || error.message.includes('expirado')) {
+      userFriendlyMessage = '[Melhor Envio] Erro de autenticação. O token pode ter expirado. Tente novamente em alguns instantes ou verifique a configuração na página de Integrações.'
+      statusCode = 401
+      errorSource = 'integration'
+    }
+    
+    // Erro de rede/timeout (sistema)
+    else if (error.message.includes('fetch') || error.message.includes('network') || error.message.includes('timeout')) {
+      userFriendlyMessage = '[Sistema] Erro de conexão com o serviço de frete. Tente novamente em alguns instantes.'
+      statusCode = 503
+      errorSource = 'system'
+    }
+    
+    // Erro de token não configurado (sistema)
+    else if (error.message.includes('não configurado') || error.message.includes('está vazia')) {
+      userFriendlyMessage = '[Sistema] ' + errorMessage
+      errorSource = 'system'
+    }
+    
+    // Erro genérico (sistema)
+    else {
+      userFriendlyMessage = '[Sistema] Não foi possível calcular o frete no momento. Tente novamente ou entre em contato com o suporte.'
+      errorSource = 'system'
+    }
+
     return NextResponse.json({
-      error: error.message || 'Erro ao calcular frete',
-      details: 'Erro na comunicação com a API do Melhor Envio',
-    }, { status: 500 })
+      error: userFriendlyMessage,
+      details: errorMessage,
+      source: errorSource,
+      retryable: statusCode === 503 || statusCode === 401,
+    }, { status: statusCode })
   }
 }

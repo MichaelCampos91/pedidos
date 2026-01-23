@@ -164,6 +164,30 @@ CREATE INDEX IF NOT EXISTS idx_system_logs_created_at ON system_logs(created_at)
 CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level);
 
 -- ============================================
+-- Tabela: integration_tokens
+-- ============================================
+CREATE TABLE IF NOT EXISTS integration_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    provider VARCHAR(50) NOT NULL, -- 'melhor_envio', 'pagarme', 'bling'
+    environment VARCHAR(20) NOT NULL, -- 'sandbox', 'production'
+    token_value TEXT NOT NULL,
+    token_type VARCHAR(50) DEFAULT 'bearer', -- 'bearer', 'basic', 'api_key'
+    additional_data JSONB, -- Para armazenar dados extras (client_id, secret, etc)
+    is_active BOOLEAN DEFAULT true,
+    last_validated_at TIMESTAMP,
+    last_validation_status VARCHAR(20), -- 'valid', 'invalid', 'error'
+    last_validation_error TEXT,
+    expires_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider, environment)
+);
+
+CREATE INDEX IF NOT EXISTS idx_integration_tokens_provider ON integration_tokens(provider);
+CREATE INDEX IF NOT EXISTS idx_integration_tokens_environment ON integration_tokens(environment);
+CREATE INDEX IF NOT EXISTS idx_integration_tokens_is_active ON integration_tokens(is_active);
+
+-- ============================================
 -- Índices para performance
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_clients_cpf ON clients(cpf);
@@ -214,6 +238,12 @@ CREATE TRIGGER update_orders_updated_at
 DROP TRIGGER IF EXISTS update_shipping_rules_updated_at ON shipping_rules;
 CREATE TRIGGER update_shipping_rules_updated_at
     BEFORE UPDATE ON shipping_rules
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_integration_tokens_updated_at ON integration_tokens;
+CREATE TRIGGER update_integration_tokens_updated_at
+    BEFORE UPDATE ON integration_tokens
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 

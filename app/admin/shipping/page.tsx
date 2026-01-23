@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2, Truck, Search } from "lucide-react"
-import { formatShippingPrice, formatDeliveryTime } from "@/lib/melhor-envio"
+import { formatShippingPrice, formatDeliveryTime } from "@/lib/melhor-envio-utils"
+import { EnvironmentBadge } from "@/components/integrations/EnvironmentBadge"
+import type { IntegrationEnvironment } from "@/lib/integrations-types"
 
 interface ShippingOption {
   id: number
@@ -27,6 +29,7 @@ interface ShippingOption {
 
 export default function ShippingPage() {
   const [loading, setLoading] = useState(false)
+  const [environment, setEnvironment] = useState<IntegrationEnvironment>('sandbox')
   const [formData, setFormData] = useState({
     cep_destino: '',
     peso: '0.3',
@@ -48,7 +51,10 @@ export default function ShippingPage() {
       const response = await fetch('/api/shipping/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          environment,
+        }),
         credentials: 'include',
       })
 
@@ -64,17 +70,7 @@ export default function ShippingPage() {
         
         // Adicionar detalhes se disponível
         if (errorData.details) {
-          errorMessage += `\n\nDetalhes: ${errorData.details}`
-        }
-        
-        // Adicionar informações sobre variáveis de ambiente se disponível
-        if (errorData.envStatus) {
-          const missing = Object.entries(errorData.envStatus)
-            .filter(([_, present]) => !present)
-            .map(([key]) => key)
-          if (missing.length > 0) {
-            errorMessage += `\n\nVariáveis de ambiente faltando: ${missing.join(', ')}`
-          }
+          errorMessage += `\n\n${errorData.details}`
         }
         
         throw new Error(errorMessage)
@@ -82,8 +78,21 @@ export default function ShippingPage() {
 
       const data = await response.json()
       setShippingOptions(data.options || [])
+      
+      // Se não há opções mas há mensagem, mostrar como informação
+      if (data.options && data.options.length === 0 && data.message) {
+        // Mensagens já vêm com prefixo da API
+        setError(data.message)
+      } else {
+        setError(null) // Limpar erro se houver sucesso
+      }
     } catch (err: any) {
-      setError(err.message || 'Erro ao calcular frete')
+      // Manter prefixo se já tiver (vem da API)
+      let errorMsg = err.message || 'Erro ao calcular frete'
+      if (!errorMsg.includes('[')) {
+        errorMsg = `[Sistema] ${errorMsg}`
+      }
+      setError(errorMsg)
     } finally {
       setLoading(false)
     }
@@ -100,11 +109,36 @@ export default function ShippingPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Dados para Cotação</CardTitle>
-          <CardDescription>Preencha os dados para calcular o frete</CardDescription>
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle>Dados para Cotação</CardTitle>
+              <CardDescription>Preencha os dados para calcular o frete</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <EnvironmentBadge environment={environment} />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="environment">Ambiente</Label>
+              <select
+                id="environment"
+                value={environment}
+                onChange={(e) => setEnvironment(e.target.value as IntegrationEnvironment)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="sandbox">Sandbox (Testes)</option>
+                <option value="production">Produção</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {environment === 'sandbox' 
+                  ? 'Use o ambiente sandbox para testes sem custos reais'
+                  : 'Ambiente de produção - use com cuidado'}
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="cep_destino">CEP de Destino *</Label>
@@ -173,6 +207,16 @@ export default function ShippingPage() {
             {error && (
               <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm whitespace-pre-line">
                 {error}
+                {error.includes('[Melhor Envio]') && (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Esta mensagem veio da integração Melhor Envio.
+                  </div>
+                )}
+                {error.includes('[Sistema]') && (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Esta mensagem veio do sistema.
+                  </div>
+                )}
               </div>
             )}
 
@@ -196,8 +240,13 @@ export default function ShippingPage() {
       {shippingOptions.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Opções de Frete</CardTitle>
-            <CardDescription>Modalidades disponíveis</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Opções de Frete</CardTitle>
+                <CardDescription>Modalidades disponíveis no ambiente {environment === 'sandbox' ? 'Sandbox' : 'Produção'}</CardDescription>
+              </div>
+              <EnvironmentBadge environment={environment} />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
