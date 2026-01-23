@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     const total = parseInt(totalResult.rows[0].total)
 
     // Total de pedidos no período (se filtrado)
-    const totalPeriod = start_date && end_date ? total : total
+    const total_period = start_date && end_date ? total : total
 
     // Faturamento total
     const revenueResult = await query(
