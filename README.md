@@ -156,3 +156,5 @@ O projeto utiliza uma arquitetura monolítica Next.js, onde:
 - **Banco de dados** é acessado via `lib/database.ts`
 - **Autenticação** é gerenciada via JWT em cookies httpOnly
 - **Componentes** reutilizáveis em `components/`
+ 
+ 
