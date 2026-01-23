@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
-import { getAllTokens, upsertToken, updateOAuth2Token, type IntegrationProvider, type IntegrationEnvironment, type TokenType } from '@/lib/integrations'
+import { getAllTokens, getToken, upsertToken, updateOAuth2Token, type IntegrationProvider, type IntegrationEnvironment, type TokenType } from '@/lib/integrations'
 import { getOAuth2Token, calculateExpirationDate } from '@/lib/melhor-envio-oauth'
 
 // Lista todos os tokens

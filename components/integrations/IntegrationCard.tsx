@@ -17,7 +17,7 @@ import {
   AlertCircle
 } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
-import type { IntegrationProvider, IntegrationToken, IntegrationEnvironment } from "@/lib/integrations-types"
+import type { IntegrationProvider, IntegrationToken, IntegrationEnvironment, TokenType } from "@/lib/integrations-types"
 
 interface IntegrationCardProps {
   provider: IntegrationProvider
@@ -32,7 +32,7 @@ interface IntegrationCardProps {
     provider: IntegrationProvider
     environment: IntegrationEnvironment
     token_value?: string
-    token_type?: string
+    token_type?: TokenType
     client_id?: string
     client_secret?: string
     cep_origem?: string
@@ -83,7 +83,7 @@ export function IntegrationCard({
     provider: IntegrationProvider
     environment: IntegrationEnvironment
     token_value?: string
-    token_type?: string
+    token_type?: TokenType
     client_id?: string
     client_secret?: string
     cep_origem?: string

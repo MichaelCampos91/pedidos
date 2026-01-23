@@ -75,11 +75,15 @@ export function invalidateCache(cacheKey: string): void {
  */
 export function cleanupExpiredCache(): void {
   const now = Date.now()
-  for (const [key, entry] of cache.entries()) {
+  const keysToDelete: string[] = []
+  
+  cache.forEach((entry, key) => {
     if (now >= entry.expiresAt) {
-      cache.delete(key)
+      keysToDelete.push(key)
     }
-  }
+  })
+  
+  keysToDelete.forEach(key => cache.delete(key))
 }
 
 /**

@@ -4,6 +4,9 @@ import { requireAuth } from '@/lib/auth'
 import { getToken, updateOAuth2Token, type IntegrationEnvironment } from '@/lib/integrations'
 import { getOAuth2Token } from '@/lib/melhor-envio-oauth'
 
+// Forçar rota dinâmica (usa cookies e autenticação)
+export const dynamic = 'force-dynamic'
+
 /**
  * Callback OAuth2 do Melhor Envio
  * 
