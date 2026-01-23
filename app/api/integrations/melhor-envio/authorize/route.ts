@@ -41,12 +41,12 @@ export async function GET(request: NextRequest) {
     const redirectUri = process.env.MELHOR_ENVIO_REDIRECT_URI 
       || `https://pedidos.lojacenario.com.br/api/auth/callback/melhor-envio`
 
-    // Gerar URL de autorização com scopes necessários
+    // Gerar URL de autorização
+    // Scopes removidos - permissões configuradas no painel do desenvolvedor do Melhor Envio
     const authorizationUrl = generateAuthorizationUrl(
       environment,
       clientId,
-      redirectUri,
-      ['shipping-calculate', 'shipping-read'] // Scopes necessários para calcular e ler fretes
+      redirectUri
     )
 
     console.log('[Melhor Envio OAuth2] URL de autorização gerada', {

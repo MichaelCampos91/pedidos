@@ -32,13 +32,13 @@ export function getOAuthBaseUrl(environment: IntegrationEnvironment): string {
 
 /**
  * Gera URL de autorização OAuth2 para fluxo authorization_code
- * Inclui scopes necessários para calcular e ler informações de frete
+ * IMPORTANTE: O Melhor Envio não usa scopes explícitos na URL.
+ * As permissões são configuradas no painel do desenvolvedor do app.
  */
 export function generateAuthorizationUrl(
   environment: IntegrationEnvironment,
   clientId: string,
-  redirectUri: string,
-  scopes: string[] = ['shipping-calculate', 'shipping-read']
+  redirectUri: string
 ): string {
   const baseUrl = getOAuthBaseUrl(environment)
   const authUrl = `${baseUrl}/oauth/authorize`
@@ -47,7 +47,7 @@ export function generateAuthorizationUrl(
     response_type: 'code',
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: scopes.join(' '),
+    // scope removido - permissões vêm da configuração do app no painel do Melhor Envio
     state: environment, // Incluir environment no state para identificar no callback
   })
   
@@ -56,9 +56,9 @@ export function generateAuthorizationUrl(
   console.log('[Melhor Envio OAuth2] URL de autorização gerada', {
     environment,
     authUrl,
-    scopes,
     redirectUri,
     state: environment,
+    note: 'Permissões configuradas no painel do desenvolvedor do Melhor Envio',
   })
   
   return fullUrl
