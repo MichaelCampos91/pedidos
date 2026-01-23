@@ -49,11 +49,35 @@ export default function ShippingPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
+        credentials: 'include',
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Erro ao calcular frete')
+        const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
+        
+        let errorMessage = errorData.error || 'Erro ao calcular frete'
+        
+        // Tratar erro 401 especificamente
+        if (response.status === 401) {
+          errorMessage = 'Você não está autenticado. Por favor, faça login novamente.'
+        }
+        
+        // Adicionar detalhes se disponível
+        if (errorData.details) {
+          errorMessage += `\n\nDetalhes: ${errorData.details}`
+        }
+        
+        // Adicionar informações sobre variáveis de ambiente se disponível
+        if (errorData.envStatus) {
+          const missing = Object.entries(errorData.envStatus)
+            .filter(([_, present]) => !present)
+            .map(([key]) => key)
+          if (missing.length > 0) {
+            errorMessage += `\n\nVariáveis de ambiente faltando: ${missing.join(', ')}`
+          }
+        }
+        
+        throw new Error(errorMessage)
       }
 
       const data = await response.json()
@@ -147,7 +171,7 @@ export default function ShippingPage() {
             </div>
 
             {error && (
-              <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+              <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm whitespace-pre-line">
                 {error}
               </div>
             )}
