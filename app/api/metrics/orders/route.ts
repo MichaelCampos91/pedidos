@@ -1,0 +1,83 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { query } from '@/lib/database'
+import { requireAuth, authErrorResponse } from '@/lib/auth'
+
+export async function GET(request: NextRequest) {
+  try {
+    const cookieStore = cookies()
+    const cookieToken = cookieStore.get('auth_token')?.value
+    await requireAuth(request, cookieToken)
+
+    const { searchParams } = new URL(request.url)
+    const start_date = searchParams.get('start_date')
+    const end_date = searchParams.get('end_date')
+
+    let dateFilter = ''
+    const params: any[] = []
+    let paramIndex = 1
+
+    if (start_date && end_date) {
+      dateFilter = `WHERE DATE(created_at) BETWEEN $${paramIndex} AND $${paramIndex + 1}`
+      params.push(start_date, end_date)
+      paramIndex += 2
+    }
+
+    // Total de pedidos
+    const totalResult = await query(
+      `SELECT COUNT(*) as total FROM orders ${dateFilter}`,
+      params
+    )
+    const total = parseInt(totalResult.rows[0].total)
+
+    // Total de pedidos no período (se filtrado)
+    const totalPeriod = start_date && end_date ? total : total
+
+    // Faturamento total
+    const revenueResult = await query(
+      `SELECT COALESCE(SUM(total), 0) as revenue FROM orders ${dateFilter}`,
+      params
+    )
+    const revenue = parseFloat(revenueResult.rows[0].revenue || 0)
+
+    // Faturamento no período
+    const revenuePeriod = start_date && end_date ? revenue : revenue
+
+    // Pedidos aguardando pagamento
+    const awaitingPaymentResult = await query(
+      `SELECT COUNT(*) as count FROM orders WHERE status = 'aguardando_pagamento' ${dateFilter.replace('WHERE', 'AND') || ''}`,
+      params.length > 0 ? params : []
+    )
+    const awaiting_payment = parseInt(awaitingPaymentResult.rows[0].count)
+
+    // Distribuição por status
+    const byStatusResult = await query(
+      `SELECT status, COUNT(*) as count 
+       FROM orders 
+       ${dateFilter}
+       GROUP BY status
+       ORDER BY count DESC`
+    )
+    const by_status = byStatusResult.rows.map((row: any) => ({
+      status: row.status,
+      count: parseInt(row.count)
+    }))
+
+    return NextResponse.json({
+      total,
+      total_period,
+      revenue,
+      revenue_period,
+      awaiting_payment,
+      by_status
+    })
+  } catch (error: any) {
+    if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {
+      return authErrorResponse(error.message, 401)
+    }
+    return NextResponse.json(
+      { error: 'Erro ao buscar métricas' },
+      { status: 500 }
+    )
+  }
+}
