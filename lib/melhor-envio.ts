@@ -11,7 +11,7 @@ function getBaseUrl(environment: IntegrationEnvironment): string {
 }
 
 /**
- * Diagnostica erros 401 para identificar a causa específica
+ * Diagnostica erros 401/403 para identificar a causa específica
  * Diferencia entre: token inválido/expirado, ambiente errado, falta de escopo/permissão
  */
 export interface Error401Diagnosis {
@@ -26,18 +26,19 @@ export interface Error401Diagnosis {
 }
 
 export async function diagnose401Error(
-  response: Response,
+  errorText: string,
+  responseStatus: number,
   environment: IntegrationEnvironment,
   tokenPreview: string,
   tokenRecord?: any
 ): Promise<Error401Diagnosis> {
-  const errorText = await response.text().catch(() => '')
+  // errorText já vem lido, não precisa ler do response
   let errorData: any = {}
   
   try {
     errorData = JSON.parse(errorText)
   } catch {
-    errorData = { message: errorText || response.statusText }
+    errorData = { message: errorText || `HTTP ${responseStatus}` }
   }
 
   const errorMessage = errorData.message || errorData.error || errorText || 'Token não autorizado'
@@ -72,16 +73,17 @@ export async function diagnose401Error(
     errorMessageLower.includes('unauthorized') ||
     errorMessageLower.includes('forbidden') ||
     errorMessageLower.includes('não autorizado') ||
-    errorMessageLower.includes('sem permissão')
+    errorMessageLower.includes('sem permissão') ||
+    errorMessageLower.includes('this action is unauthorized')
   ) {
     return {
       type: 'missing_scope',
-      message: 'Token sem permissões/escopos necessários para esta operação.',
+      message: 'Token sem permissões necessárias para calcular fretes.',
       details: {
         environment,
         tokenPreview,
         errorMessage,
-        suggestion: 'O token pode ter sido gerado via client_credentials sem os escopos necessários. Use o fluxo authorization_code com scopes (shipping-calculate, shipping-read) para obter todas as permissões. Clique em "Autorizar App no Melhor Envio" na página de Integrações.',
+        suggestion: 'O token foi autorizado mas não tem permissão para calcular fretes (POST). Isso geralmente ocorre quando o token foi gerado via client_credentials. Use o fluxo authorization_code clicando em "Autorizar App no Melhor Envio" na página de Integrações. Certifique-se também de que o app do Melhor Envio tem as permissões necessárias configuradas no painel do desenvolvedor.',
       },
     }
   }
@@ -294,15 +296,16 @@ export async function calculateShipping(
       headers: Object.fromEntries(response.headers.entries()),
     })
     
-    // Tratar erros específicos
-    if (response.status === 401) {
+    // Tratar erros específicos (401 Unauthorized ou 403 Forbidden)
+    if (response.status === 401 || response.status === 403) {
       const tokenRecord = await getToken('melhor_envio', environment)
       const tokenPreview = `${cleanToken.substring(0, 4)}...${cleanToken.substring(cleanToken.length - 4)}`
       
-      // Diagnosticar o erro 401
-      const diagnosis = await diagnose401Error(response, environment, tokenPreview, tokenRecord)
+      // Diagnosticar o erro 401/403
+      const diagnosis = await diagnose401Error(errorText, response.status, environment, tokenPreview, tokenRecord)
       
-      console.error('[Melhor Envio] Erro 401 diagnosticado', {
+      console.error('[Melhor Envio] Erro 401/403 diagnosticado', {
+        status: response.status,
         diagnosisType: diagnosis.type,
         environment,
         tokenPreview,
@@ -369,10 +372,12 @@ export async function calculateShipping(
                 options: retryData.length,
               })
               return retryData
-            } else if (retryResponse.status === 401) {
-              // Se ainda der 401 após refresh, diagnosticar novamente
-              const retryDiagnosis = await diagnose401Error(retryResponse, environment, `${newTokens.access_token.substring(0, 4)}...${newTokens.access_token.substring(newTokens.access_token.length - 4)}`, tokenRecord)
-              console.error('[Melhor Envio] Erro 401 persiste após renovação', {
+            } else if (retryResponse.status === 401 || retryResponse.status === 403) {
+              // Se ainda der 401/403 após refresh, diagnosticar novamente
+              const retryErrorText = await retryResponse.text().catch(() => '')
+              const retryDiagnosis = await diagnose401Error(retryErrorText, retryResponse.status, environment, `${newTokens.access_token.substring(0, 4)}...${newTokens.access_token.substring(newTokens.access_token.length - 4)}`, tokenRecord)
+              console.error('[Melhor Envio] Erro 401/403 persiste após renovação', {
+                status: retryResponse.status,
                 diagnosisType: retryDiagnosis.type,
                 suggestion: retryDiagnosis.details.suggestion,
               })
@@ -419,9 +424,14 @@ export async function getShippingServices(
   })
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ 
-      message: `Erro HTTP ${response.status}: ${response.statusText}` 
-    }))
+    const errorText = await response.text().catch(() => '')
+    let errorData: any = {}
+    
+    try {
+      errorData = JSON.parse(errorText)
+    } catch {
+      errorData = { message: errorText || `Erro HTTP ${response.status}: ${response.statusText}` }
+    }
     
     console.error('[Melhor Envio] Erro ao buscar serviços', {
       status: response.status,
@@ -429,8 +439,11 @@ export async function getShippingServices(
       error: errorData,
     })
     
-    if (response.status === 401) {
-      throw new Error('[Melhor Envio] Token inválido ou expirado. Configure ou valide o token na página de Integrações.')
+    if (response.status === 401 || response.status === 403) {
+      const tokenRecord = await getToken('melhor_envio', environment)
+      const tokenPreview = cleanToken ? `${cleanToken.substring(0, 4)}...${cleanToken.substring(cleanToken.length - 4)}` : 'não configurado'
+      const diagnosis = await diagnose401Error(errorText, response.status, environment, tokenPreview, tokenRecord)
+      throw new Error(`${diagnosis.message} ${diagnosis.details.suggestion}`)
     }
     
     throw new Error(`[Melhor Envio] ${errorData.message || 'Erro ao buscar serviços de envio'}`)
@@ -505,9 +518,10 @@ export async function validateToken(
 
       canCalculate = testCalculateResponse.ok
 
-      if (testCalculateResponse.status === 401) {
-        // Diagnosticar erro 401 no POST
-        calculateDiagnosis = await diagnose401Error(testCalculateResponse, environment, tokenPreview, tokenRecord)
+      if (testCalculateResponse.status === 401 || testCalculateResponse.status === 403) {
+        // Diagnosticar erro 401/403 no POST
+        const testErrorText = await testCalculateResponse.text().catch(() => '')
+        calculateDiagnosis = await diagnose401Error(testErrorText, testCalculateResponse.status, environment, tokenPreview, tokenRecord)
         
         console.error('[Melhor Envio] Validação: Token funciona para GET mas não para POST', {
           environment,
@@ -552,9 +566,10 @@ export async function validateToken(
 
     const response = servicesResponse
 
-    if (response.status === 401) {
-      // Diagnosticar erro 401 no GET
-      const diagnosis = await diagnose401Error(response, environment, tokenPreview, tokenRecord)
+    if (response.status === 401 || response.status === 403) {
+      // Diagnosticar erro 401/403 no GET
+      const getErrorText = await response.text().catch(() => '')
+      const diagnosis = await diagnose401Error(getErrorText, response.status, environment, tokenPreview, tokenRecord)
       
       console.error('[Melhor Envio] Validação GET: Token inválido', {
         environment,

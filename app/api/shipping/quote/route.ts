@@ -245,8 +245,10 @@ export async function POST(request: NextRequest) {
       }, { status: 500 })
     }
 
-    // Se for erro 401, atualizar status do token no banco
-    if (error.message.includes('401') || error.message.includes('inválido') || error.message.includes('expirado')) {
+    // Se for erro 401/403 (mas não missing_scope), atualizar status do token no banco
+    // missing_scope não marca como inválido porque o token é válido, só não tem permissão
+    if ((error.message.includes('401') || error.message.includes('403') || error.message.includes('inválido') || error.message.includes('expirado')) 
+        && !error.message.includes('sem permissões') && !error.message.includes('missing_scope')) {
       try {
         const token = await getToken('melhor_envio', environment)
         if (token) {
@@ -256,7 +258,7 @@ export async function POST(request: NextRequest) {
             error.message,
             { lastError: new Date().toISOString(), endpoint: 'calculate' }
           )
-          console.log('[Shipping Quote] Status do token atualizado para inválido após erro 401')
+          console.log('[Shipping Quote] Status do token atualizado para inválido após erro 401/403')
         }
       } catch (updateError) {
         console.error('[Shipping Quote] Erro ao atualizar status do token:', updateError)
@@ -276,10 +278,19 @@ export async function POST(request: NextRequest) {
       errorSource = 'integration'
     }
     
-    // Erro 401 - Token (da integração)
-    else if (error.message.includes('401') || error.message.includes('inválido') || error.message.includes('expirado')) {
-      userFriendlyMessage = '[Melhor Envio] Erro de autenticação. O token pode ter expirado. Tente novamente em alguns instantes ou verifique a configuração na página de Integrações.'
-      statusCode = 401
+    // Erro de permissão/escopo (da integração)
+    else if (error.message.includes('sem permissões') || error.message.includes('missing_scope') || error.message.includes('permissões necessárias')) {
+      userFriendlyMessage = error.message // Usar mensagem completa do diagnóstico que já inclui sugestão
+      statusCode = 403
+      errorSource = 'integration'
+    }
+    
+    // Erro 401/403 - Token (da integração)
+    else if (error.message.includes('401') || error.message.includes('403') || error.message.includes('inválido') || error.message.includes('expirado') || error.message.includes('unauthorized')) {
+      userFriendlyMessage = error.message.includes('diagnóstico') || error.message.includes('sugestão') 
+        ? error.message // Se já tem diagnóstico detalhado, usar a mensagem completa
+        : '[Melhor Envio] Erro de autenticação. O token pode ter expirado. Tente novamente em alguns instantes ou verifique a configuração na página de Integrações.'
+      statusCode = error.message.includes('403') ? 403 : 401
       errorSource = 'integration'
     }
     
@@ -306,7 +317,7 @@ export async function POST(request: NextRequest) {
       error: userFriendlyMessage,
       details: errorMessage,
       source: errorSource,
-      retryable: statusCode === 503 || statusCode === 401,
+      retryable: statusCode === 503 || statusCode === 401 || (statusCode === 403 && !errorMessage.includes('sem permissões')),
     }, { status: statusCode })
   }
 }
