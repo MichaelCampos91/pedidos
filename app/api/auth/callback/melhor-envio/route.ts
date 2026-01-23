@@ -8,6 +8,16 @@ import { getOAuthBaseUrl } from '@/lib/melhor-envio-oauth'
 export const dynamic = 'force-dynamic'
 
 /**
+ * Retorna a URL base da aplicação para redirecionamentos
+ * Usa variável de ambiente ou fallback para o domínio de produção
+ */
+function getAppBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL 
+    || process.env.APP_URL
+    || 'https://pedidos.lojacenario.com.br'
+}
+
+/**
  * Callback OAuth2 do Melhor Envio
  * 
  * IMPORTANTE: URL de redirecionamento que DEVE ser configurada no app do Melhor Envio:
@@ -36,6 +46,9 @@ export async function GET(request: NextRequest) {
     const error = searchParams.get('error')
     const errorDescription = searchParams.get('error_description')
 
+    // Obter URL base da aplicação para redirecionamentos
+    const appBaseUrl = getAppBaseUrl()
+
     // Verificar se houve erro na autorização
     if (error) {
       console.error('[Melhor Envio OAuth2 Callback] Erro na autorização', {
@@ -44,13 +57,13 @@ export async function GET(request: NextRequest) {
       })
       
       return NextResponse.redirect(
-        new URL(`/admin/integrations?error=${encodeURIComponent(`[Melhor Envio] ${errorDescription || error}`)}`, request.url)
+        new URL(`/admin/integrations?error=${encodeURIComponent(`[Melhor Envio] ${errorDescription || error}`)}`, appBaseUrl)
       )
     }
 
     if (!code) {
       return NextResponse.redirect(
-        new URL('/admin/integrations?error=[Sistema] Código de autorização não fornecido', request.url)
+        new URL('/admin/integrations?error=[Sistema] Código de autorização não fornecido', appBaseUrl)
       )
     }
 
@@ -62,7 +75,7 @@ export async function GET(request: NextRequest) {
     
     if (!existingToken?.additional_data?.client_id || !existingToken?.additional_data?.client_secret) {
       return NextResponse.redirect(
-        new URL('/admin/integrations?error=[Sistema] Client ID e Client Secret não configurados. Configure primeiro na página de Integrações.', request.url)
+        new URL('/admin/integrations?error=[Sistema] Client ID e Client Secret não configurados. Configure primeiro na página de Integrações.', appBaseUrl)
       )
     }
 
@@ -116,7 +129,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(
         new URL(
           `/admin/integrations?error=${encodeURIComponent(`[Melhor Envio] Erro ao obter token: ${errorData.message || errorData.error || response.statusText}`)}`,
-          request.url
+          appBaseUrl
         )
       )
     }
@@ -125,7 +138,7 @@ export async function GET(request: NextRequest) {
 
     if (!tokenData.access_token) {
       return NextResponse.redirect(
-        new URL('/admin/integrations?error=[Melhor Envio] Resposta OAuth2 inválida: access_token não encontrado', request.url)
+        new URL('/admin/integrations?error=[Melhor Envio] Resposta OAuth2 inválida: access_token não encontrado', appBaseUrl)
       )
     }
 
@@ -154,15 +167,17 @@ export async function GET(request: NextRequest) {
 
     // Redirecionar para página de integrações com sucesso
     return NextResponse.redirect(
-      new URL('/admin/integrations?success=[Melhor Envio] Token OAuth2 configurado com sucesso', request.url)
+      new URL('/admin/integrations?success=[Melhor Envio] Token OAuth2 configurado com sucesso', appBaseUrl)
     )
   } catch (error: any) {
     console.error('[Melhor Envio OAuth2 Callback] Erro:', error)
     
+    const appBaseUrl = getAppBaseUrl()
+    
     return NextResponse.redirect(
       new URL(
         `/admin/integrations?error=${encodeURIComponent(`[Sistema] Erro ao processar callback OAuth2: ${error.message}`)}`,
-        request.url
+        appBaseUrl
       )
     )
   }
