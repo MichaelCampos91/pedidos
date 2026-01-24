@@ -206,8 +206,21 @@ export async function POST(request: NextRequest) {
       products: productsList,
     }, environment)
 
+    // Filtrar opções com preço inválido ou undefined
+    const validOptions = (shippingOptions || []).filter(option => {
+      if (!option || !option.price) return false
+      const price = parseFloat(option.price)
+      return !isNaN(price) && isFinite(price) && price > 0
+    })
+
+    console.log('[Shipping Quote] Opções filtradas', {
+      total: shippingOptions?.length || 0,
+      validas: validOptions.length,
+      invalidas: (shippingOptions?.length || 0) - validOptions.length,
+    })
+
     // Tratar resposta vazia
-    if (!shippingOptions || shippingOptions.length === 0) {
+    if (!validOptions || validOptions.length === 0) {
       return NextResponse.json({
         success: true,
         options: [],
@@ -216,12 +229,12 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Armazenar no cache
-    setCachedQuote(cacheKey, shippingOptions)
+    // Armazenar no cache apenas opções válidas
+    setCachedQuote(cacheKey, validOptions)
 
     return NextResponse.json({
       success: true,
-      options: shippingOptions,
+      options: validOptions,
       cached: false,
     })
   } catch (error: any) {

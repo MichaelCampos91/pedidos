@@ -45,7 +45,7 @@ export async function PUT(
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { name, description, base_price, active } = body
+    const { name, description, base_price, width, height, length, weight, active } = body
 
     if (!name || base_price === undefined) {
       return NextResponse.json(
@@ -59,9 +59,23 @@ export async function PUT(
         name = $1,
         description = $2,
         base_price = $3,
-        active = $4
-      WHERE id = $5`,
-      [name, description || null, parseFloat(base_price), active !== false, params.id]
+        width = $4,
+        height = $5,
+        length = $6,
+        weight = $7,
+        active = $8
+      WHERE id = $9`,
+      [
+        name, 
+        description || null, 
+        parseFloat(base_price),
+        width ? parseFloat(width) : null,
+        height ? parseFloat(height) : null,
+        length ? parseFloat(length) : null,
+        weight ? parseFloat(weight) : null,
+        active !== false,
+        params.id
+      ]
     )
 
     return NextResponse.json({ success: true })

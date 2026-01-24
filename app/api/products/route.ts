@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { name, description, base_price, active } = body
+    const { name, description, base_price, width, height, length, weight, active } = body
 
     if (!name || base_price === undefined) {
       return NextResponse.json(
@@ -56,10 +56,19 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await query(
-      `INSERT INTO products (name, description, base_price, active)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO products (name, description, base_price, width, height, length, weight, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
-      [name, description || null, parseFloat(base_price), active !== false]
+      [
+        name, 
+        description || null, 
+        parseFloat(base_price),
+        width ? parseFloat(width) : null,
+        height ? parseFloat(height) : null,
+        length ? parseFloat(length) : null,
+        weight ? parseFloat(weight) : null,
+        active !== false
+      ]
     )
 
     return NextResponse.json({ success: true, id: result.rows[0].id })

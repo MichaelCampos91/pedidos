@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS products (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     base_price DECIMAL(10, 2) NOT NULL,
+    width DECIMAL(10, 2),
+    height DECIMAL(10, 2),
+    length DECIMAL(10, 2),
+    weight DECIMAL(10, 2),
     active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

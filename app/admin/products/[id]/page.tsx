@@ -21,6 +21,10 @@ export default function ProductFormPage() {
     name: '',
     description: '',
     base_price: '',
+    width: '',
+    height: '',
+    length: '',
+    weight: '',
     active: true
   })
 
@@ -38,6 +42,10 @@ export default function ProductFormPage() {
         name: product.name || '',
         description: product.description || '',
         base_price: product.base_price || '',
+        width: product.width || '',
+        height: product.height || '',
+        length: product.length || '',
+        weight: product.weight || '',
         active: product.active !== false
       })
     } catch (error) {
@@ -130,6 +138,63 @@ export default function ProductFormPage() {
                   Produto ativo
                 </Label>
               </div>
+            </div>
+
+            <div className="space-y-4 pt-4 border-t">
+              <h3 className="text-lg font-semibold">Dimensões e Peso (para cálculo de frete)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="width">Largura (cm)</Label>
+                  <Input
+                    id="width"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.width}
+                    onChange={(e) => setFormData({ ...formData, width: e.target.value })}
+                    placeholder="20"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="height">Altura (cm)</Label>
+                  <Input
+                    id="height"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.height}
+                    onChange={(e) => setFormData({ ...formData, height: e.target.value })}
+                    placeholder="10"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="length">Comprimento (cm)</Label>
+                  <Input
+                    id="length"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.length}
+                    onChange={(e) => setFormData({ ...formData, length: e.target.value })}
+                    placeholder="30"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="weight">Peso (kg)</Label>
+                  <Input
+                    id="weight"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.weight}
+                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                    placeholder="0.3"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Dimensões e peso são usados para cálculo de frete. Deixe em branco se não aplicável.
+              </p>
             </div>
           </CardContent>
         </Card>
