@@ -125,14 +125,22 @@ CREATE TABLE IF NOT EXISTS payments (
 -- ============================================
 CREATE TABLE IF NOT EXISTS shipping_rules (
     id BIGSERIAL PRIMARY KEY,
-    type VARCHAR(50) NOT NULL, -- 'free' ou 'discount'
-    condition_type VARCHAR(50) NOT NULL, -- 'min_value', 'cep', etc
-    condition_value VARCHAR(255),
-    discount_percentage DECIMAL(5, 2) DEFAULT 0,
+    rule_type VARCHAR(50) NOT NULL, -- 'free_shipping', 'discount', 'surcharge', 'production_days'
+    condition_type VARCHAR(50) NOT NULL, -- 'all', 'min_value', 'states', 'shipping_methods'
+    condition_value JSONB, -- Valores específicos (valor mínimo, estados, métodos)
+    discount_type VARCHAR(20), -- 'percentage', 'fixed'
+    discount_value DECIMAL(10, 2) DEFAULT 0,
+    shipping_methods JSONB, -- Array com IDs de métodos específicos (null = todos)
+    production_days INTEGER DEFAULT 0, -- Dias úteis a adicionar ao prazo
+    priority INTEGER DEFAULT 0, -- Ordem de aplicação (menor = maior prioridade)
     active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_shipping_rules_active ON shipping_rules(active);
+CREATE INDEX IF NOT EXISTS idx_shipping_rules_rule_type ON shipping_rules(rule_type);
+CREATE INDEX IF NOT EXISTS idx_shipping_rules_priority ON shipping_rules(priority);
 
 -- ============================================
 -- Tabela: bling_sync_logs
@@ -213,6 +221,43 @@ CREATE TABLE IF NOT EXISTS system_settings (
 CREATE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings(key);
 
 -- ============================================
+-- Tabela: payment_settings
+-- ============================================
+CREATE TABLE IF NOT EXISTS payment_settings (
+    id BIGSERIAL PRIMARY KEY,
+    payment_method VARCHAR(50) NOT NULL, -- 'pix', 'credit_card'
+    setting_type VARCHAR(50) NOT NULL, -- 'discount', 'installment_interest'
+    installments INTEGER, -- NULL para PIX, 1-12 para cartão
+    discount_type VARCHAR(20), -- 'percentage', 'fixed'
+    discount_value DECIMAL(10, 2),
+    active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_settings_payment_method ON payment_settings(payment_method);
+CREATE INDEX IF NOT EXISTS idx_payment_settings_setting_type ON payment_settings(setting_type);
+CREATE INDEX IF NOT EXISTS idx_payment_settings_active ON payment_settings(active);
+
+-- ============================================
+-- Tabela: installment_rates
+-- ============================================
+CREATE TABLE IF NOT EXISTS installment_rates (
+    id BIGSERIAL PRIMARY KEY,
+    installments INTEGER NOT NULL,
+    rate_percentage DECIMAL(5, 2) NOT NULL,
+    source VARCHAR(20) DEFAULT 'manual', -- 'manual', 'pagarme'
+    environment VARCHAR(20), -- 'sandbox', 'production'
+    last_synced_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(installments, environment)
+);
+
+CREATE INDEX IF NOT EXISTS idx_installment_rates_installments ON installment_rates(installments);
+CREATE INDEX IF NOT EXISTS idx_installment_rates_environment ON installment_rates(environment);
+
+-- ============================================
 -- Índices para performance
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_clients_cpf ON clients(cpf);
@@ -275,6 +320,18 @@ CREATE TRIGGER update_integration_tokens_updated_at
 DROP TRIGGER IF EXISTS update_system_settings_updated_at ON system_settings;
 CREATE TRIGGER update_system_settings_updated_at
     BEFORE UPDATE ON system_settings
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_payment_settings_updated_at ON payment_settings;
+CREATE TRIGGER update_payment_settings_updated_at
+    BEFORE UPDATE ON payment_settings
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_installment_rates_updated_at ON installment_rates;
+CREATE TRIGGER update_installment_rates_updated_at
+    BEFORE UPDATE ON installment_rates
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 

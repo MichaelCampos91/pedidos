@@ -4,6 +4,7 @@ import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { calculateShipping } from '@/lib/melhor-envio'
 import { getToken, updateTokenValidation, type IntegrationEnvironment } from '@/lib/integrations'
 import { generateCacheKey, getCachedQuote, setCachedQuote, cleanupExpiredCache } from '@/lib/shipping-cache'
+import { applyShippingRules } from '@/lib/shipping-rules'
 
 // Limpar cache expirado periodicamente
 cleanupExpiredCache()
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { cep_destino, peso, altura, largura, comprimento, valor, produtos } = body
+    const { cep_destino, peso, altura, largura, comprimento, valor, produtos, order_value, destination_state } = body
 
     // Determinar environment: usar do body se fornecido, senão buscar ambiente ativo
     if (body.environment === 'sandbox' || body.environment === 'production') {
@@ -252,14 +253,42 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Armazenar no cache apenas opções válidas
-    setCachedQuote(cacheKey, validOptions)
+    // Aplicar regras de frete
+    try {
+      const orderValue = order_value || (produtos && produtos.length > 0
+        ? produtos.reduce((sum: number, p: any) => sum + (parseFloat(p.valor || p.insurance_value || 0) * parseInt(p.quantidade || p.quantity || 1)), 0)
+        : parseFloat(valor || 0))
 
-    return NextResponse.json({
-      success: true,
-      options: validOptions,
-      cached: false,
-    })
+      const result = await applyShippingRules({
+        shippingOptions: validOptions,
+        orderValue,
+        destinationState: destination_state,
+        destinationCep: cleanCepDestino,
+      })
+
+      // Armazenar no cache apenas opções válidas (após aplicar regras)
+      setCachedQuote(cacheKey, result.options)
+
+      return NextResponse.json({
+        success: true,
+        options: result.options,
+        cached: false,
+        productionDaysAdded: result.productionDaysAdded,
+        appliedRules: result.appliedRules,
+      })
+    } catch (rulesError: any) {
+      // Se houver erro ao aplicar regras, retornar opções originais
+      console.error('[Shipping Quote] Erro ao aplicar regras de frete:', rulesError)
+      
+      // Armazenar no cache apenas opções válidas
+      setCachedQuote(cacheKey, validOptions)
+
+      return NextResponse.json({
+        success: true,
+        options: validOptions,
+        cached: false,
+      })
+    }
   } catch (error: any) {
     console.error('[Shipping Quote] Erro:', {
       message: error.message,

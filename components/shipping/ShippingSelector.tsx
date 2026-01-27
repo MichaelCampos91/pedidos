@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Truck, Zap, DollarSign } from "lucide-react"
+import { Loader2, Truck, Zap, DollarSign, Gift } from "lucide-react"
 import { formatShippingPrice, formatDeliveryTime } from "@/lib/melhor-envio-utils"
 import { calculateDeliveryDate, formatDeliveryDate } from "@/lib/shipping-utils"
 import type { IntegrationEnvironment } from "@/lib/integrations-types"
@@ -45,6 +45,8 @@ interface ShippingSelectorProps {
   onSelect: (option: ShippingOption) => void
   selectedOptionId?: number | string | null
   className?: string
+  orderValue?: number
+  destinationState?: string
 }
 
 export function ShippingSelector({
@@ -59,6 +61,8 @@ export function ShippingSelector({
   onSelect,
   selectedOptionId,
   className = '',
+  orderValue,
+  destinationState,
 }: ShippingSelectorProps) {
   const [loading, setLoading] = useState(false)
   const [options, setOptions] = useState<ShippingOption[]>([])
@@ -83,6 +87,14 @@ export function ShippingSelector({
       // Adicionar environment apenas se fornecido
       if (environment) {
         body.environment = environment
+      }
+
+      // Adicionar valor do pedido e estado para aplicar regras de frete
+      if (orderValue !== undefined) {
+        body.order_value = orderValue
+      }
+      if (destinationState) {
+        body.destination_state = destinationState
       }
 
       if (produtos && produtos.length > 0) {
@@ -192,6 +204,7 @@ export function ShippingSelector({
         const isCheapest = optionPrice === cheapestPrice
         const isFastest = optionTime === fastestTime
         const isSelected = selectedOptionId && String(selectedOptionId) === String(option.id)
+        const isFreeShipping = optionPrice === 0
 
         return (
           <div
@@ -211,7 +224,16 @@ export function ShippingSelector({
                   <Badge variant="outline" className="text-xs">
                     {option.name}
                   </Badge>
-                  {isFastest && (
+                  {isFreeShipping && (
+                    <Badge
+                      variant="outline"
+                      className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800"
+                    >
+                      <Gift className="h-3 w-3 mr-1" />
+                      Frete Grátis
+                    </Badge>
+                  )}
+                  {isFastest && !isFreeShipping && (
                     <Badge
                       variant="outline"
                       className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-800"
@@ -220,7 +242,7 @@ export function ShippingSelector({
                       Mais Rápida
                     </Badge>
                   )}
-                  {isCheapest && (
+                  {isCheapest && !isFreeShipping && (
                     <Badge
                       variant="outline"
                       className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800"

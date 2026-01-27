@@ -3,6 +3,7 @@ import { query } from '@/lib/database'
 import { createPixTransaction, createCreditCardTransaction } from '@/lib/pagarme'
 import { getActiveEnvironment } from '@/lib/settings'
 import { getToken } from '@/lib/integrations'
+import { calculatePixDiscount } from '@/lib/payment-rules'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
 // Detectar ambiente baseado em ambiente ativo ou fallback automático
@@ -204,8 +205,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Criar transação
-    const amount = Math.round(parseFloat(order.total) * 100) // Converter para centavos
+    // Calcular valor base
+    let amount = Math.round(parseFloat(order.total) * 100) // Converter para centavos
 
     if (amount <= 0) {
       return NextResponse.json(
@@ -214,6 +215,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Aplicar desconto PIX se método for PIX
+    let pixDiscountApplied = 0
+    if (payment_method === 'pix') {
+      try {
+        const discountResult = await calculatePixDiscount(parseFloat(order.total))
+        if (discountResult.discount > 0) {
+          pixDiscountApplied = Math.round(discountResult.discount * 100) // Converter para centavos
+          amount = Math.round(discountResult.finalValue * 100)
+          
+          // Registrar desconto aplicado no banco (opcional - pode ser salvo em metadata ou tabela separada)
+          console.log('[Payment Create] Desconto PIX aplicado:', {
+            original: parseFloat(order.total),
+            discount: discountResult.discount,
+            final: discountResult.finalValue,
+          })
+        }
+      } catch (error) {
+        console.error('[Payment Create] Erro ao calcular desconto PIX:', error)
+        // Continuar sem desconto em caso de erro
+      }
+    }
 
     let transaction
     if (payment_method === 'pix') {
@@ -225,6 +247,7 @@ export async function POST(request: NextRequest) {
         items: orderItems,
         metadata: {
           order_id: order_id.toString(),
+          pix_discount_applied: pixDiscountApplied > 0 ? pixDiscountApplied.toString() : undefined,
         },
       }, detectedEnvironment as IntegrationEnvironment)
     } else if (payment_method === 'credit_card') {
@@ -257,6 +280,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Calcular valor final a ser salvo (com desconto aplicado se houver)
+    const finalAmount = pixDiscountApplied > 0 
+      ? (amount / 100).toFixed(2) // Valor já tem desconto aplicado
+      : order.total
+
     // Salvar pagamento no banco
     await query(
       `INSERT INTO payments (order_id, pagarme_transaction_id, method, installments, amount, status)
@@ -266,7 +294,7 @@ export async function POST(request: NextRequest) {
         transaction.id,
         payment_method,
         credit_card?.installments || 1,
-        order.total,
+        finalAmount,
         transaction.status === 'paid' ? 'paid' : 'pending',
       ]
     )

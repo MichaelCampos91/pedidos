@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
-import { Loader2, CreditCard, QrCode, Copy, Check, Clock, AlertCircle, CheckCircle2, XCircle, MessageCircle } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Loader2, CreditCard, QrCode, Copy, Check, Clock, AlertCircle, CheckCircle2, XCircle, MessageCircle, Percent, Gift } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 
@@ -49,6 +50,10 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
   const [pixTransactionId, setPixTransactionId] = useState<string | null>(null)
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Estados para desconto PIX e juros
+  const [pixDiscount, setPixDiscount] = useState<{ discount: number; finalValue: number } | null>(null)
+  const [installmentRates, setInstallmentRates] = useState<Array<{ installments: number; rate: number; totalWithInterest: number; installmentValue: number; hasInterest: boolean }>>([])
 
 
   // Validar formulário de cartão em tempo real
@@ -115,6 +120,69 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
 
   // Detectar ambiente: localhost = sandbox, produção = production
   const [activeEnvironment, setActiveEnvironment] = useState<'sandbox' | 'production'>('production')
+
+  // Carregar desconto PIX e taxas de parcelamento
+  useEffect(() => {
+    const loadPaymentSettings = async () => {
+      try {
+        // Buscar desconto PIX
+        const pixResponse = await fetch('/api/settings/payment', {
+          credentials: 'include',
+        })
+        if (pixResponse.ok) {
+          const pixData = await pixResponse.json()
+          const pixSetting = pixData.paymentSettings?.find(
+            (s: any) => s.payment_method === 'pix' && s.setting_type === 'discount' && s.active
+          )
+          
+          if (pixSetting && pixSetting.discount_value) {
+            const discountValue = parseFloat(pixSetting.discount_value)
+            let discount = 0
+            if (pixSetting.discount_type === 'percentage') {
+              discount = (total * discountValue) / 100
+            } else {
+              discount = discountValue
+            }
+            setPixDiscount({
+              discount,
+              finalValue: Math.max(0, total - discount),
+            })
+          }
+        }
+
+        // Buscar taxas de parcelamento
+        const ratesResponse = await fetch(`/api/settings/installment-rates?environment=${activeEnvironment}`, {
+          credentials: 'include',
+        })
+        if (ratesResponse.ok) {
+          const ratesData = await ratesResponse.json()
+          const rates = ratesData.rates || []
+          
+          const calculatedRates = Array.from({ length: 12 }, (_, i) => {
+            const installments = i + 1
+            const rateData = rates.find((r: any) => r.installments === installments)
+            const rate = rateData ? parseFloat(rateData.rate_percentage) : 0
+            const totalWithInterest = total * (1 + rate / 100)
+            const installmentValue = totalWithInterest / installments
+            
+            return {
+              installments,
+              rate,
+              totalWithInterest,
+              installmentValue,
+              hasInterest: rate > 0,
+            }
+          })
+          
+          setInstallmentRates(calculatedRates)
+        }
+      } catch (error) {
+        console.error('Erro ao carregar configurações de pagamento:', error)
+      }
+    }
+
+    loadPaymentSettings()
+  }, [total, activeEnvironment])
 
   // Buscar ambiente ativo ao montar componente
   useEffect(() => {
@@ -395,6 +463,8 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         phone: customer.phone,
       }
       
+      const finalAmount = pixDiscount && pixDiscount.discount > 0 ? pixDiscount.finalValue : total
+
       const response = await fetch('/api/payment/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -573,6 +643,9 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         document: customer.document,
         phone: customer.phone,
       }
+
+      const selectedRate = installmentRates.find(r => r.installments === cardData.installments)
+      const finalAmount = selectedRate && selectedRate.hasInterest ? selectedRate.totalWithInterest : total
 
       const response = await fetch('/api/payment/create', {
         method: 'POST',
@@ -761,12 +834,27 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
               <div className="flex items-center gap-4">
                 <QrCode className="h-8 w-8 text-primary" />
                 <div>
-                  <p className="font-medium">Pix</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">Pix</p>
+                    {pixDiscount && pixDiscount.discount > 0 && (
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                        <Gift className="h-3 w-3 mr-1" />
+                        Desconto {formatCurrency(pixDiscount.discount)}
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground">Pagamento instantâneo</p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-lg font-bold">{formatCurrency(total)}</p>
+                {pixDiscount && pixDiscount.discount > 0 ? (
+                  <div>
+                    <p className="text-sm text-muted-foreground line-through">{formatCurrency(total)}</p>
+                    <p className="text-lg font-bold text-green-600">{formatCurrency(pixDiscount.finalValue)}</p>
+                  </div>
+                ) : (
+                  <p className="text-lg font-bold">{formatCurrency(total)}</p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -798,10 +886,29 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         <CardContent className="pt-6">
           <div className="space-y-4">
             <div className="text-center">
-              <p className="font-medium mb-2">Pagamento via Pix</p>
-              <p className="text-sm text-muted-foreground">
-                Total: {formatCurrency(total)}
-              </p>
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <p className="font-medium">Pagamento via Pix</p>
+                {pixDiscount && pixDiscount.discount > 0 && (
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                    <Gift className="h-3 w-3 mr-1" />
+                    Desconto {formatCurrency(pixDiscount.discount)}
+                  </Badge>
+                )}
+              </div>
+              {pixDiscount && pixDiscount.discount > 0 ? (
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground line-through">
+                    Total: {formatCurrency(total)}
+                  </p>
+                  <p className="text-lg font-bold text-green-600">
+                    Total com desconto: {formatCurrency(pixDiscount.finalValue)}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Total: {formatCurrency(total)}
+                </p>
+              )}
             </div>
             <div className="flex gap-3">
               <Button
@@ -937,12 +1044,48 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
                 setCardData({ ...cardData, installments: parseInt(e.target.value) })
               }
             >
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((num) => (
-                <option key={num} value={num}>
-                  {num}x {formatCurrency(total / num)}
+              {installmentRates.map((rate) => (
+                <option key={rate.installments} value={rate.installments}>
+                  {rate.installments}x {formatCurrency(rate.installmentValue)}
+                  {rate.hasInterest && ` (Total: ${formatCurrency(rate.totalWithInterest)})`}
+                  {!rate.hasInterest && ' - Sem juros'}
                 </option>
               ))}
             </select>
+            {installmentRates.length > 0 && (
+              <div className="mt-2">
+                {(() => {
+                  const selectedRate = installmentRates.find(r => r.installments === cardData.installments)
+                  if (!selectedRate) return null
+                  
+                  if (selectedRate.hasInterest) {
+                    return (
+                      <div className="p-3 bg-muted/50 rounded-lg">
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Valor original:</span>
+                          <span>{formatCurrency(total)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm text-orange-600">
+                          <span>Juros ({selectedRate.rate.toFixed(2)}%):</span>
+                          <span>+{formatCurrency(selectedRate.totalWithInterest - total)}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-bold border-t pt-1 mt-1">
+                          <span>Total com juros:</span>
+                          <span>{formatCurrency(selectedRate.totalWithInterest)}</span>
+                        </div>
+                      </div>
+                    )
+                  } else {
+                    return (
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                        <Check className="h-3 w-3 mr-1" />
+                        Sem juros
+                      </Badge>
+                    )
+                  }
+                })()}
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3">
@@ -976,7 +1119,11 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
               ) : (
                 <>
                   <CreditCard className="mr-2 h-4 w-4" />
-                  Pagar {formatCurrency(total)}
+                  {(() => {
+                    const selectedRate = installmentRates.find(r => r.installments === cardData.installments)
+                    const finalAmount = selectedRate && selectedRate.hasInterest ? selectedRate.totalWithInterest : total
+                    return `Pagar ${formatCurrency(finalAmount)}`
+                  })()}
                 </>
               )}
             </Button>

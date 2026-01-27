@@ -106,6 +106,15 @@ export default function AdminLayout({
                   Integrações
                 </Button>
               </Link>
+              <Link href="/admin/settings">
+                <Button 
+                  variant="ghost" 
+                  className={`rounded-none border-b-2 ${isActive('/admin/settings') || pathname?.startsWith('/admin/settings/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
+                >
+                  <Settings className="h-4 w-4 mr-2" />
+                  Configurações
+                </Button>
+              </Link>
             </div>
           </div>
         </nav>
