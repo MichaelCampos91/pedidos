@@ -30,7 +30,13 @@ export default function AdminLayout({
         <header className="bg-white border-b">
           <div className="container mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <h1 className="text-xl font-bold">Gerenciador de Pedidos</h1>
+              <Link href="/admin/dashboard" className="flex items-center">
+                <img
+                  src="/logo.png"
+                  alt="Cenario Logo"
+                  className="h-10 w-auto object-contain"
+                />
+              </Link>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-sm text-muted-foreground">{user?.email}</span>

@@ -67,6 +67,12 @@ export const clientsApi = {
   
   update: (id: number, data: any) =>
     request<{ success: boolean }>(`/clients/${id}`, { method: 'PUT', body: data }),
+  
+  addAddress: (id: number, addressData: any) =>
+    request<{ success: boolean; address: any }>(`/clients/${id}/addresses`, {
+      method: 'POST',
+      body: addressData,
+    }),
 }
 
 // Products

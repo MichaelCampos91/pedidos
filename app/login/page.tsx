@@ -45,13 +45,23 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-2xl text-center">Login Administrativo</CardTitle>
-          <CardDescription className="text-center">
-            Acesse o painel de administração
-          </CardDescription>
-        </CardHeader>
+      <div className="w-full max-w-md space-y-8">
+        {/* Logo */}
+        <div className="flex justify-center">
+          <img
+            src="/logo.png"
+            alt="Cenario Logo"
+            className="h-24 w-auto object-contain"
+          />
+        </div>
+        
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle className="text-2xl text-center">Login Administrativo</CardTitle>
+            <CardDescription className="text-center">
+              Acesse o painel de administração
+            </CardDescription>
+          </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -95,7 +105,8 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   )
 }

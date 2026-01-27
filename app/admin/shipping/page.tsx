@@ -46,6 +46,7 @@ interface Product {
   height?: number | string
   length?: number | string
   weight?: number | string
+  active?: boolean
 }
 
 export default function ShippingPage() {

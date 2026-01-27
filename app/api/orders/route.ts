@@ -64,9 +64,17 @@ export async function GET(request: NextRequest) {
         o.*,
         c.name as client_name,
         c.cpf as client_cpf,
-        c.whatsapp as client_whatsapp
+        c.whatsapp as client_whatsapp,
+        pay.payment_status
       FROM orders o
       JOIN clients c ON o.client_id = c.id
+      LEFT JOIN LATERAL (
+        SELECT p.status as payment_status
+        FROM payments p
+        WHERE p.order_id = o.id
+        ORDER BY p.created_at DESC
+        LIMIT 1
+      ) pay ON true
       WHERE ${whereClause}
       ORDER BY o.${sortColumn} ${sortOrder}
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
@@ -83,7 +91,11 @@ export async function GET(request: NextRequest) {
         )
         return {
           ...order,
-          items: itemsResult.rows
+          items: itemsResult.rows,
+          // Garantir que campos de payment_link existam (mesmo que null)
+          payment_link_token: order.payment_link_token || null,
+          payment_link_expires_at: order.payment_link_expires_at || null,
+          payment_link_generated_at: order.payment_link_generated_at || null,
         }
       })
     )
@@ -100,11 +112,28 @@ export async function GET(request: NextRequest) {
       to: Math.min(offset + per_page, total)
     })
   } catch (error: any) {
+    console.error('Erro ao listar pedidos:', error)
+    
     if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {
       return authErrorResponse(error.message, 401)
     }
+    
+    // Se o erro for relacionado a colunas que não existem, dar mensagem mais clara
+    if (error.message && error.message.includes('column') && error.message.includes('does not exist')) {
+      return NextResponse.json(
+        { 
+          error: 'Erro ao listar pedidos: Campos do banco de dados não encontrados. Execute as migrações do schema.',
+          details: error.message 
+        },
+        { status: 500 }
+      )
+    }
+    
     return NextResponse.json(
-      { error: 'Erro ao listar pedidos' },
+      { 
+        error: 'Erro ao listar pedidos',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      },
       { status: 500 }
     )
   }
@@ -118,7 +147,19 @@ export async function POST(request: NextRequest) {
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { client_id, items, shipping_address_id } = body
+    const { 
+      client_id, 
+      items, 
+      shipping_address_id,
+      shipping_method,
+      shipping_option_id,
+      shipping_company_name,
+      shipping_delivery_time,
+      shipping_option_data,
+      total_items,
+      total_shipping,
+      total
+    } = body
 
     if (!client_id || !items || items.length === 0) {
       return NextResponse.json(
@@ -127,17 +168,35 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Calcular totais
-    const totalItems = items.reduce((sum: number, item: any) => {
+    // Calcular totais se não fornecidos
+    const calculatedTotalItems = total_items || items.reduce((sum: number, item: any) => {
       return sum + (parseFloat(item.price) * parseInt(item.quantity))
     }, 0)
+    const calculatedShipping = total_shipping || 0
+    const calculatedTotal = total || (calculatedTotalItems + calculatedShipping)
 
     // Criar pedido
     const orderResult = await query(
-      `INSERT INTO orders (client_id, status, total_items, total, shipping_address_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO orders (
+        client_id, status, total_items, total_shipping, total, 
+        shipping_address_id, shipping_method, shipping_option_id, 
+        shipping_company_name, shipping_delivery_time, shipping_option_data
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
-      [client_id, 'aguardando_pagamento', totalItems, totalItems, shipping_address_id || null]
+      [
+        client_id, 
+        'aguardando_pagamento', 
+        calculatedTotalItems, 
+        calculatedShipping,
+        calculatedTotal,
+        shipping_address_id || null,
+        shipping_method || null,
+        shipping_option_id || null,
+        shipping_company_name || null,
+        shipping_delivery_time || null,
+        shipping_option_data ? JSON.stringify(shipping_option_data) : null
+      ]
     )
 
     const orderId = orderResult.rows[0].id

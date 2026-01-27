@@ -7,8 +7,12 @@ export async function GET(
   { params }: { params: { orderId: string } }
 ) {
   try {
+    // Extrair token da query string
+    const { searchParams } = new URL(request.url)
+    const token = searchParams.get('token')
+
     const orderResult = await query(
-      `SELECT o.*, c.name as client_name, c.cpf as client_cpf, c.whatsapp as client_whatsapp, c.email as client_email
+      `SELECT o.*, c.name as client_name, c.cpf as client_cpf, c.whatsapp as client_whatsapp, c.phone as client_phone, c.email as client_email
        FROM orders o
        JOIN clients c ON o.client_id = c.id
        WHERE o.id = $1`,
@@ -24,6 +28,18 @@ export async function GET(
 
     const order = orderResult.rows[0]
 
+    // Log dos dados do cliente para debug
+    console.log('[Checkout API] Dados do cliente encontrados:', {
+      orderId: params.orderId,
+      clientName: order.client_name,
+      clientEmail: order.client_email,
+      clientCpf: order.client_cpf ? `${order.client_cpf.substring(0, 3)}***` : 'N/A',
+      clientWhatsapp: order.client_whatsapp || 'N/A',
+      clientPhone: order.client_phone || 'N/A',
+      hasWhatsapp: !!order.client_whatsapp,
+      hasPhone: !!order.client_phone,
+    })
+
     // Verificar se o pedido já foi pago
     if (order.status !== 'aguardando_pagamento') {
       return NextResponse.json(
@@ -32,9 +48,52 @@ export async function GET(
       )
     }
 
-    // Buscar itens
+    // Validar token se presente
+    if (token) {
+      // Verificar se o pedido tem token configurado
+      if (!order.payment_link_token) {
+        return NextResponse.json(
+          { error: 'Token inválido. Este pedido não possui link de pagamento configurado.' },
+          { status: 403 }
+        )
+      }
+
+      // Verificar se o token corresponde
+      if (order.payment_link_token !== token) {
+        console.warn(`[Checkout] Tentativa de acesso com token inválido para pedido ${params.orderId}`)
+        return NextResponse.json(
+          { error: 'Token inválido ou expirado' },
+          { status: 403 }
+        )
+      }
+
+      // Verificar se o token não expirou
+      if (order.payment_link_expires_at) {
+        const expiresAt = new Date(order.payment_link_expires_at)
+        const now = new Date()
+        
+        if (now > expiresAt) {
+          console.warn(`[Checkout] Tentativa de acesso com token expirado para pedido ${params.orderId}`)
+          return NextResponse.json(
+            { error: 'Link de pagamento expirado. Solicite um novo link.' },
+            { status: 403 }
+          )
+        }
+      }
+    } else {
+      // Se não houver token, permitir acesso (compatibilidade com links antigos ou desenvolvimento)
+      // Mas avisar se o pedido tem token configurado
+      if (order.payment_link_token) {
+        console.warn(`[Checkout] Acesso sem token para pedido ${params.orderId} que possui token configurado`)
+      }
+    }
+
+    // Buscar itens com dados dos produtos (se disponíveis)
     const itemsResult = await query(
-      'SELECT * FROM order_items WHERE order_id = $1',
+      `SELECT oi.*, p.width, p.height, p.length, p.weight
+       FROM order_items oi
+       LEFT JOIN products p ON oi.product_id = p.id
+       WHERE oi.order_id = $1`,
       [params.orderId]
     )
 
@@ -54,11 +113,24 @@ export async function GET(
       shippingAddress = addressResult.rows[0] || null
     }
 
+    // Parse shipping_option_data se existir
+    let shippingOptionData = null
+    if (order.shipping_option_data) {
+      try {
+        shippingOptionData = typeof order.shipping_option_data === 'string' 
+          ? JSON.parse(order.shipping_option_data) 
+          : order.shipping_option_data
+      } catch (e) {
+        console.error('Erro ao parsear shipping_option_data:', e)
+      }
+    }
+
     return NextResponse.json({
       ...order,
       items: itemsResult.rows,
       addresses: addressesResult.rows,
-      shipping_address: shippingAddress
+      shipping_address: shippingAddress,
+      shipping_option_data: shippingOptionData
     })
   } catch (error: any) {
     return NextResponse.json(

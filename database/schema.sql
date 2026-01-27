@@ -75,11 +75,18 @@ CREATE TABLE IF NOT EXISTS orders (
     total_shipping DECIMAL(10, 2) DEFAULT 0,
     total DECIMAL(10, 2) NOT NULL DEFAULT 0,
     shipping_method VARCHAR(100),
+    shipping_option_id VARCHAR(255),
+    shipping_company_name VARCHAR(255),
+    shipping_delivery_time INTEGER,
+    shipping_option_data JSONB,
     shipping_tracking VARCHAR(255),
     shipping_address_id BIGINT REFERENCES client_addresses(id),
     bling_sync_status VARCHAR(50) DEFAULT 'pending',
     bling_sync_error TEXT,
     paid_at TIMESTAMP,
+    payment_link_token VARCHAR(255),
+    payment_link_expires_at TIMESTAMP,
+    payment_link_generated_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -192,6 +199,20 @@ CREATE INDEX IF NOT EXISTS idx_integration_tokens_environment ON integration_tok
 CREATE INDEX IF NOT EXISTS idx_integration_tokens_is_active ON integration_tokens(is_active);
 
 -- ============================================
+-- Tabela: system_settings
+-- ============================================
+CREATE TABLE IF NOT EXISTS system_settings (
+    id BIGSERIAL PRIMARY KEY,
+    key VARCHAR(100) UNIQUE NOT NULL,
+    value TEXT NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings(key);
+
+-- ============================================
 -- Índices para performance
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_clients_cpf ON clients(cpf);
@@ -248,6 +269,12 @@ CREATE TRIGGER update_shipping_rules_updated_at
 DROP TRIGGER IF EXISTS update_integration_tokens_updated_at ON integration_tokens;
 CREATE TRIGGER update_integration_tokens_updated_at
     BEFORE UPDATE ON integration_tokens
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_system_settings_updated_at ON system_settings;
+CREATE TRIGGER update_system_settings_updated_at
+    BEFORE UPDATE ON system_settings
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 

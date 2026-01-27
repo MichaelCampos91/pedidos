@@ -1,126 +1,142 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useSearchParams } from "next/navigation"
+import Image from "next/image"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CheckoutSteps } from "@/components/checkout/CheckoutSteps"
 import { PaymentForm } from "@/components/checkout/PaymentForm"
-import { Loader2, ArrowLeft, ArrowRight, Truck } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleHeader } from "@/components/ui/collapsible"
+import { Loader2, AlertCircle, FileText, CreditCard, CheckCircle2, XCircle, Lock, Truck, MessageCircle } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { calculateDeliveryDate, formatDeliveryDate } from "@/lib/shipping-utils"
+import { formatDeliveryTime } from "@/lib/melhor-envio-utils"
 
+// Steps do checkout
 const STEPS = [
-  { id: 1, name: "Itens", description: "Confirme os itens" },
-  { id: 2, name: "Frete", description: "Escolha o frete" },
-  { id: 3, name: "Endereço", description: "Selecione o endereço" },
-  { id: 4, name: "Pagamento", description: "Finalize o pagamento" },
+  { id: 1, name: "Revisão", description: "Revise seu pedido", icon: FileText },
+  { id: 2, name: "Pagamento", description: "Escolha o pagamento", icon: CreditCard },
+  { id: 3, name: "Concluído", description: "Pedido finalizado", icon: CheckCircle2 },
 ]
+
+// Funções auxiliares
+const truncateText = (text: string, maxLength: number): string => {
+  if (!text) return ''
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
+}
+
+const openWhatsApp = (message: string) => {
+  const phoneNumber = "5518997264861" // (18) 99726-4861
+  const encodedMessage = encodeURIComponent(message)
+  const url = `https://wa.me/${phoneNumber}?text=${encodedMessage}`
+  window.open(url, '_blank')
+}
+
+const checkCheckoutCompleted = (orderId: string): boolean => {
+  if (typeof window === 'undefined') return false
+  const key = `checkout_completed_${orderId}`
+  return localStorage.getItem(key) === 'true'
+}
+
+const markCheckoutCompleted = (orderId: string) => {
+  if (typeof window === 'undefined') return
+  const key = `checkout_completed_${orderId}`
+  localStorage.setItem(key, 'true')
+}
 
 export default function CheckoutPage() {
   const params = useParams()
-  const router = useRouter()
+  const searchParams = useSearchParams()
   const orderId = params.orderId as string
 
   const [loading, setLoading] = useState(true)
   const [currentStep, setCurrentStep] = useState(1)
   const [order, setOrder] = useState<any>(null)
-  const [selectedAddress, setSelectedAddress] = useState<number | null>(null)
-  const [shippingOptions, setShippingOptions] = useState<any[]>([])
-  const [selectedShipping, setSelectedShipping] = useState<any>(null)
-  const [loadingShipping, setLoadingShipping] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | 'failed' | null>(null)
+  const [itemsExpanded, setItemsExpanded] = useState(false)
+  const [addressExpanded, setAddressExpanded] = useState(false)
 
   useEffect(() => {
     loadCheckoutData()
   }, [orderId])
 
+  useEffect(() => {
+    // Verificar se checkout já foi concluído
+    if (checkCheckoutCompleted(orderId)) {
+      setCurrentStep(3)
+    }
+  }, [orderId])
+
+  // Log do customer sendo passado para PaymentForm
+  useEffect(() => {
+    if (order && currentStep === 2) {
+      console.log('[CheckoutPage] Customer sendo passado para PaymentForm:', {
+        orderId: parseInt(orderId),
+        customer: {
+          name: order.client_name,
+          email: order.client_email || '',
+          hasDocument: !!order.client_cpf,
+          documentPreview: order.client_cpf ? `${order.client_cpf.substring(0, 3)}***` : 'N/A',
+          phone: order.client_whatsapp || 'N/A',
+          hasPhone: !!order.client_whatsapp,
+          phoneLength: order.client_whatsapp?.length || 0,
+        },
+      })
+    }
+  }, [order, orderId, currentStep])
+
   const loadCheckoutData = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/checkout/${orderId}`)
+      setError(null)
+      
+      // Extrair token da URL
+      const token = searchParams.get('token')
+      const url = token 
+        ? `/api/checkout/${orderId}?token=${token}`
+        : `/api/checkout/${orderId}`
+      
+      const response = await fetch(url)
+      
       if (!response.ok) {
-        throw new Error("Pedido não encontrado")
+        const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
+        throw new Error(errorData.error || "Erro ao carregar pedido")
       }
+      
       const data = await response.json()
       setOrder(data)
-      setSelectedAddress(data.shipping_address_id || (data.addresses?.[0]?.id || null))
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao carregar checkout:", error)
-      alert("Erro ao carregar dados do pedido")
+      setError(error.message || "Erro ao carregar dados do pedido")
     } finally {
       setLoading(false)
     }
   }
 
-  const loadShippingOptions = async () => {
-    if (!selectedAddress) return
-
-    const address = order.addresses?.find((a: any) => a.id === selectedAddress)
-    if (!address) return
-
-    setLoadingShipping(true)
-    try {
-      const response = await fetch('/api/shipping/quote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cep_destino: address.cep,
-          peso: '0.5', // Peso padrão, pode ser calculado dos itens
-          altura: '10',
-          largura: '20',
-          comprimento: '30',
-          valor: totalItems.toString(),
-        }),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setShippingOptions(data.options || [])
-      }
-    } catch (error) {
-      console.error('Erro ao carregar opções de frete:', error)
-    } finally {
-      setLoadingShipping(false)
-    }
+  const handlePaymentSuccess = (transaction: any) => {
+    setPaymentStatus(transaction.status === 'paid' ? 'paid' : transaction.status === 'failed' ? 'failed' : 'pending')
+    markCheckoutCompleted(orderId)
+    setCurrentStep(3)
   }
 
-  const handleNext = async () => {
-    if (currentStep === 2) {
-      // Carregar opções de frete quando selecionar endereço
-      if (selectedAddress && shippingOptions.length === 0) {
-        await loadShippingOptions()
-        return // Não avança ainda, espera seleção do frete
-      }
-      if (!selectedShipping) {
-        alert('Selecione uma opção de frete')
-        return
-      }
-      // Salvar frete selecionado no pedido
-      await fetch(`/api/orders/${orderId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shipping_method: selectedShipping.name,
-          total_shipping: parseFloat(selectedShipping.price),
-          total: totalItems + parseFloat(selectedShipping.price),
-        }),
-      })
+  const handleRequestChange = () => {
+    openWhatsApp("Olá, preciso alterar os dados do meu pedido.")
+  }
+
+  const handleGoToPayment = () => {
+    if (checkCheckoutCompleted(orderId)) {
+      setCurrentStep(3)
+      return
     }
-    if (currentStep === 3) {
-      // Salvar endereço selecionado
-      if (selectedAddress) {
-        await fetch(`/api/checkout/${orderId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ shipping_address_id: selectedAddress }),
-        })
-      }
-    }
-    if (currentStep < STEPS.length) {
-      setCurrentStep(currentStep + 1)
-    }
+    setCurrentStep(2)
   }
 
   const handleBack = () => {
+    if (checkCheckoutCompleted(orderId)) return // Bloquear navegação se concluído
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1)
     }
@@ -128,22 +144,34 @@ export default function CheckoutPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
-  if (!order) {
+  if (error || !order) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-center text-muted-foreground">
-              Pedido não encontrado
-            </p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="container mx-auto px-4 max-w-4xl">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-5 w-5" />
+                Erro ao acessar checkout
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4">
+                {error || "Pedido não encontrado"}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Se você recebeu um link de pagamento, verifique se ele está correto e não expirou.
+                Entre em contato com o vendedor para solicitar um novo link.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     )
   }
@@ -152,296 +180,294 @@ export default function CheckoutPage() {
     return sum + parseFloat(item.price) * parseInt(item.quantity)
   }, 0) || 0
 
-  const totalShipping = selectedShipping ? parseFloat(selectedShipping.price) : 0
+  const totalShipping = parseFloat(order.total_shipping || 0)
   const totalWithShipping = totalItems + totalShipping
 
+  // Buscar endereço selecionado
+  const selectedAddress = order.addresses?.find((a: any) => a.id === order.shipping_address_id) || order.addresses?.[0]
+
+  // Preparar dados do frete
+  const shippingData = order.shipping_option_data 
+    ? (typeof order.shipping_option_data === 'string' 
+        ? JSON.parse(order.shipping_option_data) 
+        : order.shipping_option_data)
+    : {}
+
+  const deliveryDate = order.shipping_delivery_time 
+    ? calculateDeliveryDate(order.shipping_delivery_time)
+    : null
+
+  const isCompleted = checkCheckoutCompleted(orderId)
+
   return (
-    <div className="min-h-screen bg-gray-100 py-8">
-      <div className="container mx-auto px-4 max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Checkout</h1>
-          <p className="text-muted-foreground">
-            Pedido #{orderId} - {order.client_name}
-          </p>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="container mx-auto px-4 max-w-4xl flex-1 py-8">
+        {/* Logo */}
+        <div className="flex justify-center mb-8">
+          <Image
+            src="/logo.png"
+            alt="Cenário Studio"
+            width={200}
+            height={80}
+            className="object-contain"
+            priority
+          />
         </div>
 
+        {/* Stepper */}
         <Card className="mb-6">
           <CardContent className="pt-6">
             <CheckoutSteps currentStep={currentStep} steps={STEPS} />
           </CardContent>
         </Card>
 
-        {/* Etapa 1: Itens */}
+        {/* Etapa 1: Revisão */}
         {currentStep === 1 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Itens do Pedido</CardTitle>
-              <CardDescription>Confirme os itens e valores</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {order.items?.map((item: any, index: number) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-4 border rounded-lg"
-                  >
+          <div className="space-y-4">
+            {/* Collapsible Itens */}
+            <Card>
+              <Collapsible open={itemsExpanded} onOpenChange={setItemsExpanded}>
+                <CollapsibleHeader isOpen={itemsExpanded} className="border-0">
+                  <div className="flex items-center justify-between w-full">
                     <div className="flex-1">
-                      <p className="font-medium">{item.title}</p>
-                      {item.observations && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {item.observations}
-                        </p>
+                      <h3 className="font-semibold text-lg">Itens ({order.items?.length || 0})</h3>
+                      {!itemsExpanded && (
+                        <div className="mt-1">
+                          <p className="text-sm text-muted-foreground">
+                            {order.items?.map((item: any) => truncateText(item.title, 30)).join(', ')}
+                          </p>
+                          <p className="text-sm font-medium mt-1">
+                            Subtotal: {formatCurrency(totalItems)}
+                          </p>
+                        </div>
                       )}
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Quantidade: {item.quantity}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium">
-                        {formatCurrency(parseFloat(item.price) * parseInt(item.quantity))}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatCurrency(parseFloat(item.price))} cada
-                      </p>
                     </div>
                   </div>
-                ))}
-                <div className="border-t pt-4 flex justify-between items-center">
-                  <span className="text-lg font-semibold">Total:</span>
-                  <span className="text-2xl font-bold">
-                    {formatCurrency(totalItems)}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Etapa 2: Frete */}
-        {currentStep === 2 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Frete</CardTitle>
-              <CardDescription>Selecione o endereço e escolha a modalidade de frete</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {/* Seleção de endereço primeiro */}
-                <div>
-                  <h3 className="font-medium mb-4">Endereço de Entrega</h3>
-                  <div className="space-y-4">
-                    {order.addresses?.map((address: any) => (
+                </CollapsibleHeader>
+                <CollapsibleContent className="px-4 pb-4">
+                  <div className="space-y-4 pt-2">
+                    {order.items?.map((item: any, index: number) => (
                       <div
-                        key={address.id}
-                        className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                          selectedAddress === address.id
-                            ? "border-primary bg-primary/5"
-                            : "hover:border-primary/50"
-                        }`}
-                        onClick={() => {
-                          setSelectedAddress(address.id)
-                          setShippingOptions([])
-                          setSelectedShipping(null)
-                        }}
+                        key={index}
+                        className="flex items-center justify-between p-4 border rounded-lg"
                       >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="font-medium">
-                              {address.street}, {address.number}
+                        <div className="flex-1">
+                          <p className="font-medium">{item.title}</p>
+                          {item.observations && (
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {item.observations}
                             </p>
-                            {address.complement && (
-                              <p className="text-sm text-muted-foreground">
-                                {address.complement}
-                              </p>
-                            )}
-                            <p className="text-sm text-muted-foreground">
-                              {address.neighborhood} - {address.city}/{address.state}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              CEP: {address.cep}
-                            </p>
-                          </div>
-                          {selectedAddress === address.id && (
-                            <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-                              <div className="w-2 h-2 rounded-full bg-white" />
-                            </div>
                           )}
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Quantidade: {item.quantity}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-medium">
+                            {formatCurrency(parseFloat(item.price) * parseInt(item.quantity))}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatCurrency(parseFloat(item.price))} cada
+                          </p>
                         </div>
                       </div>
                     ))}
-                  </div>
-                </div>
-
-                {/* Opções de frete */}
-                {selectedAddress && (
-                  <div>
-                    <h3 className="font-medium mb-4">Modalidades de Frete</h3>
-                    {loadingShipping ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : shippingOptions.length === 0 ? (
-                      <Button
-                        variant="outline"
-                        onClick={loadShippingOptions}
-                        className="w-full"
-                      >
-                        Calcular Frete
-                      </Button>
-                    ) : (
-                      <div className="space-y-3">
-                        {shippingOptions.map((option: any) => (
-                          <div
-                            key={option.id}
-                            className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                              selectedShipping?.id === option.id
-                                ? "border-primary bg-primary/5"
-                                : "hover:border-primary/50"
-                            }`}
-                            onClick={() => setSelectedShipping(option)}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="font-medium">{option.name}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {option.company.name} - {option.delivery_time} dias úteis
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-bold">
-                                  {formatCurrency(parseFloat(option.price))}
-                                </p>
-                                {selectedShipping?.id === option.id && (
-                                  <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center mt-2 ml-auto">
-                                    <div className="w-2 h-2 rounded-full bg-white" />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {(!order.addresses || order.addresses.length === 0) && (
-                  <p className="text-center text-muted-foreground py-8">
-                    Nenhum endereço cadastrado. Selecione um endereço na próxima etapa.
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Etapa 3: Endereço */}
-        {currentStep === 3 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Endereço de Entrega</CardTitle>
-              <CardDescription>Selecione o endereço de entrega</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {order.addresses?.map((address: any) => (
-                  <div
-                    key={address.id}
-                    className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                      selectedAddress === address.id
-                        ? "border-primary bg-primary/5"
-                        : "hover:border-primary/50"
-                    }`}
-                    onClick={() => setSelectedAddress(address.id)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium">
-                          {address.street}, {address.number}
-                        </p>
-                        {address.complement && (
-                          <p className="text-sm text-muted-foreground">
-                            {address.complement}
-                          </p>
-                        )}
-                        <p className="text-sm text-muted-foreground">
-                          {address.neighborhood} - {address.city}/{address.state}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          CEP: {address.cep}
-                        </p>
-                        {address.is_default && (
-                          <span className="inline-block mt-2 px-2 py-1 text-xs bg-primary/10 text-primary rounded">
-                            Padrão
-                          </span>
-                        )}
-                      </div>
-                      {selectedAddress === address.id && (
-                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-                          <div className="w-2 h-2 rounded-full bg-white" />
-                        </div>
-                      )}
+                    <div className="border-t pt-4 flex justify-between items-center">
+                      <span className="text-lg font-semibold">Subtotal:</span>
+                      <span className="text-xl font-bold">
+                        {formatCurrency(totalItems)}
+                      </span>
                     </div>
                   </div>
-                ))}
-                {(!order.addresses || order.addresses.length === 0) && (
-                  <p className="text-center text-muted-foreground py-8">
-                    Nenhum endereço cadastrado
+                </CollapsibleContent>
+              </Collapsible>
+            </Card>
+
+            {/* Collapsible Endereço */}
+            {selectedAddress && (
+              <Card>
+                <Collapsible open={addressExpanded} onOpenChange={setAddressExpanded}>
+                  <CollapsibleHeader isOpen={addressExpanded} className="border-0">
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-lg">Endereço</h3>
+                        {!addressExpanded && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {truncateText(selectedAddress.street, 30)}, {selectedAddress.number}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </CollapsibleHeader>
+                  <CollapsibleContent className="px-4 pb-4">
+                    <div className="pt-2">
+                      <div className="p-4 border rounded-lg bg-muted/30">
+                        <p className="font-medium">
+                          {selectedAddress.street}, {selectedAddress.number}
+                        </p>
+                        {selectedAddress.complement && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {selectedAddress.complement}
+                          </p>
+                        )}
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {selectedAddress.neighborhood} - {selectedAddress.city}/{selectedAddress.state}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          CEP: {selectedAddress.cep}
+                        </p>
+                        {selectedAddress.is_default && (
+                          <Badge variant="outline" className="mt-2">
+                            Padrão
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </Card>
+            )}
+
+            {/* Seção Frete */}
+            {order.shipping_method && (
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Truck className="h-5 w-5 text-primary" />
+                        <p className="font-semibold text-lg">{order.shipping_company_name || order.shipping_method}</p>
+                        <Badge variant="outline">{order.shipping_method}</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Prazo: {order.shipping_delivery_time ? formatDeliveryTime(order.shipping_delivery_time) : 'A calcular'}
+                      </p>
+                      {deliveryDate && (
+                        <p className="text-sm font-medium text-primary mt-1">
+                          Data prevista: {formatDeliveryDate(deliveryDate)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold">
+                        {formatCurrency(totalShipping)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Botões */}
+            <div className="flex flex-col sm:flex-row gap-3 mt-6">
+              <Button
+                variant="outline"
+                onClick={handleRequestChange}
+                className="flex-1"
+              >
+                <MessageCircle className="h-4 w-4 mr-2" />
+                Solicitar Alteração
+              </Button>
+              <Button
+                onClick={handleGoToPayment}
+                className="flex-1"
+              >
+                Ir para pagamento
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Etapa 2: Pagamento */}
+        {currentStep === 2 && (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Pagamento</CardTitle>
+                <CardDescription>Escolha a forma de pagamento</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {/* Mensagem de Segurança */}
+                <div className="flex items-center gap-2 mb-6 p-3 bg-muted/50 rounded-lg">
+                  <Lock className="h-4 w-4 text-primary" />
+                  <p className="text-sm text-muted-foreground">
+                    Seus dados estão protegidos e seguros
                   </p>
+                </div>
+
+                <PaymentForm
+                  orderId={parseInt(orderId)}
+                  total={totalWithShipping}
+                  customer={{
+                    name: order.client_name,
+                    email: order.client_email || '',
+                    document: order.client_cpf,
+                    phone: order.client_whatsapp,
+                  }}
+                  onSuccess={handlePaymentSuccess}
+                />
+              </CardContent>
+            </Card>
+
+            {/* Botões */}
+            {!isCompleted && (
+              <div className="flex gap-3 mt-4">
+                <Button
+                  variant="outline"
+                  onClick={handleBack}
+                  className="flex-1"
+                >
+                  Voltar
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Etapa 3: Concluído */}
+        {currentStep === 3 && (
+          <Card>
+            <CardContent className="pt-12 pb-12">
+              <div className="flex flex-col items-center text-center space-y-4">
+                {paymentStatus === 'paid' ? (
+                  <>
+                    <CheckCircle2 className="h-16 w-16 text-green-600" />
+                    <h2 className="text-2xl font-bold text-green-600">Pagamento Aprovado!</h2>
+                    <p className="text-muted-foreground max-w-md">
+                      Sua transação foi processada com sucesso. Você receberá uma confirmação por e-mail em breve.
+                    </p>
+                  </>
+                ) : paymentStatus === 'failed' ? (
+                  <>
+                    <XCircle className="h-16 w-16 text-destructive" />
+                    <h2 className="text-2xl font-bold text-destructive">Pagamento Recusado</h2>
+                    <p className="text-muted-foreground max-w-md">
+                      Não foi possível processar seu pagamento. Por favor, tente novamente ou entre em contato conosco.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="h-16 w-16 text-primary animate-spin" />
+                    <h2 className="text-2xl font-bold">Processando Pagamento</h2>
+                    <p className="text-muted-foreground max-w-md">
+                      Aguarde enquanto processamos seu pagamento. Você será notificado em breve.
+                    </p>
+                  </>
                 )}
               </div>
             </CardContent>
           </Card>
         )}
-
-        {/* Etapa 4: Pagamento */}
-        {currentStep === 4 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Pagamento</CardTitle>
-              <CardDescription>Escolha a forma de pagamento</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PaymentForm
-                orderId={parseInt(orderId)}
-                total={totalWithShipping}
-                customer={{
-                  name: order.client_name,
-                  email: order.client_email || '',
-                  document: order.client_cpf,
-                  phone: order.client_whatsapp,
-                }}
-                onSuccess={(transaction) => {
-                  if (transaction.status === 'paid') {
-                    alert('Pagamento confirmado! Redirecionando...')
-                    // Redirecionar para página de sucesso ou pedido
-                  } else {
-                    alert('Pagamento processado. Aguardando confirmação...')
-                  }
-                }}
-              />
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Navegação */}
-        <div className="flex justify-between mt-6">
-          <Button
-            variant="outline"
-            onClick={handleBack}
-            disabled={currentStep === 1}
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Voltar
-          </Button>
-          {currentStep < STEPS.length && (
-            <Button onClick={handleNext} disabled={(currentStep === 2 && (!selectedAddress || !selectedShipping)) || (currentStep === 3 && !selectedAddress)}>
-              Próximo
-              <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
-          )}
-        </div>
       </div>
+
+      {/* Rodapé */}
+      <footer className="border-t bg-white py-6 mt-auto">
+        <div className="container mx-auto px-4 max-w-4xl text-center">
+          <p className="text-sm text-muted-foreground">
+            CNPJ: 42.480.518/0001-10 - S. D. Paineis Decorativos Ltda
+          </p>
+        </div>
+      </footer>
     </div>
   )
 }

@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { provider, environment, token_value, token_type, additional_data, client_id, client_secret, cep_origem } = body
+    const { provider, environment, token_value, token_type, additional_data, client_id, client_secret, cep_origem, public_key } = body
 
     if (!provider || !environment) {
       return NextResponse.json(
@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
           client_id, // Armazenar para futuras renovações
           client_secret: finalClientSecret, // Armazenar para futuras renovações (quando refresh_token não disponível)
           ...(cep_origem && { cep_origem }),
+          ...(provider === 'pagarme' && public_key && { public_key }),
           ...additional_data,
         }
 
@@ -165,9 +166,20 @@ export async function POST(request: NextRequest) {
         tokenPreview: `${cleanTokenValue.substring(0, 4)}...${cleanTokenValue.substring(cleanTokenValue.length - 4)}`,
       })
 
+      // Para Pagar.me, se public_key não foi fornecida ou está vazia mas já existe no banco, manter a existente
+      let finalPublicKey = public_key && public_key.trim() ? public_key.trim() : null
+      if (provider === 'pagarme' && !finalPublicKey) {
+        const existingToken = await getToken(provider as IntegrationProvider, environment as IntegrationEnvironment)
+        if (existingToken?.additional_data?.public_key) {
+          finalPublicKey = existingToken.additional_data.public_key
+          console.log('[Integrations] Mantendo public_key existente do banco para Pagar.me')
+        }
+      }
+
       const legacyAdditionalData: any = {
         ...additional_data,
         ...(cep_origem && { cep_origem }),
+        ...(provider === 'pagarme' && finalPublicKey && { public_key: finalPublicKey }),
       }
 
       token = await upsertToken(

@@ -19,6 +19,7 @@ interface TokenFormProps {
     client_id?: string
     client_secret?: string
     cep_origem?: string
+    public_key?: string
     additional_data?: Record<string, any>
   }) => Promise<void>
   onCancel: () => void
@@ -27,6 +28,7 @@ interface TokenFormProps {
 
 export function TokenForm({ provider, token, onSave, onCancel, isSaving = false }: TokenFormProps) {
   const isMelhorEnvio = provider === 'melhor_envio'
+  const isPagarme = provider === 'pagarme'
   
   // Detectar modo baseado no token existente
   const hasOAuth2Data = token?.additional_data?.client_id || token?.additional_data?.refresh_token
@@ -43,6 +45,7 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
     client_id: token?.additional_data?.client_id || '',
     client_secret: '', // Nunca mostrar secret salvo por segurança
     cep_origem: token?.additional_data?.cep_origem || '',
+    public_key: token?.additional_data?.public_key || '', // Para Pagar.me
   })
 
   const [isAuthorizing, setIsAuthorizing] = useState(false)
@@ -119,6 +122,11 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
         saveData.client_secret = formData.client_secret
       }
       
+      // Incluir public_key se for Pagar.me
+      if (isPagarme && formData.public_key) {
+        saveData.public_key = formData.public_key
+      }
+      
       await onSave(saveData)
     } else {
       // Modo token direto (legacy)
@@ -133,6 +141,7 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
         token_value: formData.token_value,
         token_type: formData.token_type,
         cep_origem: formData.cep_origem || undefined,
+        public_key: isPagarme && formData.public_key ? formData.public_key : undefined,
       })
     }
   }
@@ -311,6 +320,35 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
               />
               <p className="text-xs text-muted-foreground">
                 CEP de onde os produtos serão enviados. Se não informado, será usado o CEP padrão configurado.
+              </p>
+            </div>
+          )}
+
+          {isPagarme && (
+            <div className="space-y-2">
+              <Label htmlFor="public_key">
+                Public Key {token && token.additional_data?.public_key ? '(deixe em branco para manter o atual)' : '(Opcional - para tokenização de cartão)'}
+              </Label>
+              <Input
+                id="public_key"
+                type="password"
+                value={formData.public_key}
+                onChange={(e) => setFormData({ ...formData, public_key: e.target.value })}
+                placeholder={token && token.additional_data?.public_key 
+                  ? "Deixe em branco para manter o atual ou digite uma nova"
+                  : "pk_live_... ou pk_test_..."
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                {token && token.additional_data?.public_key
+                  ? "Deixe em branco para manter a Public Key atual, ou digite uma nova para atualizar."
+                  : "Chave pública para tokenização de cartões no frontend. Encontre no painel do Pagar.me em Configurações → Chaves de API. A Public Key é diferente da API Key (Secret Key) e é necessária para que pagamentos com cartão funcionem. Se não configurada, a tokenização de cartão não funcionará."
+                }
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                <strong>Onde encontrar:</strong> No painel do Pagar.me, acesse Configurações → Chaves de API. 
+                Você verá duas chaves: <strong>API Key</strong> (Secret Key - usada no backend) e <strong>Public Key</strong> (usada para tokenização no frontend).
+                A Public Key começa com <code className="text-xs bg-muted px-1 py-0.5 rounded">pk_live_</code> (produção) ou <code className="text-xs bg-muted px-1 py-0.5 rounded">pk_test_</code> (sandbox).
               </p>
             </div>
           )}

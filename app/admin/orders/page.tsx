@@ -9,19 +9,34 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DatePicker } from "@/components/ui/DatePicker"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Search, Plus, Edit, CalendarIcon, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2 } from "lucide-react"
+import {
+  Search,
+  Plus,
+  CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Loader2,
+  Link2,
+  Clock,
+  Truck,
+  CheckCircle2,
+  XCircle,
+  Eye,
+  Pencil,
+  Copy,
+  RefreshCw,
+  MessageCircle,
+} from "lucide-react"
 import { ordersApi } from "@/lib/api"
-import { formatCurrency, formatDateTime, formatCPF } from "@/lib/utils"
-
-const STATUS_LABELS: Record<string, string> = {
-  aguardando_pagamento: "Aguardando Pagamento",
-  aguardando_producao: "Aguardando Produção",
-  em_producao: "Em Produção",
-  aguardando_envio: "Aguardando Envio",
-  enviado: "Enviado",
-  nao_pagos: "Não Pagos",
-  cancelados: "Cancelados"
-}
+import { cn, formatCurrency, formatDateTime, formatCPF } from "@/lib/utils"
+import { PaymentLinkModal } from "@/components/orders/PaymentLinkModal"
+import { OrderModal } from "@/components/orders/OrderModal"
+import { Badge } from "@/components/ui/badge"
+import { OrderStatusModal } from "@/components/orders/OrderStatusModal"
+import { OrderDetailsModal } from "@/components/orders/OrderDetailsModal"
+import { STATUS_LABELS, ORDER_STATUS_CONFIG } from "@/components/orders/order-status-config"
 
 export default function OrdersPage() {
   const router = useRouter()
@@ -38,6 +53,38 @@ export default function OrdersPage() {
     last_page: 1,
     from: 0,
     to: 0,
+  })
+  const [paymentLinkModal, setPaymentLinkModal] = useState<{
+    open: boolean
+    orderId: number | null
+    link: string | null
+    expiresAt: string | null
+  }>({
+    open: false,
+    orderId: null,
+    link: null,
+    expiresAt: null,
+  })
+  const [orderModal, setOrderModal] = useState<{
+    open: boolean
+    orderId: number | null
+  }>({
+    open: false,
+    orderId: null,
+  })
+  const [statusModal, setStatusModal] = useState<{
+    open: boolean
+    order: any | null
+  }>({
+    open: false,
+    order: null,
+  })
+  const [detailsModal, setDetailsModal] = useState<{
+    open: boolean
+    orderId: number | null
+  }>({
+    open: false,
+    orderId: null,
   })
 
   const loadOrders = async () => {
@@ -91,6 +138,44 @@ export default function OrdersPage() {
     setPagination((prev) => ({ ...prev, current_page: page }))
   }
 
+  const handleOpenPaymentLink = (order: any) => {
+    // Construir link se existir token
+    let link = null
+    if (order.payment_link_token) {
+      const baseUrl = typeof window !== "undefined" ? window.location.origin : ""
+      link = `${baseUrl}/checkout/${order.id}?token=${order.payment_link_token}`
+    }
+
+    setPaymentLinkModal({
+      open: true,
+      orderId: order.id,
+      link,
+      expiresAt: order.payment_link_expires_at,
+    })
+  }
+
+  const getPaymentLinkForOrder = (order: any) => {
+    if (!order.payment_link_token) return null
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : ""
+    return `${baseUrl}/checkout/${order.id}?token=${order.payment_link_token}`
+  }
+
+  const handleCopyPaymentLink = async (order: any) => {
+    const link = getPaymentLinkForOrder(order)
+    if (!link) return
+
+    try {
+      await navigator.clipboard.writeText(link)
+      // Idealmente usar um toast global aqui para feedback ("Link copiado!")
+    } catch (error) {
+      console.error("Erro ao copiar link de pagamento:", error)
+    }
+  }
+
+  const handleRefreshOrders = () => {
+    loadOrders()
+  }
+
   const getPageNumbers = () => {
     const pages = []
     const maxVisible = 5
@@ -112,7 +197,7 @@ export default function OrdersPage() {
           <h2 className="text-2xl font-bold">Pedidos</h2>
           <p className="text-muted-foreground">Gerencie todos os pedidos</p>
         </div>
-        <Button onClick={() => router.push('/admin/orders/new')}>
+        <Button onClick={() => setOrderModal({ open: true, orderId: null })}>
           <Plus className="h-4 w-4 mr-2" />
           Novo Pedido
         </Button>
@@ -192,7 +277,8 @@ export default function OrdersPage() {
                   <TableHead>ID</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Total</TableHead>
+                <TableHead>Total</TableHead>
+                <TableHead>Frete</TableHead>
                   <TableHead>Criado em</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
@@ -205,26 +291,166 @@ export default function OrdersPage() {
                       <div>
                         <div className="font-medium">{order.client_name}</div>
                         <div className="text-sm text-muted-foreground">{formatCPF(order.client_cpf)}</div>
+                      {order.client_whatsapp && (
+                        <button
+                          type="button"
+                          className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
+                          onClick={() => {
+                            const clean = String(order.client_whatsapp).replace(/\D/g, "")
+                            const phone = clean.length === 11 ? `55${clean}` : clean
+                            const msg = encodeURIComponent(
+                              `Olá, estamos entrando em contato sobre o seu pedido #${order.id}.`
+                            )
+                            window.open(
+                              `https://wa.me/${phone}?text=${msg}`,
+                              "_blank",
+                              "noopener,noreferrer"
+                            )
+                          }}
+                        >
+                          <MessageCircle className="h-3 w-3" />
+                          <span>{order.client_whatsapp}</span>
+                        </button>
+                      )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800">
-                        {STATUS_LABELS[order.status] || order.status}
-                      </span>
+                      <div className="space-y-1">
+                      {(() => {
+                        const config =
+                          ORDER_STATUS_CONFIG[order.status] || {
+                            label: STATUS_LABELS[order.status] || order.status,
+                            className: "",
+                          }
+                        const Icon = config.icon
+                        return (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border",
+                              config.className
+                            )}
+                          >
+                            {Icon && <Icon className="h-3 w-3" />}
+                            {config.label}
+                          </Badge>
+                        )
+                      })()}
+                      </div>
                     </TableCell>
-                    <TableCell>{formatCurrency(parseFloat(order.total))}</TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div>{formatCurrency(parseFloat(order.total))}</div>
+                      {order.payment_status && (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border",
+                            order.payment_status === "paid" &&
+                              "bg-emerald-50 text-emerald-800 border-emerald-200",
+                            order.payment_status === "pending" &&
+                              "bg-amber-50 text-amber-800 border-amber-200",
+                            order.payment_status === "failed" &&
+                              "bg-rose-50 text-rose-800 border-rose-200"
+                          )}
+                        >
+                          {order.payment_status === "paid" && (
+                            <CheckCircle2 className="h-3 w-3" />
+                          )}
+                          {order.payment_status === "pending" && <Clock className="h-3 w-3" />}
+                          {order.payment_status === "failed" && <XCircle className="h-3 w-3" />}
+                          {order.payment_status === "paid" && "Pagamento Aprovado"}
+                          {order.payment_status === "pending" && "Pagamento Pendente"}
+                          {order.payment_status === "failed" && "Pagamento Recusado"}
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div className="font-medium">
+                        {formatCurrency(parseFloat(order.total_shipping || 0))}
+                      </div>
+                      {order.shipping_method && (
+                        <Badge
+                          variant="outline"
+                          className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-800 border-amber-200"
+                        >
+                          <Truck className="h-3 w-3" />
+                          <span>
+                            {order.shipping_method}
+                            {order.shipping_company_name
+                              ? ` - ${order.shipping_company_name}`
+                              : ""}
+                          </span>
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatDateTime(order.created_at)}
                     </TableCell>
                     <TableCell>
+                    <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
-                        size="sm"
-                        onClick={() => router.push(`/admin/orders/${order.id}`)}
+                        size="icon"
+                        onClick={() => setDetailsModal({ open: true, orderId: order.id })}
+                        title="Ver detalhes"
                       >
-                        <Edit className="h-4 w-4 mr-2" />
-                        Ver/Editar
+                        <Eye className="h-4 w-4" />
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => router.push(`/admin/orders/${order.id}`)}
+                        title="Editar pedido"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setStatusModal({ open: true, order })}
+                        disabled={order.status === "enviado"}
+                        title={
+                          order.status === "enviado"
+                            ? "Status não pode mais ser alterado"
+                            : "Alterar status"
+                        }
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                      {order.payment_link_token ? (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleCopyPaymentLink(order)}
+                            title="Copiar link de pagamento"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleOpenPaymentLink(order)}
+                            title="Gerenciar link de pagamento"
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => handleOpenPaymentLink(order)}
+                          title="Gerar link de pagamento"
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -286,6 +512,55 @@ export default function OrdersPage() {
           </>
         )}
       </div>
+
+      {/* Modal de Link de Pagamento */}
+      {paymentLinkModal.orderId && (
+        <PaymentLinkModal
+          open={paymentLinkModal.open}
+          onOpenChange={(open) =>
+            setPaymentLinkModal((prev) => ({ ...prev, open }))
+          }
+          orderId={paymentLinkModal.orderId}
+          existingLink={paymentLinkModal.link}
+          expiresAt={paymentLinkModal.expiresAt}
+          onGenerateNew={handleRefreshOrders}
+        />
+      )}
+
+      {/* Modal de Pedido */}
+      <OrderModal
+        open={orderModal.open}
+        onOpenChange={(open) =>
+          setOrderModal((prev) => ({ ...prev, open }))
+        }
+        orderId={orderModal.orderId}
+        onSuccess={handleRefreshOrders}
+      />
+
+      {/* Modal de Alteração de Status */}
+      {statusModal.order && (
+        <OrderStatusModal
+          open={statusModal.open}
+          onOpenChange={(open) =>
+            setStatusModal((prev) => ({ ...prev, open }))
+          }
+          orderId={statusModal.order.id}
+          currentStatus={statusModal.order.status}
+          currentTracking={statusModal.order.shipping_tracking}
+          onSuccess={handleRefreshOrders}
+        />
+      )}
+
+      {/* Modal de Detalhes do Pedido */}
+      {detailsModal.orderId && (
+        <OrderDetailsModal
+          open={detailsModal.open}
+          onOpenChange={(open) =>
+            setDetailsModal((prev) => ({ ...prev, open }))
+          }
+          orderId={detailsModal.orderId}
+        />
+      )}
     </div>
   )
 }

@@ -72,7 +72,10 @@ export default function OrderFormPage() {
       setFormData({
         client_id: order.client_id.toString(),
         status: order.status,
-        items: order.items || [],
+        items: (order.items || []).map((item: any) => ({
+          ...item,
+          product_id: item.product_id ? item.product_id.toString() : 'custom'
+        })),
         shipping_address_id: order.shipping_address_id?.toString() || ''
       })
     } catch (error) {
@@ -86,7 +89,7 @@ export default function OrderFormPage() {
     setFormData({
       ...formData,
       items: [...formData.items, {
-        product_id: '',
+        product_id: 'custom',
         title: '',
         price: '',
         quantity: 1,
@@ -105,7 +108,7 @@ export default function OrderFormPage() {
     newItems[index] = { ...newItems[index], [field]: value }
     
     // Se selecionou um produto, preencher título e preço
-    if (field === 'product_id' && value) {
+    if (field === 'product_id' && value && value !== 'custom') {
       const product = products.find((p: any) => p.id.toString() === value)
       if (product) {
         newItems[index].title = product.name
@@ -136,7 +139,7 @@ export default function OrderFormPage() {
       const orderData = {
         client_id: parseInt(formData.client_id),
         items: formData.items.map(item => ({
-          product_id: item.product_id ? parseInt(item.product_id) : null,
+          product_id: item.product_id && item.product_id !== 'custom' ? parseInt(item.product_id) : null,
           title: item.title,
           price: parseFloat(item.price),
           quantity: parseInt(item.quantity),
@@ -308,7 +311,7 @@ export default function OrderFormPage() {
                             <SelectValue placeholder="Selecione" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Personalizado</SelectItem>
+                            <SelectItem value="custom">Personalizado</SelectItem>
                             {products.map((product: any) => (
                               <SelectItem key={product.id} value={product.id.toString()}>
                                 {product.name}

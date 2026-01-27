@@ -49,7 +49,7 @@ export async function POST(
         break
       
       case 'pagarme':
-        validationResult = await validatePagarme(token.token_value)
+        validationResult = await validatePagarme(token.token_value, env)
         break
       
       case 'bling':

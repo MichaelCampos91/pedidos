@@ -1,12 +1,13 @@
 "use client"
 
-import { Check } from "lucide-react"
+import { Check, FileText, CreditCard, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface Step {
   id: number
   name: string
   description: string
+  icon: React.ComponentType<{ className?: string }>
 }
 
 interface CheckoutStepsProps {
@@ -21,6 +22,7 @@ export function CheckoutSteps({ currentStep, steps }: CheckoutStepsProps) {
         {steps.map((step, index) => {
           const isActive = currentStep === step.id
           const isCompleted = currentStep > step.id
+          const Icon = step.icon
 
           return (
             <div key={step.id} className="flex items-center flex-1">
@@ -38,7 +40,7 @@ export function CheckoutSteps({ currentStep, steps }: CheckoutStepsProps) {
                   {isCompleted ? (
                     <Check className="h-5 w-5" />
                   ) : (
-                    <span className="text-sm font-medium">{step.id}</span>
+                    <Icon className="h-5 w-5" />
                   )}
                 </div>
                 <div className="mt-2 text-center">
