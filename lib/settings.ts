@@ -1,4 +1,5 @@
 import { query } from './database'
+import type { IntegrationProvider, IntegrationEnvironment } from './integrations-types'
 
 export interface SystemSetting {
   id: number
@@ -86,4 +87,29 @@ export async function deleteSetting(key: string): Promise<void> {
     console.error(`Erro ao deletar configuração ${key}:`, error)
     throw error
   }
+}
+
+/**
+ * Obtém o ambiente ativo para uma integração
+ * Retorna null se não configurado
+ */
+export async function getActiveEnvironment(provider: IntegrationProvider): Promise<IntegrationEnvironment | null> {
+  const key = `integration_active_env_${provider}`
+  const value = await getSetting(key)
+  if (value === 'sandbox' || value === 'production') {
+    return value as IntegrationEnvironment
+  }
+  return null
+}
+
+/**
+ * Define o ambiente ativo para uma integração
+ */
+export async function setActiveEnvironment(
+  provider: IntegrationProvider,
+  environment: IntegrationEnvironment
+): Promise<void> {
+  const key = `integration_active_env_${provider}`
+  const description = `Ambiente ativo para integração ${provider}`
+  await setSetting(key, environment, description)
 }

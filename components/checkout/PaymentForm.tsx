@@ -114,17 +114,43 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
   }, [cardData])
 
   // Detectar ambiente: localhost = sandbox, produção = production
-  const detectEnvironment = (): 'sandbox' | 'production' => {
-    if (typeof window !== 'undefined') {
-      const hostname = window.location.hostname
-      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
-        return 'sandbox'
+  const [activeEnvironment, setActiveEnvironment] = useState<'sandbox' | 'production'>('production')
+
+  // Buscar ambiente ativo ao montar componente
+  useEffect(() => {
+    const fetchActiveEnvironment = async () => {
+      try {
+        const response = await fetch('/api/integrations/active-environment?provider=pagarme', {
+          credentials: 'include',
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setActiveEnvironment(data.environment || 'production')
+        } else {
+          // Fallback: detecção automática
+          if (typeof window !== 'undefined') {
+            const hostname = window.location.hostname
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
+              setActiveEnvironment('sandbox')
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[PaymentForm] Erro ao buscar ambiente ativo, usando produção:', error)
+        // Fallback: detecção automática
+        if (typeof window !== 'undefined') {
+          const hostname = window.location.hostname
+          if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
+            setActiveEnvironment('sandbox')
+          }
+        }
       }
     }
-    return 'production'
-  }
 
-  const isSandbox = detectEnvironment() === 'sandbox'
+    fetchActiveEnvironment()
+  }, [])
+
+  const isSandbox = activeEnvironment === 'sandbox'
 
   // Função para abrir WhatsApp
   const openWhatsApp = (message: string) => {
@@ -168,8 +194,7 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
     
     setIsChecking(true)
     try {
-      const environment = detectEnvironment()
-      const response = await fetch(`/api/payment/status?transaction_id=${pixTransactionId}&environment=${environment}`)
+      const response = await fetch(`/api/payment/status?transaction_id=${pixTransactionId}&environment=${activeEnvironment}`)
       
       if (!response.ok) {
         // Silenciar erro, continuar polling
@@ -220,8 +245,7 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
 
     const fetchPublicKey = async () => {
       try {
-        const environment = detectEnvironment()
-        const response = await fetch(`/api/pagarme/public-key?environment=${environment}`)
+        const response = await fetch(`/api/pagarme/public-key?environment=${activeEnvironment}`)
         
         if (!response.ok) {
           return
@@ -363,7 +387,6 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
 
   const handlePixPayment = async () => {
     setLoading(true)
-    const environment = detectEnvironment()
     try {
       const customerData = {
         name: customer.name,
@@ -378,7 +401,7 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         body: JSON.stringify({
           order_id: orderId,
           payment_method: 'pix',
-          environment,
+          environment: activeEnvironment,
           customer: customerData,
         }),
       })
@@ -483,8 +506,6 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
     setLoading(true)
     
     try {
-      const environment = detectEnvironment()
-
       // Preparar dados do cartão para tokenização
       const cardNumber = cardData.card_number.replace(/\s/g, '')
       const [month, year] = cardData.card_expiration_date.split('/')
@@ -495,7 +516,7 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
       let publicKeyToUse = publicKey
       if (!publicKeyToUse) {
         try {
-          const keyResponse = await fetch(`/api/pagarme/public-key?environment=${environment}`)
+          const keyResponse = await fetch(`/api/pagarme/public-key?environment=${activeEnvironment}`)
           if (keyResponse.ok) {
             const keyData = await keyResponse.json()
             publicKeyToUse = keyData.publicKey
@@ -559,7 +580,7 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         body: JSON.stringify({
           order_id: orderId,
           payment_method: 'credit_card',
-          environment,
+          environment: activeEnvironment,
           customer: customerData,
           credit_card: {
             card_token: cardToken,

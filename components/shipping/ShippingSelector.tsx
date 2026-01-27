@@ -55,7 +55,7 @@ export function ShippingSelector({
   comprimento = '30',
   valor = '100',
   produtos,
-  environment = 'production',
+  environment,
   onSelect,
   selectedOptionId,
   className = '',
@@ -77,7 +77,12 @@ export function ShippingSelector({
     try {
       const body: any = {
         cep_destino: cep,
-        environment,
+        // environment só é adicionado se explicitamente fornecido
+      }
+
+      // Adicionar environment apenas se fornecido
+      if (environment) {
+        body.environment = environment
       }
 
       if (produtos && produtos.length > 0) {

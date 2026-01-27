@@ -108,9 +108,9 @@ CREATE TABLE integration_tokens (
     id BIGSERIAL PRIMARY KEY,
     provider VARCHAR(50) NOT NULL,
     environment VARCHAR(20) NOT NULL,
-    token_value TEXT NOT NULL,
-    token_type VARCHAR(20) DEFAULT 'api_key',
-    additional_data JSONB,
+    token_value TEXT NOT NULL, -- Secret Key
+    token_type VARCHAR(20) DEFAULT 'bearer', -- Sempre 'bearer' (único tipo que funciona)
+    additional_data JSONB, -- { public_key: "..." }
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -118,13 +118,30 @@ CREATE TABLE integration_tokens (
 );
 ```
 
+**IMPORTANTE**: 
+- Tipo de token sempre será **"Bearer"** (definido automaticamente no backend)
+- Apenas "Bearer" funciona como tipo de token
+
 ### Configuração de Tokens
 
 1. Acesse `/admin/integrations`
 2. Selecione Pagar.me
 3. Configure tokens para sandbox e/ou produção:
-   - **Token**: Secret Key do Pagar.me
-   - **Public Key**: Public Key do Pagar.me (em `additional_data`)
+   - **Secret Key**: Secret Key do Pagar.me (campo "Secret Key")
+   - **Public Key**: Public Key do Pagar.me (campo "Public Key" - opcional, para tokenização de cartão)
+4. Ambos os tokens são exibidos no card de integração (mascarados)
+
+### Seleção de Ambiente Ativo
+
+O sistema permite selecionar qual ambiente está ativo (Sandbox ou Produção) através de um select no topo do card de integração. O ambiente selecionado é usado automaticamente em todos os pagamentos.
+
+- Ambiente ativo é armazenado em `system_settings` com chave `integration_active_env_pagarme`
+- Se não configurado, usa produção se existir token, senão sandbox
+- Badge "Ativo" é exibido no token do ambiente selecionado
+- O ambiente selecionado é usado em:
+  - Criação de transações (`/api/payment/create`)
+  - Obtenção de Public Key (`/api/pagarme/public-key`)
+  - Polling de status (`/api/payment/status`)
 
 ### Obtenção de Tokens
 
@@ -132,10 +149,30 @@ CREATE TABLE integration_tokens (
 // Backend: Obter secret_key
 const apiKey = await getApiKey(environment)
 
-// Frontend: Obter public_key
+// Frontend: Obter public_key (usa ambiente ativo automaticamente)
+const response = await fetch(`/api/pagarme/public-key`)
+const { publicKey } = await response.json()
+
+// Ou especificar ambiente explicitamente
 const response = await fetch(`/api/pagarme/public-key?environment=${environment}`)
 const { publicKey } = await response.json()
 ```
+
+### Seleção de Ambiente Ativo
+
+**GET** `/api/integrations/active-environment?provider=pagarme`
+- Retorna ambiente ativo configurado
+- Fallback: produção se existir token, senão sandbox
+
+**POST** `/api/integrations/active-environment`
+```typescript
+{
+  provider: 'pagarme',
+  environment: 'sandbox' | 'production'
+}
+```
+- Salva ambiente ativo em `system_settings`
+- Valida se token existe para o ambiente selecionado
 
 ---
 
@@ -518,7 +555,7 @@ CREATE TABLE integration_tokens (
     provider VARCHAR(50) NOT NULL, -- 'pagarme'
     environment VARCHAR(20) NOT NULL, -- 'sandbox' | 'production'
     token_value TEXT NOT NULL, -- secret_key
-    token_type VARCHAR(20) DEFAULT 'api_key',
+    token_type VARCHAR(20) DEFAULT 'bearer', -- Sempre 'bearer' (único tipo que funciona)
     additional_data JSONB, -- { public_key: "..." }
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -588,12 +625,14 @@ Localização: `components/checkout/PaymentForm.tsx`
    - Código PIX copiável
    - Polling automático de status
    - Feedback visual (pending, paid, failed, expired)
+   - Usa ambiente ativo configurado automaticamente
 
 3. **Cartão**
    - Formulário de dados do cartão
    - Validação em tempo real
    - Tokenização automática
    - Feedback de loading e erro
+   - Usa ambiente ativo configurado automaticamente
 
 ### Estados Visuais
 
@@ -607,6 +646,36 @@ Localização: `components/checkout/PaymentForm.tsx`
 - Dados do PIX salvos em `localStorage`
 - Recuperação automática ao recarregar página
 - Limpeza automática após expiração ou pagamento
+
+### Tela de Integrações
+
+**Localização**: `app/admin/integrations/page.tsx`
+
+**Funcionalidades:**
+
+1. **Select de Ambiente**
+   - Exibido no topo de cada card de integração
+   - Opções: Sandbox e Produção (apenas se tokens existirem)
+   - Desabilitado se nenhum token cadastrado
+   - Pré-seleciona ambiente disponível se apenas um existir
+
+2. **Badge "Ativo"**
+   - Exibido no token do ambiente selecionado
+   - Cor verde para destaque visual
+
+3. **Exibição de Chaves (Pagar.me)**
+   - **Secret Key**: Exibida como `****{ultimos 4 caracteres}`
+   - **Public Key**: Exibida como `****{ultimos 4 caracteres}` (se configurada)
+   - Ambas visíveis no card do token
+
+4. **Modal de Formulário**
+   - Formulário de criação/edição exibido em modal
+   - Não ocupa espaço na tela principal
+   - Fecha automaticamente após salvar
+
+5. **Botão Validar**
+   - Exibe texto "Validar" além do ícone
+   - Facilita identificação da ação
 
 ---
 
@@ -704,20 +773,33 @@ PAGARME_WEBHOOK_SECRET=seu_secret_aqui
 ### Componentes Principais
 
 1. **lib/pagarme.ts**: Lógica de integração com Pagar.me
-2. **app/api/payment/create/route.ts**: Endpoint de criação
-3. **app/api/payment/webhook/route.ts**: Handler de webhook
-4. **app/api/payment/status/route.ts**: Polling de status
-5. **components/checkout/PaymentForm.tsx**: Interface de pagamento
+2. **lib/settings.ts**: Gerenciamento de ambiente ativo
+3. **app/api/payment/create/route.ts**: Endpoint de criação (usa ambiente ativo)
+4. **app/api/payment/webhook/route.ts**: Handler de webhook
+5. **app/api/payment/status/route.ts**: Polling de status (usa ambiente ativo)
+6. **app/api/pagarme/public-key/route.ts**: Endpoint de Public Key (usa ambiente ativo)
+7. **app/api/integrations/active-environment/route.ts**: Gerenciamento de ambiente ativo
+8. **components/checkout/PaymentForm.tsx**: Interface de pagamento (busca ambiente ativo)
+9. **components/integrations/IntegrationCard.tsx**: Card com select de ambiente e modal
 
 ### Fluxo de Dados
 
 ```
-Frontend → API Route → lib/pagarme.ts → Pagar.me API
+Frontend → Busca ambiente ativo → API Route → lib/pagarme.ts → Pagar.me API
                 ↓
-         Banco de Dados (payments)
+         system_settings (ambiente ativo)
+                ↓
+         Banco de Dados (payments, integration_tokens)
                 ↓
          Webhook → Atualização automática
 ```
+
+### Detecção de Ambiente
+
+1. **Prioridade 1**: Ambiente ativo configurado em `system_settings`
+2. **Prioridade 2**: Token de produção existe → usa produção
+3. **Prioridade 3**: Token de sandbox existe → usa sandbox
+4. **Prioridade 4**: Detecção automática (NODE_ENV, hostname)
 
 ---
 

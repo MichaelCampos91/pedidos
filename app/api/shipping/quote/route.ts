@@ -94,8 +94,31 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { cep_destino, peso, altura, largura, comprimento, valor, produtos } = body
 
-    // Determinar environment
-    environment = (body.environment === 'sandbox' ? 'sandbox' : 'production') as 'sandbox' | 'production'
+    // Determinar environment: usar do body se fornecido, senão buscar ambiente ativo
+    if (body.environment === 'sandbox' || body.environment === 'production') {
+      environment = body.environment as IntegrationEnvironment
+    } else {
+      // Buscar ambiente ativo configurado
+      try {
+        const { getActiveEnvironment } = await import('@/lib/settings')
+        const activeEnv = await getActiveEnvironment('melhor_envio')
+        if (activeEnv) {
+          environment = activeEnv
+        } else {
+          // Fallback: verificar qual token existe
+          const { getToken } = await import('@/lib/integrations')
+          const productionToken = await getToken('melhor_envio', 'production')
+          const sandboxToken = await getToken('melhor_envio', 'sandbox')
+          
+          if (productionToken) environment = 'production'
+          else if (sandboxToken) environment = 'sandbox'
+          // Caso contrário, mantém 'production' como padrão
+        }
+      } catch (error) {
+        console.warn('[Shipping Quote] Erro ao buscar ambiente ativo, usando produção como padrão:', error)
+        environment = 'production'
+      }
+    }
 
     if (!cep_destino) {
       return NextResponse.json(

@@ -1,22 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query } from '@/lib/database'
 import { createPixTransaction, createCreditCardTransaction } from '@/lib/pagarme'
+import { getActiveEnvironment } from '@/lib/settings'
+import { getToken } from '@/lib/integrations'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
-// Detectar ambiente baseado em NODE_ENV ou hostname
-function detectEnvironment(request: NextRequest): 'sandbox' | 'production' {
-  // Verificar variável de ambiente primeiro
+// Detectar ambiente baseado em ambiente ativo ou fallback automático
+async function detectEnvironment(request: NextRequest): Promise<'sandbox' | 'production'> {
+  // Primeiro, tentar buscar ambiente ativo configurado
+  try {
+    const activeEnv = await getActiveEnvironment('pagarme')
+    if (activeEnv) {
+      return activeEnv
+    }
+  } catch (error) {
+    console.warn('[Payment Create] Erro ao buscar ambiente ativo, usando fallback:', error)
+  }
+
+  // Fallback: verificar qual token existe
+  try {
+    const productionToken = await getToken('pagarme', 'production')
+    const sandboxToken = await getToken('pagarme', 'sandbox')
+    
+    if (productionToken) return 'production'
+    if (sandboxToken) return 'sandbox'
+  } catch (error) {
+    console.warn('[Payment Create] Erro ao verificar tokens, usando detecção automática:', error)
+  }
+
+  // Fallback final: detecção automática
   if (process.env.NODE_ENV === 'development') {
     return 'sandbox'
   }
   
-  // Verificar hostname da requisição
   const hostname = request.headers.get('host') || ''
   if (hostname.includes('localhost') || hostname.includes('127.0.0.1') || hostname.includes('192.168.') || hostname.includes('10.') || hostname.includes('172.')) {
     return 'sandbox'
   }
   
-  // Verificar variável de ambiente específica
   if (process.env.PAGARME_ENVIRONMENT === 'sandbox') {
     return 'sandbox'
   }
@@ -30,7 +51,7 @@ export async function POST(request: NextRequest) {
     const { order_id, payment_method, customer, billing, credit_card, environment } = body
     
     // Detectar ambiente se não foi fornecido ou usar o fornecido
-    const detectedEnvironment = environment || detectEnvironment(request)
+    const detectedEnvironment = environment || await detectEnvironment(request)
 
     if (!order_id || !payment_method || !customer) {
       return NextResponse.json(

@@ -92,11 +92,12 @@ function validateTokenNotMasked(tokenValue: string, context: string): void {
  * Cria ou atualiza um token
  * CRÍTICO: Tokens nunca devem ser salvos mascarados no banco
  */
+// NOTA: tokenType sempre será 'bearer' (único tipo que funciona)
 export async function upsertToken(
   provider: IntegrationProvider,
   environment: IntegrationEnvironment,
   tokenValue: string,
-  tokenType: TokenType = 'bearer',
+  tokenType: TokenType = 'bearer', // Sempre 'bearer' (único tipo que funciona)
   additionalData?: Record<string, any>,
   expiresAt?: Date | string
 ): Promise<IntegrationToken> {

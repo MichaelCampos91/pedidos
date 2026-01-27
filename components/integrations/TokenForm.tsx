@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, X, ExternalLink } from "lucide-react"
-import type { IntegrationProvider, IntegrationEnvironment, TokenType, IntegrationToken } from "@/lib/integrations-types"
+import { Loader2, Save, X } from "lucide-react"
+import type { IntegrationProvider, IntegrationEnvironment, IntegrationToken } from "@/lib/integrations-types"
 import { toast } from "@/lib/toast"
 
 interface TokenFormProps {
@@ -16,9 +16,6 @@ interface TokenFormProps {
     provider: IntegrationProvider
     environment: IntegrationEnvironment
     token_value?: string
-    token_type?: TokenType
-    client_id?: string
-    client_secret?: string
     cep_origem?: string
     public_key?: string
     additional_data?: Record<string, any>
@@ -31,120 +28,35 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
   const isMelhorEnvio = provider === 'melhor_envio'
   const isPagarme = provider === 'pagarme'
   
-  // Detectar modo baseado no token existente
-  const hasOAuth2Data = token?.additional_data?.client_id || token?.additional_data?.refresh_token
-  const [authMode, setAuthMode] = useState<'oauth2' | 'token'>(
-    isMelhorEnvio && (hasOAuth2Data || !token) ? 'oauth2' : 'token'
-  )
+  // NOTA: Apenas "Token direto (legacy)" funciona para Melhor Envio
+  // NOTA: Apenas "Bearer" funciona como tipo de token (definido automaticamente no backend)
 
   const [formData, setFormData] = useState({
     environment: (token?.environment || 'production') as IntegrationEnvironment,
     token_value: token?.token_value && !token.token_value.startsWith('****') 
       ? token.token_value 
       : '',
-    token_type: (token?.token_type || 'bearer') as TokenType,
-    client_id: token?.additional_data?.client_id || '',
-    client_secret: '', // Nunca mostrar secret salvo por segurança
     cep_origem: token?.additional_data?.cep_origem || '',
     public_key: token?.additional_data?.public_key || '', // Para Pagar.me
   })
 
-  const [isAuthorizing, setIsAuthorizing] = useState(false)
-
-  const handleAuthorize = async () => {
-    if (!formData.client_id && !token?.additional_data?.client_id) {
-      toast.warning('Configure o Client ID primeiro antes de autorizar')
-      return
-    }
-
-    setIsAuthorizing(true)
-    try {
-      const clientId = formData.client_id || token?.additional_data?.client_id
-      if (!clientId) {
-        throw new Error('Client ID não encontrado')
-      }
-
-      // Primeiro, salvar client_id se ainda não estiver salvo
-      if (!token && formData.client_id) {
-        await onSave({
-          provider,
-          environment: formData.environment,
-          client_id: formData.client_id,
-          cep_origem: formData.cep_origem || undefined,
-        })
-      }
-
-      // Obter URL de autorização
-      const response = await fetch(
-        `/api/integrations/melhor-envio/authorize?environment=${formData.environment}`
-      )
-
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Erro ao gerar URL de autorização')
-      }
-
-      const data = await response.json()
-      
-      // Redirecionar para URL de autorização
-      window.location.href = data.authorization_url
-    } catch (error: any) {
-      toast.error(`Erro ao iniciar autorização: ${error.message}`)
-      setIsAuthorizing(false)
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (isMelhorEnvio && authMode === 'oauth2') {
-      // Modo OAuth2
-      if (!formData.client_id) {
-        toast.warning('Client ID é obrigatório para OAuth2')
-        return
-      }
-      
-      // Se está criando novo, client_secret é obrigatório
-      if (!token && !formData.client_secret) {
-        toast.warning('Client Secret é obrigatório ao criar nova integração OAuth2')
-        return
-      }
-      
-      const saveData: any = {
-        provider,
-        environment: formData.environment,
-        client_id: formData.client_id,
-        cep_origem: formData.cep_origem || undefined,
-      }
-      
-      // Enviar client_secret apenas se fornecido (para criar novo ou atualizar)
-      // Se não fornecido e está editando, o backend buscará do banco
-      if (formData.client_secret) {
-        saveData.client_secret = formData.client_secret
-      }
-      
-      // Incluir public_key se for Pagar.me
-      if (isPagarme && formData.public_key) {
-        saveData.public_key = formData.public_key
-      }
-      
-      await onSave(saveData)
-    } else {
-      // Modo token direto (legacy)
-      if (!formData.token_value) {
-        toast.warning('Token é obrigatório')
-        return
-      }
-      
-      await onSave({
-        provider,
-        environment: formData.environment,
-        token_value: formData.token_value,
-        token_type: formData.token_type,
-        cep_origem: formData.cep_origem || undefined,
-        public_key: isPagarme && formData.public_key ? formData.public_key : undefined,
-      })
+    // Validação: token é obrigatório
+    if (!formData.token_value) {
+      toast.warning(isPagarme ? 'Secret Key é obrigatória' : 'Token é obrigatório')
+      return
     }
+    
+    // Salvar sempre como token direto (legacy) e bearer (definido no backend)
+    await onSave({
+      provider,
+      environment: formData.environment,
+      token_value: formData.token_value,
+      cep_origem: isMelhorEnvio && formData.cep_origem ? formData.cep_origem : undefined,
+      public_key: isPagarme && formData.public_key ? formData.public_key : undefined,
+    })
   }
 
   return (
@@ -155,7 +67,7 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
         </CardTitle>
         <CardDescription>
           {isMelhorEnvio 
-            ? 'Configure a autenticação OAuth2 (recomendado) ou token direto para o ambiente selecionado'
+            ? 'Configure o token direto para o ambiente selecionado. Apenas o método "Token direto (legacy)" funciona.'
             : `Configure o token para o ambiente ${formData.environment === 'sandbox' ? 'Sandbox' : 'Produção'}`
           }
         </CardDescription>
@@ -176,137 +88,37 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
             </select>
           </div>
 
-          {isMelhorEnvio && (
-            <div className="space-y-2">
-              <Label htmlFor="authMode">Método de Autenticação</Label>
-              <select
-                id="authMode"
-                value={authMode}
-                onChange={(e) => setAuthMode(e.target.value as 'oauth2' | 'token')}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                disabled={!!token}
-              >
-                <option value="oauth2">OAuth2 (Recomendado - Renovação automática)</option>
-                <option value="token">Token Direto (Legacy)</option>
-              </select>
+          <div className="space-y-2">
+            <Label htmlFor="token_value">
+              {isPagarme ? 'Secret Key *' : 'Token *'}
+            </Label>
+            <Input
+              id="token_value"
+              type="password"
+              value={formData.token_value}
+              onChange={(e) => setFormData({ ...formData, token_value: e.target.value })}
+              placeholder={isPagarme ? "Cole a Secret Key aqui (sk_live_... ou sk_test_...)" : "Cole o token aqui"}
+              required
+            />
+            {isPagarme && (
               <p className="text-xs text-muted-foreground">
-                OAuth2 renova tokens automaticamente. Token direto requer renovação manual.
+                Secret Key do Pagar.me. Encontre no painel em Configurações → Chaves de API.
+                A Secret Key começa com <code className="text-xs bg-muted px-1 py-0.5 rounded">sk_live_</code> (produção) ou <code className="text-xs bg-muted px-1 py-0.5 rounded">sk_test_</code> (sandbox).
               </p>
-            </div>
-          )}
-
-          {isMelhorEnvio && authMode === 'oauth2' ? (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="client_id">Client ID *</Label>
-                <Input
-                  id="client_id"
-                  type="text"
-                  value={formData.client_id}
-                  onChange={(e) => setFormData({ ...formData, client_id: e.target.value })}
-                  placeholder="Seu Client ID do Melhor Envio"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Obtenha em: {formData.environment === 'sandbox' 
-                    ? 'https://app-sandbox.melhorenvio.com.br/integracoes/area-dev'
-                    : 'https://melhorenvio.com.br/integracoes/area-dev'
-                  }
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  URL de redirecionamento (configure no app do Melhor Envio): 
-                  <br />
-                  <code className="text-xs bg-muted px-1 py-0.5 rounded mt-1 inline-block">
-                    https://pedidos.lojacenario.com.br/api/auth/callback/melhor-envio
-                  </code>
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="client_secret">
-                  Client Secret {token && token.additional_data?.client_secret ? '(deixe em branco para manter o atual)' : '*'}
-                </Label>
-                <Input
-                  id="client_secret"
-                  type="password"
-                  value={formData.client_secret}
-                  onChange={(e) => setFormData({ ...formData, client_secret: e.target.value })}
-                  placeholder={token && token.additional_data?.client_secret 
-                    ? "Deixe em branco para manter o atual ou digite um novo"
-                    : "Seu Client Secret do Melhor Envio"
-                  }
-                  required={authMode === 'oauth2' && !token}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {token && token.additional_data?.client_secret
-                    ? "Deixe em branco para manter o Client Secret atual, ou digite um novo para atualizar."
-                    : "Mantenha o Client Secret seguro e nunca o compartilhe."
-                  }
-                </p>
-              </div>
-
-              {/* Botão de autorização OAuth2 */}
-              {(token?.additional_data?.client_id || formData.client_id) && (
-                <div className="space-y-2 pt-2 border-t">
-                  <Label>Autorização OAuth2</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Para obter tokens com todas as permissões (recomendado), autorize o app no Melhor Envio.
-                    Isso solicitará as permissões necessárias (shipping-calculate, shipping-read).
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleAuthorize}
-                    disabled={isAuthorizing || isSaving}
-                    className="w-full"
-                  >
-                    {isAuthorizing ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Redirecionando...
-                      </>
-                    ) : (
-                      <>
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Autorizar App no Melhor Envio
-                      </>
-                    )}
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    Após autorizar, você será redirecionado de volta e o token será salvo automaticamente.
-                  </p>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="token_value">Token *</Label>
-                <Input
-                  id="token_value"
-                  type="password"
-                  value={formData.token_value}
-                  onChange={(e) => setFormData({ ...formData, token_value: e.target.value })}
-                  placeholder="Cole o token aqui"
-                  required={authMode === 'token'}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="token_type">Tipo de Token</Label>
-                <select
-                  id="token_type"
-                  value={formData.token_type}
-                  onChange={(e) => setFormData({ ...formData, token_type: e.target.value as TokenType })}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  <option value="bearer">Bearer</option>
-                  <option value="basic">Basic</option>
-                  <option value="api_key">API Key</option>
-                </select>
-              </div>
-            </>
-          )}
+            )}
+            {isMelhorEnvio && (
+              <p className="text-xs text-muted-foreground">
+                Token do Melhor Envio. Obtenha em: {formData.environment === 'sandbox' 
+                  ? 'https://app-sandbox.melhorenvio.com.br/integracoes/area-dev'
+                  : 'https://melhorenvio.com.br/integracoes/area-dev'
+                }
+              </p>
+            )}
+            {/* NOTA: Tipo de token sempre será "Bearer" (definido automaticamente no backend) */}
+            <p className="text-xs text-muted-foreground italic">
+              Tipo de token: Bearer (definido automaticamente)
+            </p>
+          </div>
 
           {isMelhorEnvio && (
             <div className="space-y-2">
@@ -343,12 +155,12 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
               <p className="text-xs text-muted-foreground">
                 {token && token.additional_data?.public_key
                   ? "Deixe em branco para manter a Public Key atual, ou digite uma nova para atualizar."
-                  : "Chave pública para tokenização de cartões no frontend. Encontre no painel do Pagar.me em Configurações → Chaves de API. A Public Key é diferente da API Key (Secret Key) e é necessária para que pagamentos com cartão funcionem. Se não configurada, a tokenização de cartão não funcionará."
+                  : "Chave pública para tokenização de cartões no frontend. Encontre no painel do Pagar.me em Configurações → Chaves de API. A Public Key é diferente da Secret Key e é necessária para que pagamentos com cartão funcionem. Se não configurada, a tokenização de cartão não funcionará."
                 }
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 <strong>Onde encontrar:</strong> No painel do Pagar.me, acesse Configurações → Chaves de API. 
-                Você verá duas chaves: <strong>API Key</strong> (Secret Key - usada no backend) e <strong>Public Key</strong> (usada para tokenização no frontend).
+                Você verá duas chaves: <strong>Secret Key</strong> (usada no backend) e <strong>Public Key</strong> (usada para tokenização no frontend).
                 A Public Key começa com <code className="text-xs bg-muted px-1 py-0.5 rounded">pk_live_</code> (produção) ou <code className="text-xs bg-muted px-1 py-0.5 rounded">pk_test_</code> (sandbox).
               </p>
             </div>

@@ -70,10 +70,8 @@ export default function IntegrationsPage() {
     provider: IntegrationProvider
     environment: IntegrationEnvironment
     token_value?: string
-    token_type?: TokenType
-    client_id?: string
-    client_secret?: string
     cep_origem?: string
+    public_key?: string
     additional_data?: Record<string, any>
   }) => {
     try {
@@ -170,6 +168,11 @@ export default function IntegrationsPage() {
     // Add é gerenciado pelo IntegrationCard
   }
 
+  const handleTokensUpdated = async () => {
+    // Recarregar tokens após salvar
+    await loadTokens()
+  }
+
   const getTokensForProvider = (provider: IntegrationProvider) => {
     return tokens.filter(t => t.provider === provider)
   }
@@ -221,6 +224,7 @@ export default function IntegrationsPage() {
               onValidate={handleValidateToken}
               onAdd={handleAddToken}
               onSave={handleSaveToken}
+              onTokensUpdated={handleTokensUpdated}
               isValidating={validating}
               isSaving={saving}
               icon={provider.icon}

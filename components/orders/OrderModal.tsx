@@ -63,7 +63,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
   const [selectedClient, setSelectedClient] = useState<any>(null)
   const [clientAddresses, setClientAddresses] = useState<any[]>([])
   const [selectedShipping, setSelectedShipping] = useState<ShippingOption | null>(null)
-  const [shippingEnvironment, setShippingEnvironment] = useState<IntegrationEnvironment>('production')
+  const [activeEnvironment, setActiveEnvironment] = useState<IntegrationEnvironment | null>(null)
+  const [loadingEnv, setLoadingEnv] = useState(true)
   const [showNewAddressForm, setShowNewAddressForm] = useState(false)
   const [showAddressSelector, setShowAddressSelector] = useState(false)
   const [freteClearedWarning, setFreteClearedWarning] = useState(false)
@@ -76,6 +77,29 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     items: [] as any[],
     shipping_address_id: '',
   })
+
+  // Buscar ambiente ativo ao montar componente
+  useEffect(() => {
+    const fetchActiveEnvironment = async () => {
+      try {
+        const response = await fetch('/api/integrations/active-environment?provider=melhor_envio', {
+          credentials: 'include',
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setActiveEnvironment(data.environment || 'production')
+        } else {
+          setActiveEnvironment('production')
+        }
+      } catch (error) {
+        console.warn('Erro ao buscar ambiente ativo, usando produção:', error)
+        setActiveEnvironment('production')
+      } finally {
+        setLoadingEnv(false)
+      }
+    }
+    fetchActiveEnvironment()
+  }, [])
 
   useEffect(() => {
     if (open) {
@@ -121,7 +145,6 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     setSelectedClient(null)
     setClientAddresses([])
     setSelectedShipping(null)
-    setShippingEnvironment('production')
     setCurrentStep(1)
     setShowNewAddressForm(false)
     setShowAddressSelector(false)
@@ -173,7 +196,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
               : order.shipping_option_data)
           : {}
         
-        setShippingEnvironment(shippingData.environment || 'production')
+        // Ambiente não é mais necessário - será usado o ambiente ativo
         
         setSelectedShipping({
           id: parseInt(order.shipping_option_id.toString()),
@@ -189,8 +212,6 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
           packages: shippingData.packages || 1,
         })
         previousAddressRef.current = order.shipping_address_id
-      } else {
-        setShippingEnvironment('production')
       }
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
@@ -413,7 +434,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         orderData.shipping_option_data = {
           delivery_range: selectedShipping.delivery_range,
           packages: selectedShipping.packages,
-          environment: shippingEnvironment,
+          // environment removido - não é mais necessário
         }
       }
 
@@ -804,13 +825,20 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
             {currentStep === 4 && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Truck className="h-5 w-5" />
-                    Frete
-                  </CardTitle>
-                  <CardDescription>
-                    Selecione a modalidade de frete para o endereço selecionado
-                  </CardDescription>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Truck className="h-5 w-5" />
+                        Frete
+                      </CardTitle>
+                      <CardDescription>
+                        Selecione a modalidade de frete para o endereço selecionado
+                      </CardDescription>
+                    </div>
+                    {activeEnvironment && (
+                      <EnvironmentBadge environment={activeEnvironment} className="text-xs" />
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {freteClearedWarning && (
@@ -825,28 +853,6 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                     </p>
                   ) : (
                     <>
-                      {/* Seletor de Ambiente */}
-                      <div className="space-y-2 mb-4">
-                        <Label htmlFor="shipping_environment">Ambiente de Frete</Label>
-                        <select
-                          id="shipping_environment"
-                          value={shippingEnvironment}
-                          onChange={(e) => setShippingEnvironment(e.target.value as IntegrationEnvironment)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                          <option value="sandbox">Sandbox (Testes)</option>
-                          <option value="production">Produção</option>
-                        </select>
-                        <div className="flex items-center gap-2">
-                          <EnvironmentBadge environment={shippingEnvironment} />
-                          <p className="text-xs text-muted-foreground">
-                            {shippingEnvironment === 'sandbox' 
-                              ? 'Use o ambiente sandbox para testes sem custos reais'
-                              : 'Ambiente de produção - use com cuidado'}
-                          </p>
-                        </div>
-                      </div>
-
                       {selectedShipping ? (
                         <div className="space-y-4">
                           <div className="p-4 border rounded-lg bg-primary/5 border-primary">
@@ -855,7 +861,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                                   <Badge variant="outline">{selectedShipping.name}</Badge>
                                   <span className="font-semibold">{selectedShipping.company.name}</span>
-                                  <EnvironmentBadge environment={shippingEnvironment} />
+                                  {activeEnvironment && <EnvironmentBadge environment={activeEnvironment} />}
                                 </div>
                                 <p className="text-sm text-muted-foreground">
                                   Prazo: {selectedShipping.delivery_time} dias úteis
@@ -891,7 +897,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                               quantidade: parseInt(item.quantity || 1),
                             }
                           })}
-                          environment={shippingEnvironment}
+                          // environment removido - componente busca automaticamente ou API usa padrão
                           onSelect={handleShippingSelect}
                         />
                       )}
@@ -1116,7 +1122,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                               <Badge variant="outline">{selectedShipping.name}</Badge>
                               <span className="font-semibold">{selectedShipping.company.name}</span>
-                              <EnvironmentBadge environment={shippingEnvironment} />
+                              {activeEnvironment && <EnvironmentBadge environment={activeEnvironment} />}
                             </div>
                             <div className="space-y-1 text-sm">
                               <p className="text-muted-foreground">

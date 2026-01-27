@@ -114,33 +114,35 @@ pedidos/
 
 ## 🔐 Autenticação e Gerenciamento de Tokens
 
-### Dois Modos de Autenticação
+### Método de Autenticação
 
-#### 1. OAuth2 (Recomendado)
-- **Renovação automática** de tokens
-- **Client ID + Client Secret** armazenados no banco
-- **Refresh Token** para renovação sem reautenticação
-- **Expiração automática** gerenciada pelo sistema
+**IMPORTANTE**: Apenas o método **"Token Direto (Legacy)"** funciona na prática. O método OAuth2 não está funcional no momento.
 
-#### 2. Token Direto (Legacy)
+#### Token Direto (Legacy)
 - Token manual fornecido pelo usuário
 - Requer renovação manual quando expira
-- Compatível com tokens antigos
+- Tipo de token sempre será **"Bearer"** (definido automaticamente)
+- Token obtido diretamente do painel do Melhor Envio
 
 ### Fluxo de Cadastro de Token
 
-#### Via OAuth2:
-1. Usuário fornece `client_id` e `client_secret`
-2. Sistema faz requisição para `/oauth/token` do Melhor Envio
-3. Recebe `access_token`, `refresh_token` e `expires_in`
-4. Armazena no banco com data de expiração
-5. `client_id` e `client_secret` são salvos em `additional_data` para futuras renovações
+1. Usuário acessa `/admin/integrations`
+2. Seleciona ambiente (Sandbox ou Produção)
+3. Clica em "Adicionar" para o ambiente desejado
+4. Preenche o campo "Token" com o token completo do Melhor Envio
+5. Opcionalmente, preenche "CEP de Origem"
+6. Clica em "Salvar"
+7. Sistema valida formato (remove "Bearer " se presente)
+8. Verifica se não está mascarado
+9. Armazena no banco com `token_type: 'bearer'` (automático)
 
-#### Via Token Direto:
-1. Usuário cola o token completo
-2. Sistema valida formato (remove "Bearer " se presente)
-3. Verifica se não está mascarado
-4. Armazena no banco
+### Seleção de Ambiente Ativo
+
+O sistema permite selecionar qual ambiente está ativo (Sandbox ou Produção) através de um select no topo do card de integração. O ambiente selecionado é usado automaticamente em todas as cotações de frete.
+
+- Ambiente ativo é armazenado em `system_settings` com chave `integration_active_env_melhor_envio`
+- Se não configurado, usa produção se existir token, senão sandbox
+- Badge "Ativo" é exibido no token do ambiente selecionado
 
 ### Estrutura de Dados no Banco
 
@@ -192,23 +194,15 @@ CREATE TABLE integration_tokens (
 
 #### POST - Criar/Atualizar Token
 ```typescript
-// Request body (OAuth2)
+// Request body (Token Direto - único método funcional)
 {
   provider: 'melhor_envio',
   environment: 'production',
-  client_id: 'xxx',
-  client_secret: 'yyy',
+  token_value: 'token_completo', // Token obtido do painel Melhor Envio
   cep_origem: '01310100'  // Opcional
 }
 
-// Request body (Token Direto)
-{
-  provider: 'melhor_envio',
-  environment: 'production',
-  token_value: 'token_completo',
-  token_type: 'bearer',
-  cep_origem: '01310100'  // Opcional
-}
+// NOTA: token_type sempre será 'bearer' (definido automaticamente no backend)
 ```
 
 ---
@@ -466,9 +460,39 @@ O hash dos produtos inclui:
 
 ---
 
-## 🔄 Fluxo OAuth2
+## 🔄 Seleção de Ambiente Ativo
 
-### Fluxo Completo
+### Endpoint de Ambiente Ativo
+
+**GET** `/api/integrations/active-environment?provider=melhor_envio`
+- Retorna ambiente ativo configurado
+- Fallback: produção se existir token, senão sandbox
+
+**POST** `/api/integrations/active-environment`
+```typescript
+{
+  provider: 'melhor_envio',
+  environment: 'sandbox' | 'production'
+}
+```
+- Salva ambiente ativo em `system_settings`
+- Valida se token existe para o ambiente selecionado
+
+### Uso em Cotações
+
+O endpoint `/api/shipping/quote` usa automaticamente o ambiente ativo configurado:
+1. Se `body.environment` for fornecido, usa esse valor
+2. Senão, busca ambiente ativo via `getActiveEnvironment('melhor_envio')`
+3. Fallback: verifica qual token existe (produção > sandbox)
+4. Fallback final: detecção automática por hostname
+
+---
+
+## 🔄 Fluxo OAuth2 (Não Funcional)
+
+**NOTA**: O fluxo OAuth2 não está funcional. Apenas "Token Direto (Legacy)" funciona.
+
+### Fluxo Completo (Documentação de Referência)
 
 #### 1. Configuração Inicial (Client Credentials)
 
@@ -686,16 +710,11 @@ O sistema registra logs detalhados:
    - Badge de status (válido/inválido/erro)
    - Badge de ambiente (sandbox/produção)
 
-2. **TokenForm**
+2. **TokenForm** (Modal)
    - Seleção de ambiente (sandbox/produção)
-   - Modo OAuth2:
-     - Campo Client ID
-     - Campo Client Secret (password)
-     - Campo CEP de Origem (opcional)
-   - Modo Token Direto:
-     - Campo Token (password)
-     - Seleção de tipo (bearer/basic/api_key)
-     - Campo CEP de Origem (opcional)
+   - Campo Token (password) - Token direto do Melhor Envio
+   - Campo CEP de Origem (opcional)
+   - Tipo de token sempre será "Bearer" (definido automaticamente)
 
 3. **TokenStatusBadge**
    - Verde: Token válido
@@ -707,11 +726,13 @@ O sistema registra logs detalhados:
 
 1. **Adicionar Token**:
    - Clica em "Adicionar" no card da integração
+   - Modal abre com formulário
    - Seleciona ambiente (sandbox/produção)
-   - Escolhe modo (OAuth2 ou Token Direto)
-   - Preenche campos obrigatórios
+   - Preenche campo "Token" com token do Melhor Envio
+   - Opcionalmente, preenche "CEP de Origem"
    - Clica em "Salvar"
-   - Sistema valida e salva no banco
+   - Sistema valida e salva no banco com tipo "Bearer" (automático)
+   - Modal fecha automaticamente
 
 2. **Validar Token**:
    - Clica em "Validar" no card
@@ -720,10 +741,11 @@ O sistema registra logs detalhados:
    - Exibe resultado na interface
 
 3. **Editar Token**:
-   - Clica em "Editar"
-   - Modifica campos desejados
-   - Para OAuth2: pode deixar Client Secret em branco para manter atual
+   - Clica em "Editar" no token desejado
+   - Modal abre com formulário preenchido
+   - Modifica campos desejados (token, CEP de origem)
    - Salva alterações
+   - Modal fecha automaticamente
 
 4. **Deletar Token**:
    - Clica em "Deletar"
@@ -822,12 +844,13 @@ MELHOR_ENVIO_REDIRECT_URI=https://pedidos.lojacenario.com.br/api/auth/callback/m
 
 A integração com Melhor Envio é robusta e completa, oferecendo:
 
-✅ **Autenticação flexível** (OAuth2 e Token Direto)  
-✅ **Renovação automática** de tokens  
+✅ **Autenticação via Token Direto** (único método funcional)  
+✅ **Tipo de token Bearer** (definido automaticamente)  
+✅ **Seleção de ambiente ativo** (Sandbox/Produção)  
 ✅ **Validação inteligente** (GET + POST)  
 ✅ **Cache eficiente** de cotações  
 ✅ **Tratamento de erros** abrangente  
-✅ **Interface administrativa** completa  
+✅ **Interface administrativa** completa com modal para formulários  
 ✅ **Suporte a múltiplos ambientes**  
 ✅ **Logs detalhados** para debug  
 

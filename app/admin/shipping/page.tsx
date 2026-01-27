@@ -52,7 +52,8 @@ interface Product {
 export default function ShippingPage() {
   const [loading, setLoading] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
-  const [environment, setEnvironment] = useState<IntegrationEnvironment>('sandbox')
+  const [activeEnvironment, setActiveEnvironment] = useState<IntegrationEnvironment | null>(null)
+  const [loadingEnv, setLoadingEnv] = useState(true)
   const [formData, setFormData] = useState({
     cep_destino: '',
     peso: '0.3',
@@ -68,6 +69,29 @@ export default function ShippingPage() {
   const [productSearch, setProductSearch] = useState('')
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+
+  // Buscar ambiente ativo ao montar componente
+  useEffect(() => {
+    const fetchActiveEnvironment = async () => {
+      try {
+        const response = await fetch('/api/integrations/active-environment?provider=melhor_envio', {
+          credentials: 'include',
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setActiveEnvironment(data.environment || 'production')
+        } else {
+          setActiveEnvironment('production') // Fallback
+        }
+      } catch (error) {
+        console.warn('Erro ao buscar ambiente ativo, usando produção:', error)
+        setActiveEnvironment('production')
+      } finally {
+        setLoadingEnv(false)
+      }
+    }
+    fetchActiveEnvironment()
+  }, [])
 
   // Carregar produtos ao montar componente
   useEffect(() => {
@@ -127,7 +151,7 @@ export default function ShippingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
-          environment,
+          // environment removido - API usa ambiente ativo automaticamente
         }),
         credentials: 'include',
       })
@@ -208,31 +232,13 @@ export default function ShippingPage() {
               <CardTitle>Dados para Cotação</CardTitle>
               <CardDescription>Preencha os dados para calcular o frete</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <EnvironmentBadge environment={environment} />
-            </div>
+            {activeEnvironment && (
+              <EnvironmentBadge environment={activeEnvironment} className="text-xs" />
+            )}
           </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="environment">Ambiente</Label>
-              <select
-                id="environment"
-                value={environment}
-                onChange={(e) => setEnvironment(e.target.value as IntegrationEnvironment)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                <option value="sandbox">Sandbox (Testes)</option>
-                <option value="production">Produção</option>
-              </select>
-              <p className="text-xs text-muted-foreground">
-                {environment === 'sandbox' 
-                  ? 'Use o ambiente sandbox para testes sem custos reais'
-                  : 'Ambiente de produção - use com cuidado'}
-              </p>
-            </div>
-
             {/* Busca de Produtos */}
             <div className="space-y-2 relative">
               <Label htmlFor="product_search">Buscar Produto (Opcional)</Label>
@@ -404,10 +410,10 @@ export default function ShippingPage() {
               <div>
                 <DialogTitle>Opções de Frete</DialogTitle>
                 <DialogDescription>
-                  Modalidades disponíveis no ambiente {environment === 'sandbox' ? 'Sandbox' : 'Produção'}
+                  Modalidades disponíveis no ambiente {activeEnvironment === 'sandbox' ? 'Sandbox' : 'Produção'}
                 </DialogDescription>
               </div>
-              <EnvironmentBadge environment={environment} />
+              {activeEnvironment && <EnvironmentBadge environment={activeEnvironment} />}
             </div>
           </DialogHeader>
 

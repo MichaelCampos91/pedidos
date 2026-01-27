@@ -1,8 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { TokenStatusBadge } from "./TokenStatusBadge"
 import { EnvironmentBadge } from "./EnvironmentBadge"
 import { TokenForm } from "./TokenForm"
@@ -17,7 +20,8 @@ import {
   AlertCircle
 } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
-import type { IntegrationProvider, IntegrationToken, IntegrationEnvironment, TokenType } from "@/lib/integrations-types"
+import { toast } from "@/lib/toast"
+import type { IntegrationProvider, IntegrationToken, IntegrationEnvironment } from "@/lib/integrations-types"
 
 interface IntegrationCardProps {
   provider: IntegrationProvider
@@ -32,12 +36,11 @@ interface IntegrationCardProps {
     provider: IntegrationProvider
     environment: IntegrationEnvironment
     token_value?: string
-    token_type?: TokenType
-    client_id?: string
-    client_secret?: string
     cep_origem?: string
+    public_key?: string
     additional_data?: Record<string, any>
   }) => Promise<void>
+  onTokensUpdated?: () => void // Callback para recarregar tokens após salvar
   isValidating?: string | null
   isSaving?: boolean
   icon?: React.ReactNode
@@ -53,47 +56,131 @@ export function IntegrationCard({
   onValidate,
   onAdd,
   onSave,
+  onTokensUpdated,
   isValidating,
   isSaving: externalSaving,
   icon
 }: IntegrationCardProps) {
-  const [showForm, setShowForm] = useState(false)
+  const [isModalOpen, setIsModalOpen] = useState(false)
   const [formEnvironment, setFormEnvironment] = useState<IntegrationEnvironment>('production')
   const [editingToken, setEditingToken] = useState<IntegrationToken | null>(null)
   const [internalSaving, setInternalSaving] = useState(false)
+  const [activeEnvironment, setActiveEnvironment] = useState<IntegrationEnvironment | null>(null)
+  const [loadingActiveEnv, setLoadingActiveEnv] = useState(true)
   
   const saving = externalSaving || internalSaving
 
   const hasAnyToken = !!sandboxToken || !!productionToken
   const hasBothTokens = !!sandboxToken && !!productionToken
 
+  // Buscar ambiente ativo ao montar componente e quando tokens mudarem
+  useEffect(() => {
+    const fetchActiveEnvironment = async () => {
+      if (!hasAnyToken) {
+        setLoadingActiveEnv(false)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/integrations/active-environment?provider=${provider}`, {
+          credentials: 'include',
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setActiveEnvironment(data.environment || null)
+        }
+      } catch (error) {
+        console.error('Erro ao buscar ambiente ativo:', error)
+        // Fallback: usar produção se existir, senão sandbox
+        if (productionToken) {
+          setActiveEnvironment('production')
+        } else if (sandboxToken) {
+          setActiveEnvironment('sandbox')
+        }
+      } finally {
+        setLoadingActiveEnv(false)
+      }
+    }
+
+    fetchActiveEnvironment()
+  }, [provider, hasAnyToken, productionToken, sandboxToken])
+
+  // Determinar opções disponíveis para o select
+  const getAvailableEnvironments = (): IntegrationEnvironment[] => {
+    const envs: IntegrationEnvironment[] = []
+    if (sandboxToken) envs.push('sandbox')
+    if (productionToken) envs.push('production')
+    return envs
+  }
+
+  // Determinar ambiente padrão se não houver selecionado
+  const getDefaultEnvironment = (): IntegrationEnvironment => {
+    if (activeEnvironment) return activeEnvironment
+    if (productionToken) return 'production'
+    if (sandboxToken) return 'sandbox'
+    return 'production'
+  }
+
+  const handleEnvironmentChange = async (newEnvironment: IntegrationEnvironment) => {
+    try {
+      const response = await fetch('/api/integrations/active-environment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, environment: newEnvironment }),
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        throw new Error('Erro ao salvar ambiente ativo')
+      }
+
+      setActiveEnvironment(newEnvironment)
+      toast.success(`Ambiente ${newEnvironment === 'sandbox' ? 'Sandbox' : 'Produção'} definido como ativo`)
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao alterar ambiente ativo')
+    }
+  }
+
   const handleAddClick = (environment: IntegrationEnvironment) => {
     setFormEnvironment(environment)
     setEditingToken(null)
-    setShowForm(true)
+    setIsModalOpen(true)
   }
 
   const handleEditClick = (token: IntegrationToken) => {
     setEditingToken(token)
     setFormEnvironment(token.environment)
-    setShowForm(true)
+    setIsModalOpen(true)
   }
 
   const handleSave = async (data: {
     provider: IntegrationProvider
     environment: IntegrationEnvironment
     token_value?: string
-    token_type?: TokenType
-    client_id?: string
-    client_secret?: string
     cep_origem?: string
+    public_key?: string
     additional_data?: Record<string, any>
   }) => {
     setInternalSaving(true)
     try {
       await onSave(data)
-      setShowForm(false)
+      setIsModalOpen(false)
       setEditingToken(null)
+      // Recarregar tokens e ambiente ativo
+      if (onTokensUpdated) {
+        await onTokensUpdated()
+        // Recarregar ambiente ativo após tokens atualizados
+        const response = await fetch(`/api/integrations/active-environment?provider=${provider}`, {
+          credentials: 'include',
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setActiveEnvironment(data.environment || null)
+        }
+      } else {
+        // Fallback: recarregar página se callback não fornecido
+        window.location.reload()
+      }
     } catch (error) {
       console.error('Erro ao salvar token:', error)
       throw error
@@ -112,23 +199,7 @@ export function IntegrationCard({
     const envLabel = environment === 'sandbox' ? 'Sandbox' : 'Produção'
     const isCurrentlyValidating = isValidating === `${provider}-${environment}`
     const hasToken = !!token
-
-    if (showForm && formEnvironment === environment && (!editingToken || editingToken.environment === environment)) {
-      return (
-        <div className="col-span-2">
-          <TokenForm
-            provider={provider}
-            token={editingToken}
-            onSave={handleSave}
-            onCancel={() => {
-              setShowForm(false)
-              setEditingToken(null)
-            }}
-            isSaving={saving}
-          />
-        </div>
-      )
-    }
+    const isActive = activeEnvironment === environment
 
     if (!hasToken) {
       return (
@@ -160,11 +231,23 @@ export function IntegrationCard({
       ? token.token_value 
       : `****${token.token_value.substring(token.token_value.length - 4)}`
 
+    // Para Pagar.me, exibir Public Key se existir
+    const isPagarme = provider === 'pagarme'
+    const publicKey = token.additional_data?.public_key
+    const maskedPublicKey = publicKey 
+      ? `****${publicKey.substring(publicKey.length - 4)}`
+      : null
+
     return (
       <div className="p-4 border rounded-lg space-y-3">
         <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <EnvironmentBadge environment={environment} />
+            {isActive && (
+              <Badge variant="default" className="bg-green-500 hover:bg-green-600">
+                Ativo
+              </Badge>
+            )}
             <TokenStatusBadge status={token.last_validation_status} />
           </div>
           <div className="flex items-center gap-1">
@@ -173,14 +256,15 @@ export function IntegrationCard({
               variant="ghost"
               onClick={() => onValidate(token)}
               disabled={isCurrentlyValidating}
-              className="h-8 w-8 p-0"
-              title="Testar token"
+              className="h-8 px-2"
+              title="Validar token"
             >
               {isCurrentlyValidating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <TestTube className="h-4 w-4" />
+                <TestTube className="h-4 w-4 mr-2" />
               )}
+              <span className="text-xs">Validar</span>
             </Button>
             <Button
               size="sm"
@@ -207,9 +291,18 @@ export function IntegrationCard({
 
         <div className="space-y-2">
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Token</p>
+            <p className="text-xs text-muted-foreground mb-1">
+              {isPagarme ? 'Secret Key' : 'Token'}
+            </p>
             <p className="text-sm font-mono text-foreground">{maskedToken}</p>
           </div>
+
+          {isPagarme && maskedPublicKey && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Public Key</p>
+              <p className="text-sm font-mono text-foreground">{maskedPublicKey}</p>
+            </div>
+          )}
 
           {token.last_validated_at && (
             <div>
@@ -243,43 +336,83 @@ export function IntegrationCard({
     )
   }
 
+  const availableEnvironments = getAvailableEnvironments()
+  const currentActiveEnv = activeEnvironment || getDefaultEnvironment()
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            {icon || <Link2 className="h-5 w-5 text-primary" />}
-            <div>
-              <CardTitle className="text-lg">{providerLabel}</CardTitle>
-              <CardDescription className="mt-1">
-                {hasAnyToken 
-                  ? hasBothTokens 
-                    ? 'Ambos os ambientes configurados'
-                    : sandboxToken 
-                      ? 'Apenas sandbox configurado'
-                      : 'Apenas produção configurado'
-                  : 'Nenhum token configurado'}
-              </CardDescription>
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3 flex-1">
+              {icon || <Link2 className="h-5 w-5 text-primary" />}
+              <div className="flex-1">
+                <CardTitle className="text-lg mb-2">{providerLabel}</CardTitle>
+                <CardDescription className="mt-1">
+                  {hasAnyToken 
+                    ? hasBothTokens 
+                      ? 'Ambos os ambientes configurados'
+                      : sandboxToken 
+                        ? 'Apenas sandbox configurado'
+                        : 'Apenas produção configurado'
+                    : 'Nenhum token configurado'}
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {hasAnyToken && !loadingActiveEnv && (
+                <Select
+                  value={currentActiveEnv}
+                  onValueChange={(value) => handleEnvironmentChange(value as IntegrationEnvironment)}
+                  disabled={availableEnvironments.length === 0}
+                >
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableEnvironments.map((env) => (
+                      <SelectItem key={env} value={env}>
+                        {env === 'sandbox' ? 'Sandbox' : 'Produção'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {hasAnyToken && (
+                <div className="flex items-center gap-1.5">
+                  {sandboxToken?.last_validation_status === 'valid' && (
+                    <div className="h-2 w-2 rounded-full bg-green-500" title="Sandbox válido" />
+                  )}
+                  {productionToken?.last_validation_status === 'valid' && (
+                    <div className="h-2 w-2 rounded-full bg-green-500" title="Produção válido" />
+                  )}
+                </div>
+              )}
             </div>
           </div>
-          {hasAnyToken && (
-            <div className="flex items-center gap-1.5">
-              {sandboxToken?.last_validation_status === 'valid' && (
-                <div className="h-2 w-2 rounded-full bg-green-500" title="Sandbox válido" />
-              )}
-              {productionToken?.last_validation_status === 'valid' && (
-                <div className="h-2 w-2 rounded-full bg-green-500" title="Produção válido" />
-              )}
-            </div>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <TokenRow token={sandboxToken} environment="sandbox" />
-          <TokenRow token={productionToken} environment="production" />
-        </div>
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <TokenRow token={sandboxToken} environment="sandbox" />
+            <TokenRow token={productionToken} environment="production" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <TokenForm
+            provider={provider}
+            token={editingToken}
+            onSave={handleSave}
+            onCancel={() => {
+              setIsModalOpen(false)
+              setEditingToken(null)
+            }}
+            isSaving={saving}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
