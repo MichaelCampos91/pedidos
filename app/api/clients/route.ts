@@ -27,10 +27,10 @@ export async function GET(request: NextRequest) {
     const params: any[] = []
     let paramIndex = 1
 
-    // Busca por texto
+    // Busca por texto (case-insensitive)
     if (search) {
       const searchTerm = `%${search}%`
-      whereClause += ` AND (name LIKE $${paramIndex} OR cpf LIKE $${paramIndex + 1} OR phone LIKE $${paramIndex + 2} OR whatsapp LIKE $${paramIndex + 3})`
+      whereClause += ` AND (name ILIKE $${paramIndex} OR cpf ILIKE $${paramIndex + 1} OR phone ILIKE $${paramIndex + 2} OR whatsapp ILIKE $${paramIndex + 3})`
       params.push(searchTerm, searchTerm, searchTerm, searchTerm)
       paramIndex += 4
     }

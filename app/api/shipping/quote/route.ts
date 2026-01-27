@@ -266,8 +266,17 @@ export async function POST(request: NextRequest) {
         destinationCep: cleanCepDestino,
       })
 
+      // Garantir que todas as opções tenham delivery_range antes de armazenar no cache
+      const optionsForCache = result.options.map(option => ({
+        ...option,
+        delivery_range: option.delivery_range || {
+          min: option.delivery_time,
+          max: option.delivery_time,
+        },
+      }))
+
       // Armazenar no cache apenas opções válidas (após aplicar regras)
-      setCachedQuote(cacheKey, result.options)
+      setCachedQuote(cacheKey, optionsForCache)
 
       return NextResponse.json({
         success: true,

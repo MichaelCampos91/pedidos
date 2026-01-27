@@ -20,7 +20,14 @@ export async function GET(request: NextRequest) {
       [environment]
     )
 
-    return NextResponse.json({ rates: result.rows })
+    // Converter valores DECIMAL do PostgreSQL para números JavaScript
+    const rates = result.rows.map(row => ({
+      ...row,
+      rate_percentage: parseFloat(row.rate_percentage) || 0,
+      installments: parseInt(row.installments) || 0,
+    }))
+
+    return NextResponse.json({ rates })
   } catch (error: any) {
     if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {
       return authErrorResponse(error.message, 401)

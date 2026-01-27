@@ -6,9 +6,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, CreditCard, QrCode, Copy, Check, Clock, AlertCircle, CheckCircle2, XCircle, MessageCircle, Percent, Gift } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
+import { Loader2, CreditCard, QrCode, Copy, Check, Clock, AlertCircle, CheckCircle2, XCircle, MessageCircle, Percent, Gift, MapPin } from "lucide-react"
+import { formatCurrency, formatCPF, formatCNPJ, maskCEP, unmaskCEP } from "@/lib/utils"
 import { toast } from "@/lib/toast"
+import { cepApi } from "@/lib/api"
 
 interface PaymentFormProps {
   orderId: number
@@ -19,10 +20,19 @@ interface PaymentFormProps {
     document: string
     phone: string
   }
+  shippingAddress?: {
+    street: string
+    number: string
+    complement?: string
+    neighborhood: string
+    city: string
+    state: string
+    zip_code: string
+  }
   onSuccess: (transaction: any) => void
 }
 
-export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentFormProps) {
+export function PaymentForm({ orderId, total, customer, shippingAddress, onSuccess }: PaymentFormProps) {
   const [paymentMethod, setPaymentMethod] = useState<'pix' | 'credit_card' | null>(null)
   const [loading, setLoading] = useState(false)
   const [pixData, setPixData] = useState<any>(null)
@@ -39,8 +49,24 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
     card_holder_name: '',
     card_expiration_date: '',
     card_cvv: '',
+    card_holder_document: '',
+    billing_address: '',
   })
   const [publicKey, setPublicKey] = useState<string | null>(null)
+  
+  // Estados para billing address e holder document
+  const [useSameBillingAddress, setUseSameBillingAddress] = useState(true)
+  const [cardHolderDocument, setCardHolderDocument] = useState(customer.document || '')
+  const [billingAddress, setBillingAddress] = useState({
+    zip_code: '',
+    street: '',
+    number: '',
+    complement: '',
+    neighborhood: '',
+    city: '',
+    state: '',
+  })
+  const [searchingCep, setSearchingCep] = useState(false)
   
   // Estados para PIX melhorado
   const [countdown, setCountdown] = useState(600) // 10 minutos em segundos
@@ -54,6 +80,47 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
   // Estados para desconto PIX e juros
   const [pixDiscount, setPixDiscount] = useState<{ discount: number; finalValue: number } | null>(null)
   const [installmentRates, setInstallmentRates] = useState<Array<{ installments: number; rate: number; totalWithInterest: number; installmentValue: number; hasInterest: boolean }>>([])
+
+  // Função para formatar CPF/CNPJ dinamicamente
+  const formatDocument = (value: string): string => {
+    const cleaned = value.replace(/\D/g, '')
+    if (cleaned.length <= 11) {
+      return formatCPF(cleaned)
+    }
+    return formatCNPJ(cleaned)
+  }
+
+  // Função para buscar CEP
+  const handleCepSearch = async () => {
+    const cleanCep = unmaskCEP(billingAddress.zip_code)
+    if (cleanCep.length !== 8) {
+      toast.warning('CEP inválido. Digite 8 dígitos.')
+      return
+    }
+
+    setSearchingCep(true)
+    try {
+      const cepData = await cepApi.search(cleanCep)
+      setBillingAddress((prev) => ({
+        ...prev,
+        street: cepData.street || '',
+        neighborhood: cepData.neighborhood || '',
+        city: cepData.city || '',
+        state: cepData.state || '',
+      }))
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao buscar CEP')
+    } finally {
+      setSearchingCep(false)
+    }
+  }
+
+  // Desmarcar checkbox se não houver shippingAddress
+  useEffect(() => {
+    if (!shippingAddress && useSameBillingAddress) {
+      setUseSameBillingAddress(false)
+    }
+  }, [shippingAddress, useSameBillingAddress])
 
 
   // Validar formulário de cartão em tempo real
@@ -99,24 +166,55 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
       cvvError = 'CVV deve ter 3 ou 4 dígitos'
     }
 
+    // Validar CPF/CNPJ do titular
+    const cleanDocument = cardHolderDocument.replace(/\D/g, '')
+    let holderDocumentError = ''
+    if (cardHolderDocument && cleanDocument.length !== 11 && cleanDocument.length !== 14) {
+      holderDocumentError = 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 dígitos'
+    }
+
+    // Validar endereço de cobrança (se não usar mesmo endereço)
+    let billingAddressError = ''
+    if (!useSameBillingAddress) {
+      const cleanCep = unmaskCEP(billingAddress.zip_code)
+      if (!cleanCep || cleanCep.length !== 8) {
+        billingAddressError = 'CEP inválido'
+      } else if (!billingAddress.street || !billingAddress.number || !billingAddress.city || !billingAddress.state) {
+        billingAddressError = 'Preencha todos os campos obrigatórios do endereço'
+      } else if (billingAddress.state.length !== 2) {
+        billingAddressError = 'Estado deve ter 2 caracteres (UF)'
+      }
+    } else if (useSameBillingAddress && !shippingAddress) {
+      // Se marcar para usar mesmo endereço mas não há shippingAddress, precisa informar endereço diferente
+      billingAddressError = 'Endereço de entrega não disponível. Informe o endereço de cobrança.'
+    }
+
     setFieldErrors({
       card_number: cardNumberError,
       card_holder_name: holderNameError,
       card_expiration_date: expirationError,
       card_cvv: cvvError,
+      card_holder_document: holderDocumentError,
+      billing_address: billingAddressError,
     })
+
+    const isValidBilling = (useSameBillingAddress && shippingAddress) || (!useSameBillingAddress && !billingAddressError)
 
     setIsCardFormValid(
       isValidCardNumber &&
       isValidHolderName &&
       isValidExpiration &&
       isValidCvv &&
+      (cleanDocument.length === 11 || cleanDocument.length === 14) &&
+      isValidBilling &&
       !cardNumberError &&
       !holderNameError &&
       !expirationError &&
-      !cvvError
+      !cvvError &&
+      !holderDocumentError &&
+      !billingAddressError
     )
-  }, [cardData])
+  }, [cardData, cardHolderDocument, useSameBillingAddress, billingAddress, shippingAddress])
 
   // Detectar ambiente: localhost = sandbox, produção = production
   const [activeEnvironment, setActiveEnvironment] = useState<'sandbox' | 'production'>('production')
@@ -517,7 +615,7 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         const errorDetails = data.error || data.details || ''
         const errorMsg = errorDetails 
           ? `QR Code não foi gerado: ${errorDetails}`
-          : 'QR Code não foi gerado. Verifique a configuração do Pagar.me e se o token está correto para o ambiente ' + environment + '.'
+          : `QR Code não foi gerado. Verifique a configuração do Pagar.me e se o token está correto para o ambiente ${activeEnvironment}.`
         throw new Error(errorMsg)
       }
 
@@ -644,6 +742,42 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         phone: customer.phone,
       }
 
+      // Preparar dados de billing address
+      let billingData = null
+      if (useSameBillingAddress && shippingAddress) {
+        // Usar endereço de entrega
+        billingData = {
+          address: {
+            street: shippingAddress.street,
+            number: shippingAddress.number,
+            complement: shippingAddress.complement || '',
+            neighborhood: shippingAddress.neighborhood,
+            city: shippingAddress.city,
+            state: shippingAddress.state,
+            zip_code: shippingAddress.zip_code.replace(/\D/g, ''),
+          },
+        }
+      } else if (!useSameBillingAddress && billingAddress.zip_code) {
+        // Usar endereço de cobrança informado
+        const cleanCep = unmaskCEP(billingAddress.zip_code)
+        if (cleanCep.length === 8 && billingAddress.street && billingAddress.number && billingAddress.city && billingAddress.state) {
+          billingData = {
+            address: {
+              street: billingAddress.street,
+              number: billingAddress.number,
+              complement: billingAddress.complement || '',
+              neighborhood: billingAddress.neighborhood || '',
+              city: billingAddress.city,
+              state: billingAddress.state.toUpperCase(),
+              zip_code: cleanCep,
+            },
+          }
+        }
+      }
+
+      // Preparar documento do titular (limpar formatação)
+      const cleanHolderDocument = cardHolderDocument.replace(/\D/g, '')
+
       const selectedRate = installmentRates.find(r => r.installments === cardData.installments)
       const finalAmount = selectedRate && selectedRate.hasInterest ? selectedRate.totalWithInterest : total
 
@@ -655,9 +789,11 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
           payment_method: 'credit_card',
           environment: activeEnvironment,
           customer: customerData,
+          billing: billingData,
           credit_card: {
             card_token: cardToken,
             installments: cardData.installments,
+            holder_document: cleanHolderDocument || undefined,
           },
         }),
       })
@@ -991,6 +1127,189 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
             />
             {fieldErrors.card_holder_name && (
               <p className="text-sm text-destructive">{fieldErrors.card_holder_name}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="card_holder_document">Documento do titular do cartão</Label>
+            <Input
+              id="card_holder_document"
+              placeholder="CPF ou CNPJ"
+              value={cardHolderDocument}
+              onChange={(e) => {
+                const formatted = formatDocument(e.target.value)
+                setCardHolderDocument(formatted)
+                // Limpar erro ao digitar
+                if (fieldErrors.card_holder_document) {
+                  setFieldErrors((prev) => ({ ...prev, card_holder_document: '' }))
+                }
+              }}
+              maxLength={18}
+              className={fieldErrors.card_holder_document ? 'border-destructive' : ''}
+            />
+            {fieldErrors.card_holder_document && (
+              <p className="text-sm text-destructive">{fieldErrors.card_holder_document}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              CPF ou CNPJ do titular do cartão (pode ser diferente do cliente)
+            </p>
+          </div>
+
+          {/* Seção de Endereço de Cobrança */}
+          <div className="space-y-4 pt-4 border-t">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold">Endereço de Cobrança</h3>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              O endereço de cobrança ajuda na aprovação do pagamento
+            </p>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="use_same_billing"
+                checked={useSameBillingAddress}
+                onChange={(e) => setUseSameBillingAddress(e.target.checked)}
+                disabled={!shippingAddress}
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+              <Label htmlFor="use_same_billing" className={shippingAddress ? "cursor-pointer" : "cursor-not-allowed opacity-50"}>
+                Usar o mesmo endereço de entrega
+                {!shippingAddress && " (não disponível)"}
+              </Label>
+            </div>
+            
+            {!shippingAddress && useSameBillingAddress && (
+              <div className="p-3 rounded-md bg-yellow-50 text-yellow-800 text-sm border border-yellow-200">
+                Endereço de entrega não disponível. Por favor, informe o endereço de cobrança abaixo.
+              </div>
+            )}
+
+            {(!useSameBillingAddress || !shippingAddress) && (
+              <div className="space-y-4 pt-2">
+                {fieldErrors.billing_address && (
+                  <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+                    {fieldErrors.billing_address}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="billing_cep">CEP *</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="billing_cep"
+                        value={billingAddress.zip_code}
+                        onChange={(e) => {
+                          const formatted = maskCEP(e.target.value)
+                          setBillingAddress((prev) => ({ ...prev, zip_code: formatted }))
+                          // Limpar erro ao digitar
+                          if (fieldErrors.billing_address) {
+                            setFieldErrors((prev) => ({ ...prev, billing_address: '' }))
+                          }
+                        }}
+                        placeholder="00000-000"
+                        maxLength={9}
+                        disabled={searchingCep}
+                        className={fieldErrors.billing_address ? 'border-destructive' : ''}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleCepSearch}
+                        disabled={searchingCep || unmaskCEP(billingAddress.zip_code).length !== 8}
+                      >
+                        {searchingCep ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Buscar'
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="billing_number">Número *</Label>
+                    <Input
+                      id="billing_number"
+                      value={billingAddress.number}
+                      onChange={(e) =>
+                        setBillingAddress((prev) => ({ ...prev, number: e.target.value }))
+                      }
+                      placeholder="123"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="billing_street">Rua *</Label>
+                  <Input
+                    id="billing_street"
+                    value={billingAddress.street}
+                    onChange={(e) =>
+                      setBillingAddress((prev) => ({ ...prev, street: e.target.value }))
+                    }
+                    placeholder="Rua, Avenida, etc."
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="billing_complement">Complemento</Label>
+                    <Input
+                      id="billing_complement"
+                      value={billingAddress.complement}
+                      onChange={(e) =>
+                        setBillingAddress((prev) => ({ ...prev, complement: e.target.value }))
+                      }
+                      placeholder="Apartamento, bloco, etc."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="billing_neighborhood">Bairro</Label>
+                    <Input
+                      id="billing_neighborhood"
+                      value={billingAddress.neighborhood}
+                      onChange={(e) =>
+                        setBillingAddress((prev) => ({ ...prev, neighborhood: e.target.value }))
+                      }
+                      placeholder="Bairro"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="billing_city">Cidade *</Label>
+                    <Input
+                      id="billing_city"
+                      value={billingAddress.city}
+                      onChange={(e) =>
+                        setBillingAddress((prev) => ({ ...prev, city: e.target.value }))
+                      }
+                      placeholder="Cidade"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="billing_state">Estado *</Label>
+                    <Input
+                      id="billing_state"
+                      value={billingAddress.state}
+                      onChange={(e) =>
+                        setBillingAddress((prev) => ({
+                          ...prev,
+                          state: e.target.value.toUpperCase().substring(0, 2),
+                        }))
+                      }
+                      placeholder="SP"
+                      maxLength={2}
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 

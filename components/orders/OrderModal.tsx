@@ -39,11 +39,11 @@ const STATUS_OPTIONS = [
 ]
 
 const STEPS = [
-  { id: 1, name: "Cliente", description: "Selecione o cliente" },
-  { id: 2, name: "Itens", description: "Adicione os itens" },
-  { id: 3, name: "Endereço", description: "Confirme o endereço" },
-  { id: 4, name: "Frete", description: "Escolha o frete" },
-  { id: 5, name: "Revisão", description: "Revise o pedido" },
+  { id: 1, name: "Cliente", description: "Selecione o cliente", icon: User },
+  { id: 2, name: "Itens", description: "Adicione os itens", icon: Package },
+  { id: 3, name: "Endereço", description: "Confirme o endereço", icon: MapPin },
+  { id: 4, name: "Frete", description: "Escolha o frete", icon: Truck },
+  { id: 5, name: "Revisão", description: "Revise o pedido", icon: FileText },
 ]
 
 interface OrderModalProps {

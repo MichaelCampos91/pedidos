@@ -4,7 +4,21 @@
 export function formatShippingPrice(price: string | number | undefined | null): string {
   const value = typeof price === 'string' ? parseFloat(price) : (price || 0)
   
-  if (isNaN(value) || !isFinite(value) || value <= 0) {
+  // Se o valor é inválido (NaN ou não finito), retornar "Indisponível"
+  if (isNaN(value) || !isFinite(value)) {
+    return 'Indisponível'
+  }
+  
+  // Se o valor é 0, retornar "R$ 0,00" (frete grátis)
+  if (value === 0) {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    }).format(0)
+  }
+  
+  // Se o valor é negativo, retornar "Indisponível"
+  if (value < 0) {
     return 'Indisponível'
   }
   

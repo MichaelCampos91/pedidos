@@ -56,6 +56,7 @@ interface CreateTransactionParams {
     card_token?: string
     installments?: number
     statement_descriptor?: string
+    holder_document?: string // CPF/CNPJ do titular do cartão
   }
   items?: Array<{
     id: number
@@ -606,10 +607,11 @@ export async function createCreditCardTransaction(
           statement_descriptor: params.credit_card.statement_descriptor || 'PEDIDO',
           // v5: card_token explícito no nível de credit_card
           card_token: params.credit_card.card_token,
-          // card pode conter outros dados (id/token) e o billing_address
+          // card pode conter outros dados (id/token), billing_address e holder_document
           card: {
             ...(cardField || {}),
             ...(billingAddress ? { billing_address: billingAddress } : {}),
+            ...(params.credit_card.holder_document ? { holder_document: params.credit_card.holder_document } : {}),
           },
         },
       },

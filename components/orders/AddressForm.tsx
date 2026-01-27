@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Loader2, MapPin, Search } from "lucide-react"
 import { cepApi } from "@/lib/api"
-import { cn } from "@/lib/utils"
+import { cn, maskCEP, unmaskCEP } from "@/lib/utils"
 
 interface AddressFormData {
   cep: string
@@ -47,7 +47,7 @@ export function AddressForm({
   const [error, setError] = useState<string | null>(null)
 
   const handleCepSearch = async () => {
-    const cleanCep = formData.cep.replace(/\D/g, "")
+    const cleanCep = unmaskCEP(formData.cep)
     if (cleanCep.length !== 8) {
       setError("CEP inválido. Digite 8 dígitos.")
       return
@@ -57,7 +57,7 @@ export function AddressForm({
     setError(null)
 
     try {
-      const cepData = await cepApi.search(formData.cep)
+      const cepData = await cepApi.search(cleanCep)
       setFormData((prev) => ({
         ...prev,
         street: cepData.street || "",
@@ -89,7 +89,7 @@ export function AddressForm({
       return
     }
 
-    const cleanCep = formData.cep.replace(/\D/g, "")
+    const cleanCep = unmaskCEP(formData.cep)
     if (cleanCep.length !== 8) {
       setError("CEP inválido")
       return
@@ -135,8 +135,7 @@ export function AddressForm({
               id="cep"
               value={formData.cep}
               onChange={(e) => {
-                const value = e.target.value.replace(/\D/g, "")
-                const formatted = value.replace(/(\d{5})(\d)/, "$1-$2")
+                const formatted = maskCEP(e.target.value)
                 handleInputChange("cep", formatted)
               }}
               placeholder="00000-000"

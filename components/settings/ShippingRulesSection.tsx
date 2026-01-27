@@ -5,14 +5,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RuleModal } from "./RuleModal"
-import { Truck, Plus, Edit, Trash2, Loader2 } from "lucide-react"
+import { Truck, Plus, Edit, Trash2, Loader2, Gift, Percent, Clock } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 
 export function ShippingRulesSection() {
   const [loading, setLoading] = useState(false)
   const [rules, setRules] = useState<any[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<any>(null)
+  const [newRuleType, setNewRuleType] = useState<'free_shipping' | 'discount' | 'surcharge' | undefined>(undefined)
 
   useEffect(() => {
     loadRules()
@@ -53,8 +55,10 @@ export function ShippingRulesSection() {
       }
 
       await loadRules()
-    } catch (error) {
+      toast.success(ruleData.id ? 'Regra atualizada com sucesso!' : 'Regra criada com sucesso!')
+    } catch (error: any) {
       console.error('Erro ao salvar regra:', error)
+      toast.error(error.message || 'Erro ao salvar regra')
       throw error
     }
   }
@@ -75,20 +79,31 @@ export function ShippingRulesSection() {
       }
 
       await loadRules()
-    } catch (error) {
+      toast.success('Regra deletada com sucesso!')
+    } catch (error: any) {
       console.error('Erro ao deletar regra:', error)
-      alert('Erro ao deletar regra')
+      toast.error(error.message || 'Erro ao deletar regra')
     }
   }
 
   const handleEdit = (rule: any) => {
     setEditingRule(rule)
+    setNewRuleType(undefined)
     setModalOpen(true)
   }
 
-  const handleNew = () => {
+  const handleNew = (ruleType?: 'free_shipping' | 'discount' | 'surcharge') => {
     setEditingRule(null)
+    setNewRuleType(ruleType)
     setModalOpen(true)
+  }
+
+  const handleModalClose = (open: boolean) => {
+    setModalOpen(open)
+    if (!open) {
+      setEditingRule(null)
+      setNewRuleType(undefined)
+    }
   }
 
   const getRuleTypeLabel = (type: string) => {
@@ -102,19 +117,53 @@ export function ShippingRulesSection() {
   }
 
   const getConditionLabel = (rule: any) => {
-    switch (rule.condition_type) {
-      case 'all':
-        return 'Para todos'
-      case 'min_value':
-        return `Valor mínimo: ${formatCurrency(rule.condition_value?.min_value || 0)}`
-      case 'states':
-        const states = rule.condition_value?.states || []
-        return `Estados: ${states.join(', ')}`
-      case 'shipping_methods':
-        return 'Modalidades específicas'
-      default:
-        return rule.condition_type
+    const conditionValue = rule.condition_value || {}
+    const conditions: string[] = []
+
+    // Se condition_type é 'all' e não há condições específicas, retornar "Para todos"
+    if (rule.condition_type === 'all' && 
+        !conditionValue.min_value && 
+        (!conditionValue.states || conditionValue.states.length === 0) &&
+        (!conditionValue.shipping_methods || conditionValue.shipping_methods.length === 0) &&
+        (!rule.shipping_methods || rule.shipping_methods.length === 0)) {
+      return 'Para todos'
     }
+
+    // Verificar valor mínimo
+    if (conditionValue.min_value !== undefined && conditionValue.min_value !== null) {
+      conditions.push(`Valor mínimo: ${formatCurrency(conditionValue.min_value)}`)
+    }
+
+    // Verificar estados
+    if (conditionValue.states && Array.isArray(conditionValue.states) && conditionValue.states.length > 0) {
+      conditions.push(`Estados: ${conditionValue.states.join(', ')}`)
+    }
+
+    // Verificar modalidades de frete
+    const shippingMethods = conditionValue.shipping_methods || rule.shipping_methods
+    if (shippingMethods && Array.isArray(shippingMethods) && shippingMethods.length > 0) {
+      conditions.push(`Modalidades: ${shippingMethods.length} selecionada(s)`)
+    }
+
+    // Se não há condições específicas, usar fallback baseado em condition_type
+    if (conditions.length === 0) {
+      switch (rule.condition_type) {
+        case 'all':
+          return 'Para todos'
+        case 'min_value':
+          return `Valor mínimo: ${formatCurrency(conditionValue.min_value || 0)}`
+        case 'states':
+          const states = conditionValue.states || []
+          return `Estados: ${states.join(', ')}`
+        case 'shipping_methods':
+          return 'Modalidades específicas'
+        default:
+          return rule.condition_type || 'Sem condições'
+      }
+    }
+
+    // Retornar todas as condições separadas por " • "
+    return conditions.join(' • ')
   }
 
   const getDiscountLabel = (rule: any) => {
@@ -151,7 +200,7 @@ export function ShippingRulesSection() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Truck className="h-5 w-5" />
+            <Gift className="h-5 w-5 text-green-600" />
             Frete Grátis
           </CardTitle>
           <CardDescription>
@@ -204,17 +253,20 @@ export function ShippingRulesSection() {
               ))}
             </div>
           )}
-          <Button onClick={handleNew} variant="outline">
+          <Button onClick={() => handleNew('free_shipping')} variant="outline">
             <Plus className="mr-2 h-4 w-4" />
             Nova Regra de Frete Grátis
           </Button>
         </CardContent>
       </Card>
 
-      {/* Desconto/Acréscimo */}
-      <Card>
+      {/* Desconto/Acréscimo - OCULTO */}
+      <Card className="hidden">
         <CardHeader>
-          <CardTitle>Desconto/Acréscimo no Frete</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Percent className="h-5 w-5 text-blue-600" />
+            Desconto/Acréscimo no Frete
+          </CardTitle>
           <CardDescription>
             Configure descontos ou acréscimos no valor do frete
           </CardDescription>
@@ -265,7 +317,7 @@ export function ShippingRulesSection() {
               ))}
             </div>
           )}
-          <Button onClick={handleNew} variant="outline">
+          <Button onClick={() => handleNew()} variant="outline">
             <Plus className="mr-2 h-4 w-4" />
             Nova Regra de Desconto/Acréscimo
           </Button>
@@ -276,7 +328,10 @@ export function ShippingRulesSection() {
       {productionRules.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Prazo de Produção</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-orange-600" />
+              Prazo de Produção
+            </CardTitle>
             <CardDescription>
               Regras de prazo de produção configuradas
             </CardDescription>
@@ -326,9 +381,10 @@ export function ShippingRulesSection() {
 
       <RuleModal
         open={modalOpen}
-        onOpenChange={setModalOpen}
+        onOpenChange={handleModalClose}
         rule={editingRule}
         onSave={handleSaveRule}
+        defaultRuleType={newRuleType}
       />
     </div>
   )

@@ -73,3 +73,79 @@ export function validateCPF(cpf: string): boolean {
   
   return true
 }
+
+/**
+ * Aplica máscara de telefone brasileiro com código do país
+ * Formato: +55 (99) 99999-9999 ou +55 (99) 9999-9999
+ */
+export function maskPhone(value: string): string {
+  if (!value) return ''
+  
+  const cleaned = value.replace(/\D/g, '')
+  // Remove código do país se presente
+  const phone = cleaned.startsWith('55') ? cleaned.slice(2) : cleaned
+  
+  if (phone.length === 0) {
+    return '+55 ('
+  } else if (phone.length <= 2) {
+    return `+55 (${phone}`
+  } else if (phone.length <= 6) {
+    return `+55 (${phone.slice(0, 2)}) ${phone.slice(2)}`
+  } else if (phone.length <= 10) {
+    // Telefone fixo: +55 (99) 9999-9999
+    return `+55 (${phone.slice(0, 2)}) ${phone.slice(2, 6)}-${phone.slice(6, 10)}`
+  } else {
+    // Celular: +55 (99) 99999-9999
+    return `+55 (${phone.slice(0, 2)}) ${phone.slice(2, 7)}-${phone.slice(7, 11)}`
+  }
+}
+
+/**
+ * Remove máscara de telefone, retornando apenas números
+ */
+export function unmaskPhone(value: string): string {
+  return value.replace(/\D/g, '')
+}
+
+/**
+ * Aplica máscara de CEP
+ * Formato: 99999-999
+ */
+export function maskCEP(value: string): string {
+  if (!value) return ''
+  
+  const cleaned = value.replace(/\D/g, '')
+  if (cleaned.length <= 5) {
+    return cleaned
+  }
+  return `${cleaned.slice(0, 5)}-${cleaned.slice(5, 8)}`
+}
+
+/**
+ * Remove máscara de CEP, retornando apenas números
+ */
+export function unmaskCEP(value: string): string {
+  return value.replace(/\D/g, '')
+}
+
+/**
+ * Capitaliza primeira letra de cada palavra
+ * Exemplo: "michael campos" -> "Michael Campos"
+ */
+export function capitalizeName(value: string): string {
+  if (!value) return ''
+  
+  return value
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+    .trim()
+}
+
+/**
+ * Converte string para maiúsculas
+ */
+export function toUpperCase(value: string): string {
+  return value.toUpperCase()
+}

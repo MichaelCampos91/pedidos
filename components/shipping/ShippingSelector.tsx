@@ -23,6 +23,7 @@ export interface ShippingOption {
     max: number
   }
   packages: number
+  originalPrice?: number  // Preço original antes do frete grátis
 }
 
 interface ShippingSelectorProps {
@@ -265,9 +266,20 @@ export function ShippingSelector({
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold">
-                  {formatShippingPrice(option.price)}
-                </p>
+                {option.originalPrice !== undefined && optionPrice === 0 ? (
+                  <div>
+                    <p className="text-sm text-muted-foreground line-through">
+                      {formatShippingPrice(option.originalPrice.toString())}
+                    </p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {formatShippingPrice(option.price)}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-2xl font-bold">
+                    {formatShippingPrice(option.price)}
+                  </p>
+                )}
                 {option.packages > 1 && (
                   <p className="text-xs text-muted-foreground">
                     {option.packages} volumes

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Loader2, Edit2, Save, X } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 import type { IntegrationEnvironment } from "@/lib/integrations-types"
 
 interface InstallmentRate {
@@ -35,9 +36,20 @@ export function InstallmentRatesTable({
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
 
+  // Função helper para garantir que rate_percentage seja sempre um número
+  const ensureNumber = (value: any): number => {
+    if (typeof value === 'number') return value
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value)
+      return isNaN(parsed) ? 0 : parsed
+    }
+    return 0
+  }
+
   const handleEdit = (rate: InstallmentRate) => {
     setEditingId(rate.id)
-    setEditValue(rate.rate_percentage.toString())
+    const ratePercentage = ensureNumber(rate.rate_percentage)
+    setEditValue(ratePercentage.toString())
   }
 
   const handleSave = async (rateId: number) => {
@@ -45,7 +57,8 @@ export function InstallmentRatesTable({
     try {
       const newRate = parseFloat(editValue)
       if (isNaN(newRate) || newRate < 0) {
-        alert('Valor inválido')
+        toast.error('Valor inválido. Digite um número maior ou igual a zero.')
+        setLoading(false)
         return
       }
 
@@ -119,15 +132,19 @@ export function InstallmentRatesTable({
           </TableHeader>
           <TableBody>
             {rates.map((rate) => {
-              const totalWithInterest = exampleValue * (1 + rate.rate_percentage / 100)
-              const installmentValue = totalWithInterest / rate.installments
+              // Garantir que rate_percentage seja sempre um número
+              const ratePercentage = ensureNumber(rate.rate_percentage)
+              const installments = ensureNumber(rate.installments)
+              
+              const totalWithInterest = exampleValue * (1 + ratePercentage / 100)
+              const installmentValue = totalWithInterest / installments
               const isEditing = editingId === rate.id
 
               return (
                 <TableRow key={rate.id}>
                   <TableCell className="font-medium">
-                    {rate.installments}x
-                    {rate.rate_percentage === 0 && (
+                    {installments}x
+                    {ratePercentage === 0 && (
                       <Badge variant="outline" className="ml-2 bg-green-50 text-green-700 border-green-200">
                         Sem juros
                       </Badge>
@@ -144,7 +161,7 @@ export function InstallmentRatesTable({
                         className="w-24"
                       />
                     ) : (
-                      rate.rate_percentage.toFixed(2)
+                      ratePercentage.toFixed(2)
                     )}
                   </TableCell>
                   <TableCell>{formatCurrency(totalWithInterest)}</TableCell>

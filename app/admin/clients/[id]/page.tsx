@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, Save, Plus, Trash2 } from "lucide-react"
 import { clientsApi, cepApi } from "@/lib/api"
-import { formatCPF, formatCNPJ, formatPhone } from "@/lib/utils"
+import { formatCPF, formatCNPJ, formatPhone, maskPhone, maskCEP, capitalizeName, unmaskPhone, unmaskCEP } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 
 export default function ClientFormPage() {
@@ -40,12 +40,12 @@ export default function ClientFormPage() {
       setLoadingData(true)
       const client = await clientsApi.get(parseInt(id))
       setFormData({
-        cpf: client.cpf || '',
-        cnpj: client.cnpj || '',
+        cpf: client.cpf ? formatCPF(client.cpf) : '',
+        cnpj: client.cnpj ? formatCNPJ(client.cnpj) : '',
         name: client.name || '',
         email: client.email || '',
-        phone: client.phone || '',
-        whatsapp: client.whatsapp || '',
+        phone: client.phone ? maskPhone(client.phone) : '',
+        whatsapp: client.whatsapp ? maskPhone(client.whatsapp) : '',
         addresses: client.addresses || []
       })
     } catch (error) {
@@ -60,10 +60,23 @@ export default function ClientFormPage() {
     setLoading(true)
 
     try {
+      // Preparar dados para envio (limpar máscaras)
+      const dataToSend = {
+        ...formData,
+        cpf: formData.cpf.replace(/\D/g, ''),
+        cnpj: formData.cnpj ? formData.cnpj.replace(/\D/g, '') : '',
+        phone: formData.phone ? unmaskPhone(formData.phone) : '',
+        whatsapp: formData.whatsapp ? unmaskPhone(formData.whatsapp) : '',
+        addresses: formData.addresses.map(addr => ({
+          ...addr,
+          cep: addr.cep ? unmaskCEP(addr.cep) : ''
+        }))
+      }
+
       if (isNew) {
-        await clientsApi.create(formData)
+        await clientsApi.create(dataToSend)
       } else {
-        await clientsApi.update(parseInt(id), formData)
+        await clientsApi.update(parseInt(id), dataToSend)
       }
       router.push('/admin/clients')
     } catch (error: any) {
@@ -74,13 +87,14 @@ export default function ClientFormPage() {
 
   const handleCepSearch = async (index: number) => {
     const address = formData.addresses[index]
-    if (!address.cep || address.cep.replace(/\D/g, '').length !== 8) {
+    const cleanCep = unmaskCEP(address.cep)
+    if (!cleanCep || cleanCep.length !== 8) {
       toast.warning('CEP inválido')
       return
     }
 
     try {
-      const cepData = await cepApi.search(address.cep)
+      const cepData = await cepApi.search(cleanCep)
       const newAddresses = [...formData.addresses]
       newAddresses[index] = {
         ...newAddresses[index],
@@ -140,13 +154,13 @@ export default function ClientFormPage() {
             <CardDescription>Informações básicas do cliente</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="cpf">CPF *</Label>
                 <Input
                   id="cpf"
                   value={formData.cpf}
-                  onChange={(e) => setFormData({ ...formData, cpf: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, cpf: formatCPF(e.target.value) })}
                   placeholder="000.000.000-00"
                   required
                 />
@@ -156,16 +170,16 @@ export default function ClientFormPage() {
                 <Input
                   id="cnpj"
                   value={formData.cnpj}
-                  onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, cnpj: formatCNPJ(e.target.value) })}
                   placeholder="00.000.000/0000-00"
                 />
               </div>
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2">
                 <Label htmlFor="name">Nome *</Label>
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, name: capitalizeName(e.target.value) })}
                   required
                 />
               </div>
@@ -183,8 +197,8 @@ export default function ClientFormPage() {
                 <Input
                   id="phone"
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="(00) 0000-0000"
+                  onChange={(e) => setFormData({ ...formData, phone: maskPhone(e.target.value) })}
+                  placeholder="+55 (00) 0000-0000"
                 />
               </div>
               <div className="space-y-2">
@@ -192,8 +206,8 @@ export default function ClientFormPage() {
                 <Input
                   id="whatsapp"
                   value={formData.whatsapp}
-                  onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })}
-                  placeholder="(00) 00000-0000"
+                  onChange={(e) => setFormData({ ...formData, whatsapp: maskPhone(e.target.value) })}
+                  placeholder="+55 (00) 99999-9999"
                   required
                 />
               </div>
@@ -238,10 +252,11 @@ export default function ClientFormPage() {
                         value={address.cep}
                         onChange={(e) => {
                           const newAddresses = [...formData.addresses]
-                          newAddresses[index].cep = e.target.value
+                          newAddresses[index].cep = maskCEP(e.target.value)
                           setFormData({ ...formData, addresses: newAddresses })
                         }}
                         placeholder="00000-000"
+                        maxLength={9}
                       />
                       <Button
                         type="button"
@@ -252,7 +267,7 @@ export default function ClientFormPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="space-y-2 md:col-span-2">
+                  <div className="space-y-2">
                     <Label>Rua</Label>
                     <Input
                       value={address.street}
@@ -270,17 +285,6 @@ export default function ClientFormPage() {
                       onChange={(e) => {
                         const newAddresses = [...formData.addresses]
                         newAddresses[index].number = e.target.value
-                        setFormData({ ...formData, addresses: newAddresses })
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>Complemento</Label>
-                    <Input
-                      value={address.complement}
-                      onChange={(e) => {
-                        const newAddresses = [...formData.addresses]
-                        newAddresses[index].complement = e.target.value
                         setFormData({ ...formData, addresses: newAddresses })
                       }}
                     />
@@ -308,18 +312,29 @@ export default function ClientFormPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Estado</Label>
+                    <Label>UF</Label>
                     <Input
                       value={address.state}
                       onChange={(e) => {
                         const newAddresses = [...formData.addresses]
-                        newAddresses[index].state = e.target.value
+                        newAddresses[index].state = e.target.value.toUpperCase().substring(0, 2)
                         setFormData({ ...formData, addresses: newAddresses })
                       }}
                       maxLength={2}
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 md:col-span-3">
+                    <Label>Complemento</Label>
+                    <Input
+                      value={address.complement}
+                      onChange={(e) => {
+                        const newAddresses = [...formData.addresses]
+                        newAddresses[index].complement = e.target.value
+                        setFormData({ ...formData, addresses: newAddresses })
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-3">
                     <Label>
                       <input
                         type="checkbox"

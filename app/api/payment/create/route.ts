@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
       name: (customer.name || order.client_name || '').trim(),
       email: (customer.email || order.client_email || '').trim(),
       document: cleanCPF,
-      type: 'individual', // CPF sempre é individual
+      type: 'individual' as const, // CPF sempre é individual
       phone: {
         country_code: '55',
         area_code: areaCode,
@@ -199,7 +199,6 @@ export async function POST(request: NextRequest) {
             city: address.city || '',
             state: (address.state || '').toUpperCase().substring(0, 2),
             zip_code: (address.zip_code || address.cep || '').replace(/\D/g, '').substring(0, 8),
-            country: 'BR',
           },
         }
       }

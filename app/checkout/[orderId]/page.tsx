@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { CheckoutSteps } from "@/components/checkout/CheckoutSteps"
 import { PaymentForm } from "@/components/checkout/PaymentForm"
 import { Collapsible, CollapsibleContent, CollapsibleHeader } from "@/components/ui/collapsible"
-import { Loader2, AlertCircle, FileText, CreditCard, CheckCircle2, XCircle, Lock, Truck, MessageCircle } from "lucide-react"
+import { Loader2, AlertCircle, FileText, CreditCard, CheckCircle2, XCircle, Lock, Truck, MessageCircle, Gift } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { calculateDeliveryDate, formatDeliveryDate } from "@/lib/shipping-utils"
@@ -344,10 +344,19 @@ export default function CheckoutPage() {
                 <CardContent className="pt-6">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <Truck className="h-5 w-5 text-primary" />
                         <p className="font-semibold text-lg">{order.shipping_company_name || order.shipping_method}</p>
                         <Badge variant="outline">{order.shipping_method}</Badge>
+                        {totalShipping === 0 && (
+                          <Badge
+                            variant="outline"
+                            className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800"
+                          >
+                            <Gift className="h-3 w-3 mr-1" />
+                            Frete Grátis
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground">
                         Prazo: {order.shipping_delivery_time ? formatDeliveryTime(order.shipping_delivery_time) : 'A calcular'}
@@ -359,9 +368,30 @@ export default function CheckoutPage() {
                       )}
                     </div>
                     <div className="text-right">
-                      <p className="text-2xl font-bold">
-                        {formatCurrency(totalShipping)}
-                      </p>
+                      {shippingData.originalPrice !== undefined && totalShipping === 0 ? (
+                        <div>
+                          <p className="text-sm text-muted-foreground line-through">
+                            {formatCurrency(shippingData.originalPrice)}
+                          </p>
+                          <p className="text-2xl font-bold text-green-600">
+                            {formatCurrency(totalShipping)}
+                          </p>
+                          <p className="text-sm text-green-600 font-medium mt-1">
+                            Você tem frete grátis!
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-2xl font-bold">
+                            {formatCurrency(totalShipping)}
+                          </p>
+                          {totalShipping === 0 && (
+                            <p className="text-sm text-green-600 font-medium mt-1">
+                              Você tem frete grátis!
+                            </p>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -414,6 +444,15 @@ export default function CheckoutPage() {
                     document: order.client_cpf,
                     phone: order.client_whatsapp,
                   }}
+                  shippingAddress={selectedAddress ? {
+                    street: selectedAddress.street,
+                    number: selectedAddress.number,
+                    complement: selectedAddress.complement,
+                    neighborhood: selectedAddress.neighborhood,
+                    city: selectedAddress.city,
+                    state: selectedAddress.state,
+                    zip_code: selectedAddress.cep,
+                  } : undefined}
                   onSuccess={handlePaymentSuccess}
                 />
               </CardContent>

@@ -97,7 +97,12 @@ export async function getInstallmentRates(
        ORDER BY installments ASC`,
       [environment]
     )
-    return result.rows
+    // Converter valores DECIMAL do PostgreSQL para números JavaScript
+    return result.rows.map(row => ({
+      ...row,
+      rate_percentage: parseFloat(row.rate_percentage) || 0,
+      installments: parseInt(row.installments) || 0,
+    }))
   } catch (error) {
     console.error('[Payment Rules] Erro ao buscar taxas de parcelamento:', error)
     return []
@@ -119,7 +124,13 @@ export async function getInstallmentRate(
       [installments, environment]
     )
     if (result.rows.length > 0) {
-      return result.rows[0]
+      const row = result.rows[0]
+      // Converter valores DECIMAL do PostgreSQL para números JavaScript
+      return {
+        ...row,
+        rate_percentage: parseFloat(row.rate_percentage) || 0,
+        installments: parseInt(row.installments) || 0,
+      }
     }
     return null
   } catch (error) {
@@ -165,7 +176,7 @@ export async function calculateInstallmentTotal(
     }
   }
 
-  const rate = parseFloat(rateData.rate_percentage.toString())
+  const rate = rateData.rate_percentage // Já convertido para número em getInstallmentRate
   const totalWithInterest = originalValue * (1 + rate / 100)
   const installmentValue = totalWithInterest / installments
   const interestAmount = totalWithInterest - originalValue
@@ -199,7 +210,7 @@ export async function calculateAllInstallments(
 
   for (let i = 1; i <= maxInstallments; i++) {
     const rateData = rates.find(r => r.installments === i)
-    const rate = rateData ? parseFloat(rateData.rate_percentage.toString()) : 0
+    const rate = rateData ? rateData.rate_percentage : 0 // Já convertido para número em getInstallmentRates
     const totalWithInterest = originalValue * (1 + rate / 100)
     const installmentValue = totalWithInterest / i
     const interestAmount = totalWithInterest - originalValue

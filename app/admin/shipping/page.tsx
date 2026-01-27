@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Loader2, Truck, Search, Package, MessageCircle, Zap, DollarSign } from "lucide-react"
 import { formatShippingPrice, formatDeliveryTime } from "@/lib/melhor-envio-utils"
 import { calculateDeliveryDate, formatDeliveryDate, generateWhatsAppShareLink } from "@/lib/shipping-utils"
+import { maskCEP } from "@/lib/utils"
 import { EnvironmentBadge } from "@/components/integrations/EnvironmentBadge"
 import { productsApi } from "@/lib/api"
 import {
@@ -307,8 +308,9 @@ export default function ShippingPage() {
                 <Input
                   id="cep_destino"
                   value={formData.cep_destino}
-                  onChange={(e) => setFormData({ ...formData, cep_destino: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, cep_destino: maskCEP(e.target.value) })}
                   placeholder="00000-000"
+                  maxLength={9}
                   required
                 />
               </div>

@@ -8,15 +8,22 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { InstallmentRatesTable } from "./InstallmentRatesTable"
-import { CreditCard, QrCode, Loader2, Save } from "lucide-react"
+import { DollarSign, QrCode, CreditCard, Loader2, Save, Globe, Gift } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 import type { IntegrationEnvironment } from "@/lib/integrations-types"
 
 interface PaymentSettingsSectionProps {
   environment: IntegrationEnvironment
+  onEnvironmentChange: (env: IntegrationEnvironment) => void
+  onSave: (saving: boolean) => void
 }
 
-export function PaymentSettingsSection({ environment }: PaymentSettingsSectionProps) {
+export function PaymentSettingsSection({ 
+  environment, 
+  onEnvironmentChange,
+  onSave 
+}: PaymentSettingsSectionProps) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [pixDiscount, setPixDiscount] = useState({
@@ -24,7 +31,6 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
     discount_type: 'percentage' as 'percentage' | 'fixed',
     discount_value: '',
   })
-  const [productionDays, setProductionDays] = useState('0')
   const [installmentRates, setInstallmentRates] = useState<any[]>([])
 
   useEffect(() => {
@@ -57,8 +63,6 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
         })
       }
 
-      setProductionDays(data.productionDays?.toString() || '0')
-
       // Carregar taxas de parcelamento
       const ratesResponse = await fetch(`/api/settings/installment-rates?environment=${environment}`, {
         credentials: 'include',
@@ -70,6 +74,7 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
       }
     } catch (error) {
       console.error('Erro ao carregar configurações:', error)
+      toast.error('Erro ao carregar configurações')
     } finally {
       setLoading(false)
     }
@@ -77,6 +82,7 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
 
   const handleSavePixDiscount = async () => {
     setSaving(true)
+    onSave(true)
     try {
       const response = await fetch('/api/settings/payment', {
         method: 'POST',
@@ -87,7 +93,6 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
             discount_type: pixDiscount.discount_type,
             discount_value: pixDiscount.discount_value ? parseFloat(pixDiscount.discount_value) : null,
           },
-          productionDays: parseInt(productionDays) || 0,
         }),
         credentials: 'include',
       })
@@ -96,17 +101,19 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
         throw new Error('Erro ao salvar configurações')
       }
 
-      alert('Configurações salvas com sucesso!')
-    } catch (error) {
+      toast.success('Desconto PIX salvo com sucesso!')
+    } catch (error: any) {
       console.error('Erro ao salvar:', error)
-      alert('Erro ao salvar configurações')
+      toast.error(error.message || 'Erro ao salvar desconto PIX')
     } finally {
       setSaving(false)
+      onSave(false)
     }
   }
 
   const handleSaveInstallmentRates = async (rates: any[]) => {
     setSaving(true)
+    onSave(true)
     try {
       const response = await fetch('/api/settings/installment-rates', {
         method: 'POST',
@@ -123,12 +130,45 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
       }
 
       setInstallmentRates(rates)
-      alert('Taxas salvas com sucesso!')
-    } catch (error) {
+      toast.success('Taxas de parcelamento salvas com sucesso!')
+    } catch (error: any) {
       console.error('Erro ao salvar taxas:', error)
-      alert('Erro ao salvar taxas')
+      toast.error(error.message || 'Erro ao salvar taxas de parcelamento')
     } finally {
       setSaving(false)
+      onSave(false)
+    }
+  }
+
+  const handleSaveAll = async () => {
+    setSaving(true)
+    onSave(true)
+    try {
+      // Salvar desconto PIX
+      const pixResponse = await fetch('/api/settings/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pixDiscount: {
+            active: pixDiscount.active,
+            discount_type: pixDiscount.discount_type,
+            discount_value: pixDiscount.discount_value ? parseFloat(pixDiscount.discount_value) : null,
+          },
+        }),
+        credentials: 'include',
+      })
+
+      if (!pixResponse.ok) {
+        throw new Error('Erro ao salvar desconto PIX')
+      }
+
+      toast.success('Configurações de pagamento salvas com sucesso!')
+    } catch (error: any) {
+      console.error('Erro ao salvar:', error)
+      toast.error(error.message || 'Erro ao salvar configurações de pagamento')
+    } finally {
+      setSaving(false)
+      onSave(false)
     }
   }
 
@@ -169,7 +209,7 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <QrCode className="h-5 w-5" />
+            <QrCode className="h-5 w-5 text-green-600" />
             Desconto PIX
           </CardTitle>
           <CardDescription>
@@ -248,44 +288,38 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
         </CardContent>
       </Card>
 
-      {/* Prazo de Produção */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Prazo de Produção</CardTitle>
-          <CardDescription>
-            Adicione dias úteis ao prazo de entrega do frete
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="production_days">Dias Úteis</Label>
-            <Input
-              id="production_days"
-              type="number"
-              min="0"
-              value={productionDays}
-              onChange={(e) => setProductionDays(e.target.value)}
-              placeholder="0"
-            />
-            <p className="text-xs text-muted-foreground">
-              Este valor será adicionado ao prazo retornado pela cotação de frete
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Juros de Parcelamento */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5" />
+            <CreditCard className="h-5 w-5 text-blue-600" />
             Juros de Parcelamento
           </CardTitle>
           <CardDescription>
             Configure as taxas de juros para cada número de parcelas
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* Seletor de Ambiente */}
+          <div className="space-y-2">
+            <Label htmlFor="environment" className="flex items-center gap-2">
+              <Globe className="h-4 w-4" />
+              Ambiente
+            </Label>
+            <Select value={environment} onValueChange={(value) => onEnvironmentChange(value as IntegrationEnvironment)}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sandbox">Sandbox</SelectItem>
+                <SelectItem value="production">Produção</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Selecione o ambiente para configurar taxas de parcelamento
+            </p>
+          </div>
+
           <InstallmentRatesTable
             rates={installmentRates}
             environment={environment}
@@ -295,8 +329,8 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
       </Card>
 
       {/* Botão Salvar */}
-      <div className="flex justify-end">
-        <Button onClick={handleSavePixDiscount} disabled={saving}>
+      <div className="flex justify-end pt-6 border-t">
+        <Button onClick={handleSaveAll} disabled={saving} size="lg">
           {saving ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -305,7 +339,7 @@ export function PaymentSettingsSection({ environment }: PaymentSettingsSectionPr
           ) : (
             <>
               <Save className="mr-2 h-4 w-4" />
-              Salvar Configurações
+              Salvar Configurações de Pagamento
             </>
           )}
         </Button>
