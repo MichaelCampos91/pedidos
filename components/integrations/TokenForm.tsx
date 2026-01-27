@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2, Save, X, ExternalLink } from "lucide-react"
 import type { IntegrationProvider, IntegrationEnvironment, TokenType, IntegrationToken } from "@/lib/integrations-types"
+import { toast } from "@/lib/toast"
 
 interface TokenFormProps {
   provider: IntegrationProvider
@@ -52,7 +53,7 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
 
   const handleAuthorize = async () => {
     if (!formData.client_id && !token?.additional_data?.client_id) {
-      alert('Configure o Client ID primeiro antes de autorizar')
+      toast.warning('Configure o Client ID primeiro antes de autorizar')
       return
     }
 
@@ -88,7 +89,7 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
       // Redirecionar para URL de autorização
       window.location.href = data.authorization_url
     } catch (error: any) {
-      alert(`Erro ao iniciar autorização: ${error.message}`)
+      toast.error(`Erro ao iniciar autorização: ${error.message}`)
       setIsAuthorizing(false)
     }
   }
@@ -99,13 +100,13 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
     if (isMelhorEnvio && authMode === 'oauth2') {
       // Modo OAuth2
       if (!formData.client_id) {
-        alert('Client ID é obrigatório para OAuth2')
+        toast.warning('Client ID é obrigatório para OAuth2')
         return
       }
       
       // Se está criando novo, client_secret é obrigatório
       if (!token && !formData.client_secret) {
-        alert('Client Secret é obrigatório ao criar nova integração OAuth2')
+        toast.warning('Client Secret é obrigatório ao criar nova integração OAuth2')
         return
       }
       
@@ -131,7 +132,7 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
     } else {
       // Modo token direto (legacy)
       if (!formData.token_value) {
-        alert('Token é obrigatório')
+        toast.warning('Token é obrigatório')
         return
       }
       

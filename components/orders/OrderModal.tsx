@@ -26,6 +26,7 @@ import { CheckoutSteps } from "@/components/checkout/CheckoutSteps"
 import { ClientSearch } from "@/components/orders/ClientSearch"
 import { AddressForm } from "@/components/orders/AddressForm"
 import { calculateDeliveryDate, formatDeliveryDate } from "@/lib/shipping-utils"
+import { toast } from "@/lib/toast"
 
 const STATUS_OPTIONS = [
   { value: 'aguardando_pagamento', label: 'Aguardando Pagamento' },
@@ -316,15 +317,15 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     
     // Validações por step
     if (currentStep === 1 && !formData.client_id) {
-      alert('Selecione um cliente')
+      toast.warning('Selecione um cliente')
       return
     }
     if (currentStep === 2 && formData.items.length === 0) {
-      alert('Adicione pelo menos um item')
+      toast.warning('Adicione pelo menos um item')
       return
     }
     if (currentStep === 3 && !formData.shipping_address_id) {
-      alert('Selecione um endereço de entrega')
+      toast.warning('Selecione um endereço de entrega')
       return
     }
     // Step 4 (Frete) não precisa validação - frete é opcional
@@ -368,15 +369,15 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     
     // Validações finais no último step (Revisão)
     if (!formData.client_id) {
-      alert('Selecione um cliente antes de salvar o pedido')
+      toast.warning('Selecione um cliente antes de salvar o pedido')
       return
     }
     if (formData.items.length === 0) {
-      alert('Adicione pelo menos um item antes de salvar o pedido')
+      toast.warning('Adicione pelo menos um item antes de salvar o pedido')
       return
     }
     if (!formData.shipping_address_id) {
-      alert('Selecione um endereço de entrega antes de salvar o pedido')
+      toast.warning('Selecione um endereço de entrega antes de salvar o pedido')
       return
     }
 
@@ -428,7 +429,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         onSuccess()
       }
     } catch (error: any) {
-      alert(error.message || 'Erro ao salvar pedido')
+      toast.error(error.message || 'Erro ao salvar pedido')
     } finally {
       setLoading(false)
     }

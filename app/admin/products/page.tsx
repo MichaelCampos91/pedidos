@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Plus, Edit, Trash2, Loader2 } from "lucide-react"
 import { productsApi } from "@/lib/api"
+import { toast } from "@/lib/toast"
 import { formatCurrency } from "@/lib/utils"
 
 export default function ProductsPage() {
@@ -39,7 +40,7 @@ export default function ProductsPage() {
       await productsApi.delete(id)
       loadProducts()
     } catch (error: any) {
-      alert(error.message || 'Erro ao excluir produto')
+      toast.error(error.message || 'Erro ao excluir produto')
     }
   }
 

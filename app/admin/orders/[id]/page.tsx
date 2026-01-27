@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loader2, Save, Plus, Trash2, MessageCircle } from "lucide-react"
 import { ordersApi, clientsApi, productsApi } from "@/lib/api"
 import { formatCurrency, formatCPF, formatPhone } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 
 const STATUS_OPTIONS = [
   { value: 'aguardando_pagamento', label: 'Aguardando Pagamento' },
@@ -135,7 +136,7 @@ export default function OrderFormPage() {
     e.preventDefault()
     
     if (!formData.client_id || formData.items.length === 0) {
-      alert('Selecione um cliente e adicione pelo menos um item')
+      toast.warning('Selecione um cliente e adicione pelo menos um item')
       return
     }
 
@@ -167,7 +168,7 @@ export default function OrderFormPage() {
       }
       router.push('/admin/orders')
     } catch (error: any) {
-      alert(error.message || 'Erro ao salvar pedido')
+      toast.error(error.message || 'Erro ao salvar pedido')
       setLoading(false)
     }
   }

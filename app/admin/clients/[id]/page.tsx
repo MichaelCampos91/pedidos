@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Loader2, Save, Plus, Trash2 } from "lucide-react"
 import { clientsApi, cepApi } from "@/lib/api"
 import { formatCPF, formatCNPJ, formatPhone } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 
 export default function ClientFormPage() {
   const router = useRouter()
@@ -66,7 +67,7 @@ export default function ClientFormPage() {
       }
       router.push('/admin/clients')
     } catch (error: any) {
-      alert(error.message || 'Erro ao salvar cliente')
+      toast.error(error.message || 'Erro ao salvar cliente')
       setLoading(false)
     }
   }
@@ -74,7 +75,7 @@ export default function ClientFormPage() {
   const handleCepSearch = async (index: number) => {
     const address = formData.addresses[index]
     if (!address.cep || address.cep.replace(/\D/g, '').length !== 8) {
-      alert('CEP inválido')
+      toast.warning('CEP inválido')
       return
     }
 
@@ -90,7 +91,7 @@ export default function ClientFormPage() {
       }
       setFormData({ ...formData, addresses: newAddresses })
     } catch (error: any) {
-      alert(error.message || 'Erro ao buscar CEP')
+      toast.error(error.message || 'Erro ao buscar CEP')
     }
   }
 

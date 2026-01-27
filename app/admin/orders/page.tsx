@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
+import { toast } from "@/lib/toast"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -168,10 +169,7 @@ export default function OrdersPage() {
 
     try {
       await navigator.clipboard.writeText(link)
-      if (typeof window !== "undefined") {
-        // eslint-disable-next-line no-alert
-        window.alert("Link de pagamento copiado para a área de transferência.")
-      }
+      toast.success("Link de pagamento copiado para a área de transferência.")
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
         console.error("Erro ao copiar link de pagamento:", error)

@@ -65,17 +65,22 @@ export default function CheckoutPage() {
   }, [orderId])
 
   useEffect(() => {
-    // Verificar se checkout já foi concluído
-    if (checkCheckoutCompleted(orderId)) {
+    // Verificar se checkout já foi concluído ou se paymentStatus está setado
+    if (checkCheckoutCompleted(orderId) || paymentStatus !== null) {
       setCurrentStep(3)
     }
-  }, [orderId])
+  }, [orderId, paymentStatus])
 
 
   const loadCheckoutData = async () => {
     try {
       setLoading(true)
-      setError(null)
+      
+      // Se checkout já foi concluído, não setar erro mesmo se API retornar erro
+      const isCompleted = checkCheckoutCompleted(orderId)
+      if (!isCompleted) {
+        setError(null)
+      }
       
       // Extrair token da URL
       const token = searchParams.get('token')
@@ -87,12 +92,30 @@ export default function CheckoutPage() {
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
+        
+        // Se checkout foi concluído, tratar erro silenciosamente
+        if (isCompleted) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn("Erro ao recarregar dados após checkout concluído (ignorado):", errorData.error)
+          }
+          // Manter order existente ou não setar erro
+          return
+        }
+        
         throw new Error(errorData.error || "Erro ao carregar pedido")
       }
       
       const data = await response.json()
       setOrder(data)
     } catch (error: any) {
+      // Se checkout foi concluído, não setar erro
+      if (checkCheckoutCompleted(orderId)) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn("Erro ao recarregar dados após checkout concluído (ignorado):", error.message)
+        }
+        return
+      }
+      
       if (process.env.NODE_ENV === 'development') {
         console.error("Erro ao carregar checkout:", error)
       }
@@ -135,7 +158,9 @@ export default function CheckoutPage() {
     )
   }
 
-  if (error || !order) {
+  // Não exibir tela de erro se checkout já foi concluído
+  // Nesse caso, ir direto para step 3 mesmo sem order carregado
+  if ((error || !order) && !checkCheckoutCompleted(orderId)) {
     return (
       <div className="min-h-screen bg-gray-50 py-8">
         <div className="container mx-auto px-4 max-w-4xl">
@@ -429,6 +454,30 @@ export default function CheckoutPage() {
                     <p className="text-muted-foreground max-w-md">
                       Não foi possível processar seu pagamento. Por favor, tente novamente ou entre em contato conosco.
                     </p>
+                    <Button
+                      onClick={() => openWhatsApp("Olá, preciso de ajuda com o pagamento do pedido.")}
+                      className="mt-4"
+                      variant="default"
+                    >
+                      <MessageCircle className="h-4 w-4 mr-2" />
+                      Fale Conosco
+                    </Button>
+                  </>
+                ) : paymentStatus === null && error ? (
+                  <>
+                    <XCircle className="h-16 w-16 text-destructive" />
+                    <h2 className="text-2xl font-bold text-destructive">Erro no Pagamento</h2>
+                    <p className="text-muted-foreground max-w-md">
+                      Ocorreu um erro ao processar seu pagamento. Entre em contato conosco para obter ajuda.
+                    </p>
+                    <Button
+                      onClick={() => openWhatsApp("Olá, preciso de ajuda com o pagamento do pedido.")}
+                      className="mt-4"
+                      variant="default"
+                    >
+                      <MessageCircle className="h-4 w-4 mr-2" />
+                      Fale Conosco
+                    </Button>
                   </>
                 ) : (
                   <>

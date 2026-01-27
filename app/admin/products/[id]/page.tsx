@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, Save } from "lucide-react"
 import { productsApi } from "@/lib/api"
+import { toast } from "@/lib/toast"
 
 export default function ProductFormPage() {
   const router = useRouter()
@@ -67,7 +68,7 @@ export default function ProductFormPage() {
       }
       router.push('/admin/products')
     } catch (error: any) {
-      alert(error.message || 'Erro ao salvar produto')
+      toast.error(error.message || 'Erro ao salvar produto')
       setLoading(false)
     }
   }

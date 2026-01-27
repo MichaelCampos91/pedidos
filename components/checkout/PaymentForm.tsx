@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
-import { Loader2, CreditCard, QrCode } from "lucide-react"
+import { Loader2, CreditCard, QrCode, Copy, Check, Clock, AlertCircle, CheckCircle2, XCircle, MessageCircle } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 
 interface PaymentFormProps {
   orderId: number
@@ -39,6 +40,15 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
     card_cvv: '',
   })
   const [publicKey, setPublicKey] = useState<string | null>(null)
+  
+  // Estados para PIX melhorado
+  const [countdown, setCountdown] = useState(600) // 10 minutos em segundos
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'failed' | 'expired'>('pending')
+  const [isChecking, setIsChecking] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [pixTransactionId, setPixTransactionId] = useState<string | null>(null)
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
 
   // Validar formulário de cartão em tempo real
@@ -114,6 +124,94 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
     return 'production'
   }
 
+  const isSandbox = detectEnvironment() === 'sandbox'
+
+  // Função para abrir WhatsApp
+  const openWhatsApp = (message: string) => {
+    const phoneNumber = "5518997264861" // (18) 99726-4861
+    const encodedMessage = encodeURIComponent(message)
+    const url = `https://wa.me/${phoneNumber}?text=${encodedMessage}`
+    window.open(url, '_blank')
+  }
+
+  // Formatar tempo em MM:SS
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+  }
+
+  // Copiar código PIX
+  const handleCopyPixCode = async () => {
+    if (!pixData?.pix_qr_code) return
+    
+    try {
+      await navigator.clipboard.writeText(pixData.pix_qr_code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (error) {
+      // Fallback para navegadores antigos
+      const textArea = document.createElement('textarea')
+      textArea.value = pixData.pix_qr_code
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  // Verificar status do pagamento via polling
+  const checkPaymentStatus = useCallback(async () => {
+    if (!pixTransactionId) return
+    
+    setIsChecking(true)
+    try {
+      const environment = detectEnvironment()
+      const response = await fetch(`/api/payment/status?transaction_id=${pixTransactionId}&environment=${environment}`)
+      
+      if (!response.ok) {
+        // Silenciar erro, continuar polling
+        return
+      }
+      
+      const data = await response.json()
+      
+      if (data.success && data.status) {
+        if (data.status === 'paid') {
+          setPaymentStatus('paid')
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
+          }
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current)
+            countdownIntervalRef.current = null
+          }
+          // Limpar localStorage
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(`pix_countdown_${orderId}_${pixTransactionId}`)
+          }
+          onSuccess(data.transaction)
+        } else if (data.status === 'failed') {
+          setPaymentStatus('failed')
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
+          }
+        }
+      }
+    } catch (error) {
+      // Silenciar erro, continuar polling
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[PaymentForm] Erro no polling:', error)
+      }
+    } finally {
+      setIsChecking(false)
+    }
+  }, [pixTransactionId, orderId, onSuccess])
+
   // Obter public key quando o método de pagamento for cartão (opcional - pode ser buscada no momento do pagamento)
   useEffect(() => {
     if (paymentMethod !== 'credit_card' || publicKey) {
@@ -138,6 +236,130 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
 
     fetchPublicKey()
   }, [paymentMethod, publicKey])
+
+  // Recuperar dados do PIX do localStorage ao montar componente
+  useEffect(() => {
+    if (typeof window === 'undefined' || pixData) return
+
+    // Tentar encontrar qualquer QR code salvo para este pedido
+    const keys = Object.keys(localStorage)
+    const pixKey = keys.find(key => key.startsWith(`pix_countdown_${orderId}_`))
+    
+    if (pixKey) {
+      try {
+        const saved = localStorage.getItem(pixKey)
+        if (saved) {
+          const { transactionId, expiresAt, pix_qr_code, pix_expiration_date } = JSON.parse(saved)
+          const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+          
+          if (remaining > 0 && pix_qr_code) {
+            // Recuperar transactionId e dados do PIX
+            setPixTransactionId(transactionId)
+            setPixData({
+              id: transactionId,
+              pix_qr_code,
+              pix_expiration_date,
+              status: 'pending',
+            })
+            setCountdown(remaining)
+            setPaymentStatus('pending')
+          } else {
+            // Expirou, limpar
+            localStorage.removeItem(pixKey)
+            setPaymentStatus('expired')
+          }
+        }
+      } catch (error) {
+        // Se erro ao parsear, limpar
+        localStorage.removeItem(pixKey)
+      }
+    }
+  }, [orderId, pixData])
+
+  // Recuperar cronômetro quando pixTransactionId muda
+  useEffect(() => {
+    if (!pixTransactionId || typeof window === 'undefined') return
+
+    const storageKey = `pix_countdown_${orderId}_${pixTransactionId}`
+    const saved = localStorage.getItem(storageKey)
+    
+    if (saved) {
+      try {
+        const { expiresAt } = JSON.parse(saved)
+        const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+        setCountdown(remaining)
+        
+        // Se expirou, limpar e resetar
+        if (remaining <= 0) {
+          localStorage.removeItem(storageKey)
+          setPaymentStatus('expired')
+          return
+        }
+      } catch (error) {
+        // Se erro ao parsear, resetar
+        localStorage.removeItem(storageKey)
+        setCountdown(600) // Resetar para 10 minutos
+      }
+    } else {
+      // Se não há dados salvos mas temos transactionId, resetar countdown
+      setCountdown(600)
+    }
+  }, [pixTransactionId, orderId])
+
+  // Cronômetro regressivo
+  useEffect(() => {
+    if (!pixData || !pixTransactionId || countdown <= 0 || paymentStatus !== 'pending') {
+      return
+    }
+
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          setPaymentStatus('expired')
+          const storageKey = `pix_countdown_${orderId}_${pixTransactionId}`
+          localStorage.removeItem(storageKey)
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
+          }
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    countdownIntervalRef.current = interval
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+    }
+  }, [pixData, pixTransactionId, orderId, paymentStatus, countdown])
+
+  // Polling de status a cada 5 segundos
+  useEffect(() => {
+    if (!pixTransactionId || paymentStatus !== 'pending' || countdown <= 0) {
+      return
+    }
+
+    // Primeira verificação imediata
+    checkPaymentStatus()
+
+    const interval = setInterval(() => {
+      checkPaymentStatus()
+    }, 5000) // 5 segundos
+
+    pollingIntervalRef.current = interval
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+    }
+  }, [pixTransactionId, paymentStatus, countdown, checkPaymentStatus])
 
   const handlePixPayment = async () => {
     setLoading(true)
@@ -206,8 +428,27 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         throw new Error(errorMsg)
       }
 
+      // Salvar dados do PIX e iniciar cronômetro
+      const transactionId = data.transaction.id
+      setPixTransactionId(transactionId)
       setPixData(data.transaction)
-      onSuccess(data.transaction)
+      setPaymentStatus('pending')
+      setCountdown(600) // 10 minutos
+
+      // Salvar timestamp e dados no localStorage para persistência
+      if (typeof window !== 'undefined') {
+        const storageKey = `pix_countdown_${orderId}_${transactionId}`
+        const expiresAt = Date.now() + (10 * 60 * 1000) // 10 minutos
+        localStorage.setItem(storageKey, JSON.stringify({
+          timestamp: Date.now(),
+          expiresAt,
+          transactionId,
+          pix_qr_code: data.transaction.pix_qr_code,
+          pix_expiration_date: data.transaction.pix_expiration_date,
+        }))
+      }
+
+      // Não chamar onSuccess imediatamente - aguardar confirmação via polling
     } catch (error: any) {
       // Melhorar tratamento de erros para o usuário
       let errorMessage = 'Erro ao processar pagamento Pix.'
@@ -227,7 +468,7 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
       }
       
       // Exibir erro de forma mais amigável
-      alert(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -341,37 +582,149 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
       if (process.env.NODE_ENV === 'development') {
         console.error('[PaymentForm Credit Card] Erro:', error.message)
       }
-      alert(error.message || 'Erro ao processar pagamento com cartão')
+      toast.error(error.message || 'Erro ao processar pagamento com cartão')
     } finally {
       setLoading(false)
     }
   }
 
-  if (pixData && pixData.pix_qr_code) {
+  // Renderizar QR code ou status final do pagamento
+  if (pixData && (pixData.pix_qr_code || paymentStatus === 'paid' || paymentStatus === 'failed' || paymentStatus === 'expired')) {
     return (
       <Card>
         <CardContent className="pt-6">
           <div className="space-y-4 text-center">
-            <QrCode className="h-16 w-16 mx-auto text-primary" />
-            <div>
-              <p className="font-medium mb-2">Escaneie o QR Code para pagar</p>
+            {/* Ícone baseado no status */}
+            {paymentStatus === 'paid' ? (
+              <CheckCircle2 className="h-16 w-16 mx-auto text-green-600" />
+            ) : paymentStatus === 'failed' ? (
+              <XCircle className="h-16 w-16 mx-auto text-destructive" />
+            ) : paymentStatus === 'expired' ? (
+              <AlertCircle className="h-16 w-16 mx-auto text-destructive" />
+            ) : (
+              <QrCode className="h-16 w-16 mx-auto text-primary" />
+            )}
+
+            {/* Título baseado no status */}
+            {paymentStatus === 'paid' ? (
+              <h2 className="text-2xl font-bold text-green-600 mb-2">Pagamento Confirmado!</h2>
+            ) : paymentStatus === 'failed' ? (
+              <h2 className="text-2xl font-bold text-destructive mb-2">Pagamento Recusado</h2>
+            ) : paymentStatus === 'expired' ? (
+              <h2 className="text-2xl font-bold text-destructive mb-2">QR Code Expirado</h2>
+            ) : (
+              <p className="font-medium mb-2 text-lg">Escaneie o QR Code para pagar</p>
+            )}
+
+            {/* QR Code ou Placeholder */}
+            {paymentStatus === 'pending' && (
               <div className="bg-white p-4 rounded border inline-block">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixData.pix_qr_code)}`}
-                  alt="QR Code Pix"
-                  className="w-48 h-48"
-                />
+                {isSandbox ? (
+                  <div className="w-48 h-48 flex items-center justify-center border-2 border-dashed border-muted-foreground/30">
+                    <p className="text-sm text-muted-foreground px-4 text-center">
+                      O QRCODE apareceria aqui
+                    </p>
+                  </div>
+                ) : (
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixData.pix_qr_code)}`}
+                    alt="QR Code Pix"
+                    className="w-48 h-48"
+                  />
+                )}
               </div>
-              <p className="text-sm text-muted-foreground mt-4">
-                Ou copie o código Pix:
+            )}
+
+            {/* Cronômetro */}
+            {paymentStatus === 'pending' && countdown > 0 && (
+              <div className="flex items-center justify-center gap-2 text-lg font-semibold">
+                <Clock className="h-5 w-5 text-primary" />
+                <span>Tempo restante: {formatTime(countdown)}</span>
+              </div>
+            )}
+
+            {/* Status de expiração */}
+            {paymentStatus === 'expired' && (
+              <p className="text-muted-foreground">
+                O QR Code expirou. Por favor, gere um novo código para continuar o pagamento.
               </p>
-              <div className="bg-muted p-3 rounded text-sm font-mono break-all">
-                {pixData.pix_qr_code}
+            )}
+
+            {/* Código PIX copiável */}
+            {paymentStatus === 'pending' && (
+              <>
+                <p className="text-sm text-muted-foreground mt-4">
+                  Ou copie o código Pix:
+                </p>
+                <div className="bg-muted p-3 rounded-lg flex items-center gap-2 max-w-full">
+                  <div className="flex-1 text-sm font-mono break-all text-left">
+                    {pixData.pix_qr_code}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopyPixCode}
+                    className="shrink-0"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-4 w-4 mr-2" />
+                        Copiado!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-4 w-4 mr-2" />
+                        Copiar
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {/* Feedback de status */}
+            {paymentStatus === 'pending' && (
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                {isChecking ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Verificando pagamento...</span>
+                  </>
+                ) : (
+                  <>
+                    <Clock className="h-4 w-4" />
+                    <span>Aguardando pagamento...</span>
+                  </>
+                )}
               </div>
+            )}
+
+            {paymentStatus === 'paid' && (
+              <p className="text-muted-foreground">
+                Sua transação foi processada com sucesso. Você receberá uma confirmação por e-mail em breve.
+              </p>
+            )}
+
+            {paymentStatus === 'failed' && (
+              <>
+                <p className="text-muted-foreground mb-4">
+                  Não foi possível processar seu pagamento. Por favor, tente novamente ou entre em contato conosco.
+                </p>
+                <Button
+                  onClick={() => openWhatsApp("Olá, preciso de ajuda com o pagamento do pedido.")}
+                  variant="default"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  Fale Conosco
+                </Button>
+              </>
+            )}
+
+            {paymentStatus === 'expired' && (
               <p className="text-xs text-muted-foreground mt-2">
-                O pedido será processado automaticamente após a confirmação do pagamento
+                O QR Code PIX expira após 10 minutos. Gere um novo código para continuar.
               </p>
-            </div>
+            )}
           </div>
         </CardContent>
       </Card>
