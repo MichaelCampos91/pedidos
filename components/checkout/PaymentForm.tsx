@@ -40,21 +40,6 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
   })
   const [publicKey, setPublicKey] = useState<string | null>(null)
 
-  // Log do customer recebido como prop
-  useEffect(() => {
-    console.log('[PaymentForm] Customer recebido como prop:', {
-      orderId,
-      customer: {
-        name: customer.name,
-        email: customer.email,
-        hasDocument: !!customer.document,
-        documentPreview: customer.document ? `${customer.document.substring(0, 3)}***` : 'N/A',
-        phone: customer.phone || 'N/A',
-        hasPhone: !!customer.phone,
-        phoneLength: customer.phone?.length || 0,
-      },
-    })
-  }, [orderId, customer])
 
   // Validar formulário de cartão em tempo real
   useEffect(() => {
@@ -138,25 +123,16 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
     const fetchPublicKey = async () => {
       try {
         const environment = detectEnvironment()
-        console.log('[PaymentForm] Buscando public key para ambiente:', environment)
         const response = await fetch(`/api/pagarme/public-key?environment=${environment}`)
         
         if (!response.ok) {
-          const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
-          console.warn('[PaymentForm] Erro ao obter public key (será buscada no momento do pagamento):', error)
           return
         }
 
         const data = await response.json()
-        const maskedKey = data.publicKey ? `${data.publicKey.substring(0, 8)}...` : 'não encontrada'
-        console.log('[PaymentForm] Public key obtida:', { 
-          hasKey: !!data.publicKey, 
-          keyPreview: maskedKey,
-          environment: data.environment 
-        })
         setPublicKey(data.publicKey)
       } catch (error) {
-        console.warn('[PaymentForm] Erro ao buscar public key (será buscada no momento do pagamento):', error)
+        // Silently fail - will be fetched at payment time
       }
     }
 
@@ -165,28 +141,14 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
 
   const handlePixPayment = async () => {
     setLoading(true)
-    const environment = detectEnvironment() // Mover para fora do try para estar disponível no catch
+    const environment = detectEnvironment()
     try {
-      // Log do customer sendo enviado para API (PIX)
       const customerData = {
         name: customer.name,
         email: customer.email,
         document: customer.document,
         phone: customer.phone,
       }
-      console.log('[PaymentForm PIX] Enviando customer para API:', {
-        orderId,
-        environment,
-        customer: {
-          name: customerData.name,
-          email: customerData.email,
-          hasDocument: !!customerData.document,
-          documentPreview: customerData.document ? `${customerData.document.substring(0, 3)}***` : 'N/A',
-          phone: customerData.phone || 'N/A',
-          hasPhone: !!customerData.phone,
-          phoneLength: customerData.phone?.length || 0,
-        },
-      })
       
       const response = await fetch('/api/payment/create', {
         method: 'POST',
@@ -201,61 +163,86 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
-        const errorMessage = error.error || error.message || 'Erro ao processar pagamento'
-        console.error('[PaymentForm PIX] Erro na API:', {
-          status: response.status,
-          statusText: response.statusText,
-          error,
-          environment,
-        })
+        let errorMessage = error.error || error.message || 'Erro ao processar pagamento'
+        
+        // Melhorar mensagens de erro específicas
+        if (response.status === 400) {
+          errorMessage = error.error || 'Dados inválidos. Verifique as informações do cliente e tente novamente.'
+        } else if (response.status === 401) {
+          errorMessage = 'Token do Pagar.me inválido. Verifique a configuração nas integrações.'
+        } else if (response.status === 404) {
+          errorMessage = 'Recurso não encontrado. Verifique se o pedido existe.'
+        } else if (response.status === 500) {
+          errorMessage = error.error || 'Erro interno do servidor. Tente novamente mais tarde.'
+        }
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[PaymentForm PIX] Erro na API:', {
+            status: response.status,
+            errorMessage,
+            errorDetails: error,
+          })
+        }
         throw new Error(errorMessage)
       }
 
       const data = await response.json()
-      console.log('[PaymentForm PIX] Resposta recebida:', {
-        hasTransaction: !!data.transaction,
-        transactionId: data.transaction?.id,
-        status: data.transaction?.status,
-        hasPixQrCode: !!data.transaction?.pix_qr_code,
-      })
 
-      if (!data.transaction || !data.transaction.pix_qr_code) {
-        console.error('[PaymentForm PIX] QR Code não encontrado na resposta:', data)
-        throw new Error('QR Code não foi gerado. Verifique a configuração do Pagar.me e se o token está correto para o ambiente ' + environment + '.')
+      // Validar estrutura de resposta antes de acessar pix_qr_code
+      if (!data || !data.success) {
+        const errorMsg = data?.error || 'Erro desconhecido ao processar pagamento PIX'
+        throw new Error(errorMsg)
       }
+
+      if (!data.transaction) {
+        throw new Error('Resposta inválida do servidor: dados da transação não encontrados.')
+      }
+
+      if (!data.transaction.pix_qr_code) {
+        const errorDetails = data.error || data.details || ''
+        const errorMsg = errorDetails 
+          ? `QR Code não foi gerado: ${errorDetails}`
+          : 'QR Code não foi gerado. Verifique a configuração do Pagar.me e se o token está correto para o ambiente ' + environment + '.'
+        throw new Error(errorMsg)
+      }
+
       setPixData(data.transaction)
       onSuccess(data.transaction)
     } catch (error: any) {
-      console.error('[PaymentForm PIX] Erro completo:', {
-        message: error.message,
-        stack: error.stack,
-        environment,
-      })
-      const userMessage = error.message || 'Erro ao processar pagamento Pix. Verifique o console para mais detalhes.'
-      alert(userMessage)
+      // Melhorar tratamento de erros para o usuário
+      let errorMessage = 'Erro ao processar pagamento Pix.'
+      
+      if (error.message) {
+        errorMessage = error.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[PaymentForm PIX] Erro:', {
+          message: errorMessage,
+          error: error,
+          stack: error.stack,
+        })
+      }
+      
+      // Exibir erro de forma mais amigável
+      alert(errorMessage)
     } finally {
       setLoading(false)
     }
   }
 
-  // Função auxiliar para mascarar dados sensíveis nos logs
-  const maskSensitiveData = (value: string, showLast: number = 4): string => {
-    if (!value || value.length <= showLast) return '***'
-    return `${'*'.repeat(value.length - showLast)}${value.substring(value.length - showLast)}`
-  }
 
   const handleCreditCardPayment = async () => {
     if (!isCardFormValid) {
-      console.log('[PaymentForm Credit Card] Formulário inválido, abortando')
       return
     }
 
-    console.log('[PaymentForm Credit Card] Iniciando processo de tokenização')
     setLoading(true)
     
     try {
       const environment = detectEnvironment()
-      console.log('[PaymentForm Credit Card] Ambiente detectado:', environment)
 
       // Preparar dados do cartão para tokenização
       const cardNumber = cardData.card_number.replace(/\s/g, '')
@@ -263,42 +250,22 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
       const expMonth = parseInt(month)
       const expYear = parseInt('20' + year)
 
-      console.log('[PaymentForm Credit Card] Dados do cartão preparados:', {
-        cardNumberMasked: maskSensitiveData(cardNumber, 4),
-        holderName: cardData.card_holder_name,
-        expMonth,
-        expYear,
-        cvvMasked: maskSensitiveData(cardData.card_cvv, 0),
-        installments: cardData.installments,
-      })
-
       // Obter public key se não tiver (fallback)
       let publicKeyToUse = publicKey
       if (!publicKeyToUse) {
-        console.log('[PaymentForm Credit Card] Public key não encontrada no estado, buscando...')
         try {
           const keyResponse = await fetch(`/api/pagarme/public-key?environment=${environment}`)
           if (keyResponse.ok) {
             const keyData = await keyResponse.json()
             publicKeyToUse = keyData.publicKey
             setPublicKey(keyData.publicKey)
-            console.log('[PaymentForm Credit Card] Public key obtida:', {
-              hasKey: !!publicKeyToUse,
-              keyPreview: publicKeyToUse ? maskSensitiveData(publicKeyToUse, 8) : 'não encontrada',
-            })
           } else {
             const error = await keyResponse.json().catch(() => ({ error: 'Erro desconhecido' }))
-            console.error('[PaymentForm Credit Card] Erro ao buscar public key:', error)
             throw new Error(error.error || 'Public key do Pagar.me não configurada. Por favor, configure nas integrações.')
           }
         } catch (error: any) {
-          console.error('[PaymentForm Credit Card] Erro ao buscar public key:', error)
           throw new Error('Public key do Pagar.me não configurada. Por favor, configure nas integrações.')
         }
-      } else {
-        console.log('[PaymentForm Credit Card] Public key já disponível:', {
-          keyPreview: maskSensitiveData(publicKeyToUse, 8),
-        })
       }
 
       if (!publicKeyToUse) {
@@ -307,11 +274,6 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
 
       // Tokenizar cartão usando API REST do Pagar.me diretamente
       const tokenUrl = `https://api.pagar.me/core/v5/tokens?appId=${encodeURIComponent(publicKeyToUse)}`
-      console.log('[PaymentForm Credit Card] Enviando requisição de tokenização:', {
-        url: 'https://api.pagar.me/core/v5/tokens',
-        hasAppId: true,
-        appIdPreview: maskSensitiveData(publicKeyToUse, 8),
-      })
 
       const tokenResponse = await fetch(tokenUrl, {
         method: 'POST',
@@ -330,63 +292,25 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         }),
       })
 
-      console.log('[PaymentForm Credit Card] Resposta da API de tokenização recebida:', {
-        status: tokenResponse.status,
-        ok: tokenResponse.ok,
-      })
-
       if (!tokenResponse.ok) {
         const errorData = await tokenResponse.json().catch(() => ({ message: 'Erro desconhecido' }))
-        console.error('[PaymentForm Credit Card] Erro na tokenização:', {
-          status: tokenResponse.status,
-          statusText: tokenResponse.statusText,
-          error: errorData,
-        })
         throw new Error(errorData.message || errorData.error || 'Erro ao tokenizar cartão. Verifique os dados e tente novamente.')
       }
 
       const tokenData = await tokenResponse.json()
-      console.log('[PaymentForm Credit Card] Token recebido:', {
-        hasToken: !!tokenData.id,
-        tokenPreview: tokenData.id ? maskSensitiveData(tokenData.id, 8) : 'não encontrado',
-        tokenType: tokenData.type,
-      })
 
       if (!tokenData || !tokenData.id) {
-        console.error('[PaymentForm Credit Card] Token não encontrado na resposta:', tokenData)
         throw new Error('Falha ao tokenizar cartão. Token não foi gerado. Verifique os dados e tente novamente.')
       }
 
       const cardToken = tokenData.id
 
-      // Log do customer sendo enviado para API (Cartão)
       const customerData = {
         name: customer.name,
         email: customer.email,
         document: customer.document,
         phone: customer.phone,
       }
-      console.log('[PaymentForm Credit Card] Enviando customer para API:', {
-        orderId,
-        environment,
-        customer: {
-          name: customerData.name,
-          email: customerData.email,
-          hasDocument: !!customerData.document,
-          documentPreview: customerData.document ? `${customerData.document.substring(0, 3)}***` : 'N/A',
-          phone: customerData.phone || 'N/A',
-          hasPhone: !!customerData.phone,
-          phoneLength: customerData.phone?.length || 0,
-        },
-      })
-
-      // Enviar token ao backend
-      console.log('[PaymentForm Credit Card] Enviando token ao backend:', {
-        orderId,
-        hasToken: !!cardToken,
-        tokenPreview: maskSensitiveData(cardToken, 8),
-        installments: cardData.installments,
-      })
 
       const response = await fetch('/api/payment/create', {
         method: 'POST',
@@ -403,33 +327,20 @@ export function PaymentForm({ orderId, total, customer, onSuccess }: PaymentForm
         }),
       })
 
-      console.log('[PaymentForm Credit Card] Resposta do backend recebida:', {
-        status: response.status,
-        ok: response.ok,
-      })
-
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
-        console.error('[PaymentForm Credit Card] Erro no backend:', {
-          status: response.status,
-          error,
-        })
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[PaymentForm Credit Card] Erro no backend:', error)
+        }
         throw new Error(error.error || 'Erro ao processar pagamento')
       }
 
       const data = await response.json()
-      console.log('[PaymentForm Credit Card] Pagamento processado com sucesso:', {
-        hasTransaction: !!data.transaction,
-        transactionId: data.transaction?.id,
-        status: data.transaction?.status,
-      })
-
       onSuccess(data.transaction)
     } catch (error: any) {
-      console.error('[PaymentForm Credit Card] Erro completo:', {
-        message: error.message,
-        stack: error.stack,
-      })
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[PaymentForm Credit Card] Erro:', error.message)
+      }
       alert(error.message || 'Erro ao processar pagamento com cartão')
     } finally {
       setLoading(false)

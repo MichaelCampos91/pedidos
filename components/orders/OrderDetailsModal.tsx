@@ -37,7 +37,9 @@ export function OrderDetailsModal({
         const data = await ordersApi.get(orderId)
         setOrder(data)
       } catch (error) {
-        console.error("Erro ao carregar detalhes do pedido:", error)
+        if (process.env.NODE_ENV === 'development') {
+          console.error("Erro ao carregar detalhes do pedido:", error)
+        }
       } finally {
         setLoading(false)
       }

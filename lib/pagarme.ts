@@ -80,12 +80,42 @@ interface PagarmeTransaction {
   [key: string]: any
 }
 
+/**
+ * Extrai mensagem de erro do gateway_response da transação Pagar.me
+ */
+function extractGatewayError(pixPayment: any): string | null {
+  if (pixPayment?.gateway_response?.errors && Array.isArray(pixPayment.gateway_response.errors) && pixPayment.gateway_response.errors.length > 0) {
+    return pixPayment.gateway_response.errors[0].message
+  }
+  if (pixPayment?.gateway_response?.code) {
+    return `Erro ${pixPayment.gateway_response.code}`
+  }
+  return null
+}
+
 export async function createPixTransaction(
   params: CreateTransactionParams,
   environment: IntegrationEnvironment = 'production'
 ): Promise<PagarmeTransaction> {
   const apiKey = await getApiKey(environment)
   const baseUrl = getBaseUrl(environment)
+
+  // Verificar se apiKey está presente (validação de token)
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error(`Token do Pagar.me não configurado para ambiente ${environment}`)
+  }
+
+  // Log em desenvolvimento para verificar qual chave está sendo usada (mascarada)
+  if (process.env.NODE_ENV === 'development') {
+    const maskedKey = apiKey.length > 8 
+      ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`
+      : '****'
+    console.log('[Pagar.me PIX] Usando API key:', {
+      environment,
+      keyPreview: maskedKey,
+      keyLength: apiKey.length,
+    })
+  }
 
   // Validar campos obrigatórios
   if (!params.amount || params.amount <= 0) {
@@ -149,15 +179,6 @@ export async function createPixTransaction(
         code: `order-${params.metadata?.order_id || 'unknown'}`,
       }]
 
-  console.log('[Pagar.me PIX] Itens formatados para Pagar.me:', {
-    itemsCount: items.length,
-    items: items.map(item => ({
-      code: item.code,
-      description: item.description,
-      quantity: item.quantity,
-      amount: item.amount,
-    })),
-  })
 
   // Preparar request body com customer explícito (garantindo que phone está presente)
   // IMPORTANTE: Pagar.me espera "phones" (plural) como objeto com mobile_phone e/ou home_phone
@@ -190,10 +211,6 @@ export async function createPixTransaction(
   
   // Verificação final crítica antes de enviar
   if (!requestBody.customer.phones || !requestBody.customer.phones.mobile_phone || !requestBody.customer.phones.mobile_phone.country_code || !requestBody.customer.phones.mobile_phone.area_code || !requestBody.customer.phones.mobile_phone.number) {
-    console.error('[Pagar.me PIX] ERRO CRÍTICO: Phone não está presente no requestBody!', {
-      requestBodyCustomer: requestBody.customer,
-      paramsCustomerPhone: params.customer.phone,
-    })
     throw new Error('Telefone do cliente não está presente no requestBody. Erro crítico na montagem dos dados.')
   }
 
@@ -212,114 +229,33 @@ export async function createPixTransaction(
     }
   }
 
-  // Adicionar metadata se fornecido
-  if (params.metadata) {
-    requestBody.metadata = params.metadata
-  }
+  // Sempre incluir metadata (mesmo que vazio) para consistência com cartão
+  // Isso garante que a estrutura seja idêntica e pode resolver problemas de "ambiente não configurado"
+  requestBody.metadata = params.metadata || {}
 
-  // Log detalhado do customer recebido
-  console.log('[Pagar.me PIX] Customer recebido em params:', {
-    name: params.customer?.name,
-    email: params.customer?.email,
-    hasDocument: !!params.customer?.document,
-    documentPreview: params.customer?.document ? `${params.customer.document.substring(0, 3)}***` : 'N/A',
-    type: params.customer?.type || 'individual',
-    hasPhone: !!params.customer?.phone,
-    phone: params.customer?.phone ? {
-      country_code: params.customer.phone.country_code,
-      area_code: params.customer.phone.area_code,
-      number: params.customer.phone.number,
-      fullPhone: `+${params.customer.phone.country_code}${params.customer.phone.area_code}${params.customer.phone.number}`,
-    } : 'N/A',
-    phoneValid: !!(params.customer?.phone?.country_code && params.customer?.phone?.area_code && params.customer?.phone?.number),
-  })
-
-  console.log('[Pagar.me PIX] Criando transação', {
-    environment,
-    amount: params.amount,
-    hasCustomer: !!params.customer,
-    customerName: params.customer?.name,
-    customerDocument: params.customer?.document ? `${params.customer.document.substring(0, 3)}***` : 'N/A',
-    customerPhone: params.customer?.phone ? `+${params.customer.phone.country_code} (${params.customer.phone.area_code}) ${params.customer.phone.number}` : 'N/A',
-    hasBilling: !!params.billing,
-    itemsCount: items.length,
-    baseUrl,
-    apiKeyPrefix: apiKey ? `${apiKey.substring(0, 10)}...` : 'N/A',
-  })
-
-  // Log detalhado do requestBody.customer antes de enviar
-  console.log('[Pagar.me PIX] RequestBody.customer completo antes de enviar:', {
-    name: requestBody.customer.name,
-    email: requestBody.customer.email,
-    hasDocument: !!requestBody.customer.document,
-    documentPreview: requestBody.customer.document ? `${requestBody.customer.document.substring(0, 3)}***` : 'N/A',
-    type: requestBody.customer.type,
-    hasPhones: !!requestBody.customer.phones,
-    hasMobilePhone: !!requestBody.customer.phones?.mobile_phone,
-    mobilePhone: requestBody.customer.phones?.mobile_phone ? {
-      country_code: requestBody.customer.phones.mobile_phone.country_code,
-      area_code: requestBody.customer.phones.mobile_phone.area_code,
-      number: requestBody.customer.phones.mobile_phone.number,
-      fullPhone: `+${requestBody.customer.phones.mobile_phone.country_code}${requestBody.customer.phones.mobile_phone.area_code}${requestBody.customer.phones.mobile_phone.number}`,
-    } : 'N/A',
-    phoneValid: !!(requestBody.customer.phones?.mobile_phone?.country_code && requestBody.customer.phones?.mobile_phone?.area_code && requestBody.customer.phones?.mobile_phone?.number),
-    customerKeys: Object.keys(requestBody.customer),
-  })
-
-  // Log do request body completo (sem dados sensíveis)
-  const requestBodyForLog = {
-    ...requestBody,
-    customer: {
-      ...requestBody.customer,
-      document: requestBody.customer.document ? `${requestBody.customer.document.substring(0, 3)}***` : undefined,
-      phones: requestBody.customer.phones,
-    },
-  }
-  console.log('[Pagar.me PIX] Request body completo (sem dados sensíveis):', JSON.stringify(requestBodyForLog, null, 2))
-
-  // Log crítico: verificar se phone está realmente no requestBody antes de serializar
-  console.log('[Pagar.me PIX] VERIFICAÇÃO CRÍTICA - requestBody.customer antes de enviar:', {
-    hasCustomer: !!requestBody.customer,
-    customerKeys: Object.keys(requestBody.customer),
-    hasPhones: !!requestBody.customer.phones,
-    hasMobilePhone: !!requestBody.customer.phones?.mobile_phone,
-    phoneType: typeof requestBody.customer.phones?.mobile_phone,
-    phoneIsObject: typeof requestBody.customer.phones?.mobile_phone === 'object' && !Array.isArray(requestBody.customer.phones?.mobile_phone),
-    phoneValue: requestBody.customer.phones?.mobile_phone,
-    phoneStringified: JSON.stringify(requestBody.customer.phones?.mobile_phone),
-  })
-
-  // Serializar e verificar novamente
   const requestBodyString = JSON.stringify(requestBody)
-  const requestBodyParsed = JSON.parse(requestBodyString)
-  console.log('[Pagar.me PIX] VERIFICAÇÃO PÓS-SERIALIZAÇÃO:', {
-    hasCustomer: !!requestBodyParsed.customer,
-    customerKeys: Object.keys(requestBodyParsed.customer || {}),
-    hasPhones: !!requestBodyParsed.customer?.phones,
-    hasMobilePhone: !!requestBodyParsed.customer?.phones?.mobile_phone,
-    phoneType: typeof requestBodyParsed.customer?.phones?.mobile_phone,
-    phoneValue: requestBodyParsed.customer?.phones?.mobile_phone,
-  })
 
-  // Log FINAL: verificar se phones está na string JSON que será enviada
-  const phonesInString = requestBodyString.includes('"phones"')
-  const mobilePhoneInString = requestBodyString.includes('"mobile_phone"')
-  const phoneObjectInString = requestBodyString.includes('"country_code"') && requestBodyString.includes('"area_code"') && requestBodyString.includes('"number"')
-  console.log('[Pagar.me PIX] VERIFICAÇÃO FINAL - String JSON que será enviada:', {
-    phonesInString,
-    mobilePhoneInString,
-    phoneObjectInString,
-    stringLength: requestBodyString.length,
-    customerSection: requestBodyString.substring(
-      requestBodyString.indexOf('"customer"'),
-      requestBodyString.indexOf('"payments"') > 0 ? requestBodyString.indexOf('"payments"') : requestBodyString.length
-    ),
-  })
+  // Log do requestBody em desenvolvimento para facilitar debug e comparação com cartão
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Pagar.me PIX] Request body completo:', JSON.stringify(requestBody, null, 2))
+  }
+
+  // Construir header Authorization (mesmo formato usado em createCreditCardTransaction)
+  const authHeader = `Basic ${Buffer.from(apiKey + ':').toString('base64')}`
+
+  // Log em desenvolvimento para comparar headers
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Pagar.me PIX] Headers de autenticação:', {
+      hasAuthHeader: !!authHeader,
+      authHeaderLength: authHeader.length,
+      baseUrl,
+    })
+  }
 
   const response = await fetch(`${baseUrl}/orders`, {
     method: 'POST',
     headers: {
-      'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
+      'Authorization': authHeader,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     },
@@ -338,110 +274,159 @@ export async function createPixTransaction(
   }
 
   if (!response.ok) {
-    console.error('[Pagar.me PIX] Erro na API:', {
-      status: response.status,
-      statusText: response.statusText,
-      error: data,
-      errorMessage: data?.message || data?.error || data?.errors?.[0]?.message,
-      errorDetails: data?.errors,
-      requestBody: JSON.stringify(requestBodyForLog, null, 2),
-    })
+    // Tratamento de erro específico baseado no status HTTP
+    let errorMessage = 'Erro ao criar transação Pix'
     
-    // Log crítico: verificar se o phones estava no requestBody enviado
-    console.error('[Pagar.me PIX] VERIFICAÇÃO DO REQUEST ENVIADO:', {
-      requestBodyCustomer: requestBody.customer,
-      requestBodyCustomerPhones: requestBody.customer.phones,
-      requestBodyStringified: requestBodyString.substring(0, 500) + '...',
-      requestBodyHasPhones: requestBodyString.includes('"phones"'),
-      requestBodyHasMobilePhone: requestBodyString.includes('"mobile_phone"'),
-    })
-    
-    // Log completo da resposta de erro
-    console.error('[Pagar.me PIX] Resposta completa de erro:', JSON.stringify(data, null, 2))
-    
-    // Log detalhado dos erros
-    if (data?.errors && Array.isArray(data.errors)) {
-      console.error('[Pagar.me PIX] Erros detalhados do Pagar.me:')
-      data.errors.forEach((err: any, index: number) => {
-        console.error(`  Erro ${index + 1}:`, {
-          message: err.message,
-          parameter: err.parameter,
-          type: err.type,
-          fullError: err,
-        })
+    if (response.status === 401) {
+      errorMessage = 'Token do Pagar.me inválido ou não autorizado. Verifique se a secret_key está configurada corretamente no banco de dados.'
+    } else if (response.status === 400) {
+      errorMessage = data?.message || data?.error || data?.errors?.[0]?.message || 'Dados inválidos enviados ao Pagar.me'
+    } else if (response.status === 404) {
+      errorMessage = 'Endpoint do Pagar.me não encontrado. Verifique a configuração do ambiente.'
+    } else if (response.status >= 500) {
+      errorMessage = 'Erro interno no servidor do Pagar.me. Tente novamente mais tarde.'
+    } else {
+      errorMessage = data?.message || data?.error || data?.errors?.[0]?.message || 'Erro ao criar transação Pix'
+    }
+
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Pagar.me PIX] Erro na API:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorMessage,
+        errors: data?.errors,
+        responseData: data,
       })
     }
-    
-    const errorMessage = data?.message || data?.error || data?.errors?.[0]?.message || 'Erro ao criar transação Pix'
     throw new Error(`Pagar.me: ${errorMessage}`)
   }
 
-  console.log('[Pagar.me PIX] Resposta recebida:', {
-    orderId: data.id,
-    hasCharges: !!data.charges,
-    chargesLength: data.charges?.length || 0,
-    status: data.status,
-    fullResponseKeys: Object.keys(data),
-  })
-  
-  // Log da resposta completa para debug
-  console.log('[Pagar.me PIX] Resposta completa do Pagar.me:', JSON.stringify(data, null, 2))
-  
-  // Buscar o pagamento Pix na resposta
-  // A estrutura pode variar, tentar diferentes caminhos
+  // Buscar o pagamento Pix na resposta com verificações mais robustas
   let pixPayment = null
   let qrCode = null
   
-  if (data.charges && data.charges.length > 0) {
-    const charge = data.charges[0]
-    console.log('[Pagar.me PIX] Charge encontrado:', {
-      chargeId: charge.id,
-      status: charge.status,
-      hasLastTransaction: !!charge.last_transaction,
-      lastTransactionKeys: charge.last_transaction ? Object.keys(charge.last_transaction) : [],
-    })
-    pixPayment = charge.last_transaction
-    
-    // Tentar encontrar QR code em diferentes campos
-    if (pixPayment) {
-      qrCode = pixPayment.qr_code || pixPayment.qr_code_string || pixPayment.pix_qr_code || pixPayment.qr_code_base64
+  // Verificar estrutura básica da resposta
+  if (!data || typeof data !== 'object') {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Pagar.me PIX] Resposta não é um objeto válido:', typeof data, data)
+    }
+    throw new Error('Resposta inválida do Pagar.me: formato de dados incorreto.')
+  }
+
+  // Tentar buscar em data.charges[0].last_transaction (estrutura mais comum)
+  if (data.charges && Array.isArray(data.charges) && data.charges.length > 0) {
+    const firstCharge = data.charges[0]
+    if (firstCharge && firstCharge.last_transaction) {
+      pixPayment = firstCharge.last_transaction
+      // Buscar QR code em todos os campos possíveis
+      qrCode = pixPayment.qr_code 
+        || pixPayment.qr_code_string 
+        || pixPayment.pix_qr_code 
+        || pixPayment.qr_code_base64
+        || pixPayment.qr_code_url
     }
   }
   
-  // Fallback: tentar encontrar em outros lugares da resposta
+  // Fallback: tentar em data.last_transaction
   if (!pixPayment && data.last_transaction) {
-    console.log('[Pagar.me PIX] Usando last_transaction direto')
     pixPayment = data.last_transaction
-    qrCode = pixPayment.qr_code || pixPayment.qr_code_string || pixPayment.pix_qr_code || pixPayment.qr_code_base64
+    qrCode = qrCode || pixPayment.qr_code 
+      || pixPayment.qr_code_string 
+      || pixPayment.pix_qr_code 
+      || pixPayment.qr_code_base64
+      || pixPayment.qr_code_url
   }
 
-  // Fallback adicional: procurar QR code diretamente na resposta
+  // Fallback: tentar buscar QR code diretamente no nível raiz
   if (!qrCode) {
-    qrCode = data.qr_code || data.qr_code_string || data.pix_qr_code || data.qr_code_base64
-    if (qrCode) {
-      console.log('[Pagar.me PIX] QR Code encontrado diretamente na resposta')
+    qrCode = data.qr_code 
+      || data.qr_code_string 
+      || data.pix_qr_code 
+      || data.qr_code_base64
+      || data.qr_code_url
+  }
+
+  // Fallback adicional: buscar em data.charges[0].payment_method (se existir)
+  if (!qrCode && data.charges && Array.isArray(data.charges) && data.charges.length > 0) {
+    const charge = data.charges[0]
+    if (charge && charge.payment_method && charge.payment_method.pix) {
+      const pixData = charge.payment_method.pix
+      qrCode = pixData.qr_code 
+        || pixData.qr_code_string 
+        || pixData.pix_qr_code 
+        || pixData.qr_code_base64
+        || pixData.qr_code_url
+      if (!pixPayment && pixData) {
+        pixPayment = pixData
+      }
     }
   }
 
+  // Verificar se encontramos o pagamento
   if (!pixPayment) {
-    console.error('[Pagar.me PIX] Estrutura de resposta inesperada. Resposta completa:', JSON.stringify(data, null, 2))
-    throw new Error('Resposta inválida do Pagar.me: estrutura de dados não encontrada. Verifique os logs para mais detalhes.')
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Pagar.me PIX] Estrutura de resposta inesperada - pixPayment não encontrado:', {
+        hasCharges: !!data.charges,
+        chargesLength: data.charges?.length || 0,
+        hasLastTransaction: !!data.last_transaction,
+        dataKeys: Object.keys(data),
+        fullResponse: JSON.stringify(data, null, 2),
+      })
+    }
+    throw new Error('Resposta inválida do Pagar.me: estrutura de dados de pagamento não encontrada. Verifique se o método de pagamento PIX está habilitado na sua conta Pagar.me.')
   }
 
-  console.log('[Pagar.me PIX] Dados do pagamento Pix:', {
-    paymentId: pixPayment.id,
-    status: pixPayment.status,
-    hasQrCode: !!qrCode,
-    qrCodeLength: qrCode?.length || 0,
-    qrCodeField: qrCode ? (pixPayment.qr_code ? 'qr_code' : pixPayment.qr_code_string ? 'qr_code_string' : pixPayment.pix_qr_code ? 'pix_qr_code' : 'qr_code_base64') : 'não encontrado',
-    expiresAt: pixPayment.expires_at,
-    paymentKeys: Object.keys(pixPayment),
-  })
+  // Verificar status da transação antes de buscar QR code
+  // Se a transação falhou, extrair erro do gateway_response
+  const transactionStatus = pixPayment.status || data.status || data.charges?.[0]?.status
+  const transactionSuccess = pixPayment.success !== undefined ? pixPayment.success : (transactionStatus !== 'failed')
+  
+  if (transactionStatus === 'failed' || transactionSuccess === false) {
+    const gatewayError = extractGatewayError(pixPayment)
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Pagar.me PIX] Transação falhou:', {
+        status: transactionStatus,
+        success: transactionSuccess,
+        gatewayError,
+        gatewayResponse: pixPayment.gateway_response,
+      })
+    }
+    
+    // Mensagem específica para erro de Company não encontrada
+    if (gatewayError && (gatewayError.includes('Company') || gatewayError.includes('company'))) {
+      throw new Error('Conta Pagar.me não configurada corretamente. Verifique se a Company está configurada na sua conta Pagar.me e se o token está associado à Company correta.')
+    }
+    
+    // Mensagem específica para outros erros do gateway
+    if (gatewayError) {
+      // Limpar mensagem de erro removendo prefixos desnecessários
+      let cleanError = gatewayError
+      if (cleanError.includes('|')) {
+        const parts = cleanError.split('|')
+        cleanError = parts[parts.length - 1].trim() || cleanError
+      }
+      throw new Error(`Transação PIX falhou: ${cleanError}`)
+    }
+    
+    // Mensagem genérica se não conseguir extrair erro específico
+    throw new Error('Transação PIX falhou. Verifique a configuração da sua conta Pagar.me e tente novamente.')
+  }
 
+  // Verificar se encontramos o QR code (apenas se transação não falhou)
   if (!qrCode) {
-    console.error('[Pagar.me PIX] QR Code não encontrado na resposta. Dados do pagamento:', JSON.stringify(pixPayment, null, 2))
-    console.error('[Pagar.me PIX] Resposta completa do Pagar.me:', JSON.stringify(data, null, 2))
-    throw new Error('QR Code não foi gerado pelo Pagar.me. Verifique se o token está configurado corretamente para o ambiente.')
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Pagar.me PIX] QR Code não encontrado na resposta:', {
+        pixPaymentKeys: pixPayment ? Object.keys(pixPayment) : [],
+        dataKeys: Object.keys(data),
+        hasCharges: !!data.charges,
+        chargeKeys: data.charges?.[0] ? Object.keys(data.charges[0]) : [],
+        transactionStatus,
+        transactionSuccess,
+        fullResponse: JSON.stringify(data, null, 2),
+      })
+    }
+    throw new Error('QR Code não foi gerado pelo Pagar.me. Verifique se o token está configurado corretamente para o ambiente e se a conta Pagar.me tem PIX habilitado.')
   }
 
   return {
@@ -508,6 +493,23 @@ export async function createCreditCardTransaction(
   const apiKey = await getApiKey(environment)
   const baseUrl = getBaseUrl(environment)
 
+  // Verificar se apiKey está presente (validação de token) - mesma validação do PIX
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error(`Token do Pagar.me não configurado para ambiente ${environment}`)
+  }
+
+  // Log em desenvolvimento para verificar qual chave está sendo usada (mascarada)
+  if (process.env.NODE_ENV === 'development') {
+    const maskedKey = apiKey.length > 8 
+      ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`
+      : '****'
+    console.log('[Pagar.me Credit Card] Usando API key:', {
+      environment,
+      keyPreview: maskedKey,
+      keyLength: apiKey.length,
+    })
+  }
+
   const cardField = params.credit_card.card_id
     ? { id: params.credit_card.card_id }
     : params.credit_card.card_token
@@ -529,23 +531,6 @@ export async function createCreditCardTransaction(
         code: `order-${params.metadata?.order_id || 'unknown'}`,
       }]
 
-  console.log('[Pagar.me Credit Card] Itens formatados para Pagar.me:', {
-    itemsCount: items.length,
-    items: items.map(item => ({
-      code: item.code,
-      description: item.description,
-      quantity: item.quantity,
-      amount: item.amount,
-    })),
-  })
-
-  // Log de installments antes de montar requestBody
-  console.log('[Pagar.me Credit Card] Installments recebido:', {
-    installments: params.credit_card.installments,
-    willUse: params.credit_card.installments || 1,
-    installmentsType: typeof params.credit_card.installments,
-    isValid: typeof params.credit_card.installments === 'number' && params.credit_card.installments >= 1 && params.credit_card.installments <= 12,
-  })
 
   // Preparar request body com customer explícito (garantindo que phone está presente)
   // IMPORTANTE: Pagar.me espera "phones" (plural) como objeto com mobile_phone e/ou home_phone
@@ -587,19 +572,6 @@ export async function createCreditCardTransaction(
       },
     }
 
-    // Log do billing antes de adicionar
-    console.log('[Pagar.me Credit Card] Billing preparado para payment:', {
-      hasBilling: !!billingForPayment,
-      billing: billingForPayment,
-      allFieldsPresent: !!(
-        billingForPayment.address.street &&
-        billingForPayment.address.city &&
-        billingForPayment.address.state &&
-        billingForPayment.address.zip_code
-      ),
-    })
-  } else {
-    console.log('[Pagar.me Credit Card] Billing não fornecido (payment será enviado sem billing)')
   }
 
   // Converter billingForPayment.address para o formato v5 (billing_address com line_1/line_2)
@@ -647,131 +619,27 @@ export async function createCreditCardTransaction(
   
   // Verificação final crítica antes de enviar
   if (!requestBody.customer.phones || !requestBody.customer.phones.mobile_phone || !requestBody.customer.phones.mobile_phone.country_code || !requestBody.customer.phones.mobile_phone.area_code || !requestBody.customer.phones.mobile_phone.number) {
-    console.error('[Pagar.me Credit Card] ERRO CRÍTICO: Phone não está presente no requestBody!', {
-      requestBodyCustomer: requestBody.customer,
-      paramsCustomerPhone: params.customer.phone,
-    })
     throw new Error('Telefone do cliente não está presente no requestBody. Erro crítico na montagem dos dados.')
   }
 
-  // Log detalhado do customer recebido
-  console.log('[Pagar.me Credit Card] Customer recebido em params:', {
-    name: params.customer?.name,
-    email: params.customer?.email,
-    hasDocument: !!params.customer?.document,
-    documentPreview: params.customer?.document ? `${params.customer.document.substring(0, 3)}***` : 'N/A',
-    type: params.customer?.type || 'individual',
-    hasPhone: !!params.customer?.phone,
-    phone: params.customer?.phone ? {
-      country_code: params.customer.phone.country_code,
-      area_code: params.customer.phone.area_code,
-      number: params.customer.phone.number,
-      fullPhone: `+${params.customer.phone.country_code}${params.customer.phone.area_code}${params.customer.phone.number}`,
-    } : 'N/A',
-    phoneValid: !!(params.customer?.phone?.country_code && params.customer?.phone?.area_code && params.customer?.phone?.number),
-  })
-
-  console.log('[Pagar.me Credit Card] Criando transação', {
-    environment,
-    amount: params.amount,
-    hasCustomer: !!params.customer,
-    customerName: params.customer?.name,
-    customerDocument: params.customer?.document ? `${params.customer.document.substring(0, 3)}***` : 'N/A',
-    customerPhone: params.customer?.phone ? `+${params.customer.phone.country_code} (${params.customer.phone.area_code}) ${params.customer.phone.number}` : 'N/A',
-    hasBilling: !!params.billing,
-    itemsCount: items.length,
-    hasCardToken: !!cardField,
-    installments: params.credit_card.installments || 1,
-    baseUrl,
-    apiKeyPrefix: apiKey ? `${apiKey.substring(0, 10)}...` : 'N/A',
-  })
-
-  // Log detalhado do requestBody.customer antes de enviar
-  console.log('[Pagar.me Credit Card] RequestBody.customer completo antes de enviar:', {
-    name: requestBody.customer.name,
-    email: requestBody.customer.email,
-    hasDocument: !!requestBody.customer.document,
-    documentPreview: requestBody.customer.document ? `${requestBody.customer.document.substring(0, 3)}***` : 'N/A',
-    type: requestBody.customer.type,
-    hasPhones: !!requestBody.customer.phones,
-    hasMobilePhone: !!requestBody.customer.phones?.mobile_phone,
-    mobilePhone: requestBody.customer.phones?.mobile_phone ? {
-      country_code: requestBody.customer.phones.mobile_phone.country_code,
-      area_code: requestBody.customer.phones.mobile_phone.area_code,
-      number: requestBody.customer.phones.mobile_phone.number,
-      fullPhone: `+${requestBody.customer.phones.mobile_phone.country_code}${requestBody.customer.phones.mobile_phone.area_code}${requestBody.customer.phones.mobile_phone.number}`,
-    } : 'N/A',
-    phoneValid: !!(requestBody.customer.phones?.mobile_phone?.country_code && requestBody.customer.phones?.mobile_phone?.area_code && requestBody.customer.phones?.mobile_phone?.number),
-    customerKeys: Object.keys(requestBody.customer),
-  })
-
-  // Log do request body completo (sem dados sensíveis)
-  const requestBodyForLog = {
-    ...requestBody,
-    customer: {
-      ...requestBody.customer,
-      document: requestBody.customer.document ? `${requestBody.customer.document.substring(0, 3)}***` : undefined,
-      phones: requestBody.customer.phones,
-    },
-    payments: requestBody.payments.map(payment => ({
-      ...payment,
-      credit_card: {
-        ...payment.credit_card,
-        card: payment.credit_card.card ? { ...payment.credit_card.card, token: payment.credit_card.card.token ? '***' : undefined } : undefined,
-      },
-    })),
-  }
-  console.log('[Pagar.me Credit Card] Request body completo (sem dados sensíveis):', JSON.stringify(requestBodyForLog, null, 2))
-
-  // Log FINAL: JSON que será enviado para o Pagar.me (sem dados sensíveis)
-  console.log(
-    '[Pagar.me Credit Card] Request body FINAL (sem dados sensíveis):',
-    JSON.stringify(requestBodyForLog, null, 2),
-  )
-
-  // Log crítico: verificar se phone está realmente no requestBody antes de serializar
-  console.log('[Pagar.me Credit Card] VERIFICAÇÃO CRÍTICA - requestBody.customer antes de enviar:', {
-    hasCustomer: !!requestBody.customer,
-    customerKeys: Object.keys(requestBody.customer),
-    hasPhones: !!requestBody.customer.phones,
-    hasMobilePhone: !!requestBody.customer.phones?.mobile_phone,
-    phoneType: typeof requestBody.customer.phones?.mobile_phone,
-    phoneIsObject: typeof requestBody.customer.phones?.mobile_phone === 'object' && !Array.isArray(requestBody.customer.phones?.mobile_phone),
-    phoneValue: requestBody.customer.phones?.mobile_phone,
-    phoneStringified: JSON.stringify(requestBody.customer.phones?.mobile_phone),
-  })
-
-  // Serializar e verificar novamente
   const requestBodyString = JSON.stringify(requestBody)
-  const requestBodyParsed = JSON.parse(requestBodyString)
-  console.log('[Pagar.me Credit Card] VERIFICAÇÃO PÓS-SERIALIZAÇÃO:', {
-    hasCustomer: !!requestBodyParsed.customer,
-    customerKeys: Object.keys(requestBodyParsed.customer || {}),
-    hasPhones: !!requestBodyParsed.customer?.phones,
-    hasMobilePhone: !!requestBodyParsed.customer?.phones?.mobile_phone,
-    phoneType: typeof requestBodyParsed.customer?.phones?.mobile_phone,
-    phoneValue: requestBodyParsed.customer?.phones?.mobile_phone,
-  })
 
-  // Log FINAL: verificar se phones está na string JSON que será enviada
-  const phonesInString = requestBodyString.includes('"phones"')
-  const mobilePhoneInString = requestBodyString.includes('"mobile_phone"')
-  const phoneObjectInString = requestBodyString.includes('"country_code"') && requestBodyString.includes('"area_code"') && requestBodyString.includes('"number"')
-  console.log('[Pagar.me Credit Card] VERIFICAÇÃO FINAL - String JSON que será enviada:', {
-    phonesInString,
-    mobilePhoneInString,
-    phoneObjectInString,
-    stringLength: requestBodyString.length,
-    customerSection: requestBodyString.substring(
-      requestBodyString.indexOf('"customer"'),
-      requestBodyString.indexOf('"payments"') > 0 ? requestBodyString.indexOf('"payments"') : requestBodyString.length
-    ),
-  })
+  // Construir header Authorization (mesmo formato usado em createPixTransaction)
+  const authHeader = `Basic ${Buffer.from(apiKey + ':').toString('base64')}`
+
+  // Log em desenvolvimento para comparar headers
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Pagar.me Credit Card] Headers de autenticação:', {
+      hasAuthHeader: !!authHeader,
+      authHeaderLength: authHeader.length,
+      baseUrl,
+    })
+  }
 
   const response = await fetch(`${baseUrl}/orders`, {
     method: 'POST',
     headers: {
-      'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
+      'Authorization': authHeader,
       'Content-Type': 'application/json',
     },
     body: requestBodyString,
@@ -790,94 +658,32 @@ export async function createCreditCardTransaction(
 
   if (!response.ok) {
     error = data
-    
-    console.error('[Pagar.me Credit Card] Erro na API:', {
-      status: response.status,
-      statusText: response.statusText,
-      error: error,
-      errorMessage: error?.message || error?.error || error?.errors?.[0]?.message,
-      errorDetails: error?.errors,
-      requestBody: JSON.stringify(requestBodyForLog, null, 2),
-    })
-    
-    // Log crítico: verificar se o phones estava no requestBody enviado
-    console.error('[Pagar.me Credit Card] VERIFICAÇÃO DO REQUEST ENVIADO:', {
-      requestBodyCustomer: requestBody.customer,
-      requestBodyCustomerPhones: requestBody.customer.phones,
-      requestBodyStringified: requestBodyString.substring(0, 500) + '...',
-      requestBodyHasPhones: requestBodyString.includes('"phones"'),
-      requestBodyHasMobilePhone: requestBodyString.includes('"mobile_phone"'),
-    })
-    
-    // Log completo da resposta de erro
-    console.error('[Pagar.me Credit Card] Resposta completa de erro:', JSON.stringify(error, null, 2))
-    
-    // Log detalhado dos erros
-    if (error?.errors && Array.isArray(error.errors)) {
-      console.error('[Pagar.me Credit Card] Erros detalhados do Pagar.me:')
-      error.errors.forEach((err: any, index: number) => {
-        console.error(`  Erro ${index + 1}:`, {
-          message: err.message,
-          parameter: err.parameter,
-          type: err.type,
-          fullError: err,
-        })
+    const errorMessage = error?.message || error?.error || error?.errors?.[0]?.message || 'Erro ao criar transação de cartão'
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Pagar.me Credit Card] Erro na API:', {
+        status: response.status,
+        errorMessage,
+        errors: error?.errors,
       })
     }
-    
-    throw new Error(error.message || error.error || error.errors?.[0]?.message || 'Erro ao criar transação de cartão')
+    throw new Error(errorMessage)
   }
-  
-  // Log da resposta completa mesmo quando OK (para debug de transações que falham)
-  console.log('[Pagar.me Credit Card] Resposta completa do Pagar.me:', {
-    orderId: data.id,
-    status: data.status,
-    hasCharges: !!data.charges,
-    chargesLength: data.charges?.length || 0,
-    charges: data.charges?.map((charge: any) => ({
-      id: charge.id,
-      status: charge.status,
-      lastTransaction: charge.last_transaction ? {
-        id: charge.last_transaction.id,
-        status: charge.last_transaction.status,
-        gatewayResponse: charge.last_transaction.gateway_response,
-        acquirerResponse: charge.last_transaction.acquirer_response,
-        acquirerResponseCode: charge.last_transaction.acquirer_response_code,
-        acquirerResponseMessage: charge.last_transaction.acquirer_response_message,
-      } : null,
-    })) || [],
-  })
   
   // Buscar o pagamento de cartão na resposta
   const cardPayment = data.charges?.[0]?.last_transaction
   if (!cardPayment) {
-    console.error('[Pagar.me Credit Card] Resposta inválida - last_transaction não encontrado. Resposta completa:', JSON.stringify(data, null, 2))
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Pagar.me Credit Card] Resposta inválida - last_transaction não encontrado')
+    }
     throw new Error('Resposta inválida do Pagar.me')
   }
   
-  // Log detalhado do pagamento
-  console.log('[Pagar.me Credit Card] Dados do pagamento:', {
-    paymentId: cardPayment.id,
-    status: cardPayment.status,
-    gatewayResponse: cardPayment.gateway_response,
-    acquirerResponse: cardPayment.acquirer_response,
-    acquirerResponseCode: cardPayment.acquirer_response_code,
-    acquirerResponseMessage: cardPayment.acquirer_response_message,
-    gatewayId: cardPayment.gateway_id,
-    paymentKeys: Object.keys(cardPayment),
-  })
-  
-  // Se a transação falhou, logar os detalhes do erro
-  if (cardPayment.status === 'failed' || data.status === 'failed') {
-    console.error('[Pagar.me Credit Card] TRANSAÇÃO FALHOU - Detalhes completos:', {
-      orderStatus: data.status,
-      chargeStatus: data.charges?.[0]?.status,
-      transactionStatus: cardPayment.status,
-      gatewayResponse: cardPayment.gateway_response,
-      acquirerResponse: cardPayment.acquirer_response,
+  // Se a transação falhou, logar os detalhes do erro apenas em desenvolvimento
+  if ((cardPayment.status === 'failed' || data.status === 'failed') && process.env.NODE_ENV === 'development') {
+    console.error('[Pagar.me Credit Card] Transação falhou:', {
+      status: cardPayment.status,
       acquirerResponseCode: cardPayment.acquirer_response_code,
       acquirerResponseMessage: cardPayment.acquirer_response_message,
-      fullResponse: JSON.stringify(data, null, 2),
     })
   }
 

@@ -119,7 +119,9 @@ export default function OrdersPage() {
         to: response.to,
       })
     } catch (error) {
-      console.error("Erro ao carregar pedidos:", error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error("Erro ao carregar pedidos:", error)
+      }
     } finally {
       setLoading(false)
     }
@@ -166,9 +168,14 @@ export default function OrdersPage() {
 
     try {
       await navigator.clipboard.writeText(link)
-      // Idealmente usar um toast global aqui para feedback ("Link copiado!")
+      if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-alert
+        window.alert("Link de pagamento copiado para a área de transferência.")
+      }
     } catch (error) {
-      console.error("Erro ao copiar link de pagamento:", error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error("Erro ao copiar link de pagamento:", error)
+      }
     }
   }
 
@@ -440,7 +447,7 @@ export default function OrdersPage() {
                             <Link2 className="h-4 w-4" />
                           </Button>
                         </>
-                      ) : (
+                      ) : !order.payment_status || order.payment_status !== "paid" ? (
                         <Button
                           variant="outline"
                           size="icon"
@@ -449,7 +456,7 @@ export default function OrdersPage() {
                         >
                           <Link2 className="h-4 w-4" />
                         </Button>
-                      )}
+                      ) : null}
                     </div>
                     </TableCell>
                   </TableRow>

@@ -71,7 +71,9 @@ export function PaymentLinkModal({
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
-      console.error('Erro ao copiar:', err)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Erro ao copiar:', err)
+      }
     }
   }
 

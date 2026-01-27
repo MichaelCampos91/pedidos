@@ -28,18 +28,6 @@ export async function GET(
 
     const order = orderResult.rows[0]
 
-    // Log dos dados do cliente para debug
-    console.log('[Checkout API] Dados do cliente encontrados:', {
-      orderId: params.orderId,
-      clientName: order.client_name,
-      clientEmail: order.client_email,
-      clientCpf: order.client_cpf ? `${order.client_cpf.substring(0, 3)}***` : 'N/A',
-      clientWhatsapp: order.client_whatsapp || 'N/A',
-      clientPhone: order.client_phone || 'N/A',
-      hasWhatsapp: !!order.client_whatsapp,
-      hasPhone: !!order.client_phone,
-    })
-
     // Verificar se o pedido já foi pago
     if (order.status !== 'aguardando_pagamento') {
       return NextResponse.json(
@@ -60,7 +48,6 @@ export async function GET(
 
       // Verificar se o token corresponde
       if (order.payment_link_token !== token) {
-        console.warn(`[Checkout] Tentativa de acesso com token inválido para pedido ${params.orderId}`)
         return NextResponse.json(
           { error: 'Token inválido ou expirado' },
           { status: 403 }
@@ -73,18 +60,11 @@ export async function GET(
         const now = new Date()
         
         if (now > expiresAt) {
-          console.warn(`[Checkout] Tentativa de acesso com token expirado para pedido ${params.orderId}`)
           return NextResponse.json(
             { error: 'Link de pagamento expirado. Solicite um novo link.' },
             { status: 403 }
           )
         }
-      }
-    } else {
-      // Se não houver token, permitir acesso (compatibilidade com links antigos ou desenvolvimento)
-      // Mas avisar se o pedido tem token configurado
-      if (order.payment_link_token) {
-        console.warn(`[Checkout] Acesso sem token para pedido ${params.orderId} que possui token configurado`)
       }
     }
 
@@ -121,7 +101,9 @@ export async function GET(
           ? JSON.parse(order.shipping_option_data) 
           : order.shipping_option_data
       } catch (e) {
-        console.error('Erro ao parsear shipping_option_data:', e)
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Erro ao parsear shipping_option_data:', e)
+        }
       }
     }
 

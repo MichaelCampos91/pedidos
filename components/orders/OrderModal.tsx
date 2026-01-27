@@ -134,7 +134,9 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
       const data = await productsApi.list()
       setProducts(data.filter((p: any) => p.active))
     } catch (error) {
-      console.error('Erro ao carregar produtos:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Erro ao carregar produtos:', error)
+      }
     }
   }
 
@@ -190,7 +192,9 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         setShippingEnvironment('production')
       }
     } catch (error) {
-      console.error('Erro ao carregar pedido:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Erro ao carregar pedido:', error)
+      }
     } finally {
       setLoadingData(false)
     }
@@ -211,7 +215,9 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         previousAddressRef.current = defaultAddress.id
       }
     } catch (error) {
-      console.error('Erro ao carregar endereços:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Erro ao carregar endereços:', error)
+      }
       setClientAddresses([])
     }
   }

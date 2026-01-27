@@ -71,23 +71,6 @@ export default function CheckoutPage() {
     }
   }, [orderId])
 
-  // Log do customer sendo passado para PaymentForm
-  useEffect(() => {
-    if (order && currentStep === 2) {
-      console.log('[CheckoutPage] Customer sendo passado para PaymentForm:', {
-        orderId: parseInt(orderId),
-        customer: {
-          name: order.client_name,
-          email: order.client_email || '',
-          hasDocument: !!order.client_cpf,
-          documentPreview: order.client_cpf ? `${order.client_cpf.substring(0, 3)}***` : 'N/A',
-          phone: order.client_whatsapp || 'N/A',
-          hasPhone: !!order.client_whatsapp,
-          phoneLength: order.client_whatsapp?.length || 0,
-        },
-      })
-    }
-  }, [order, orderId, currentStep])
 
   const loadCheckoutData = async () => {
     try {
@@ -110,7 +93,9 @@ export default function CheckoutPage() {
       const data = await response.json()
       setOrder(data)
     } catch (error: any) {
-      console.error("Erro ao carregar checkout:", error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error("Erro ao carregar checkout:", error)
+      }
       setError(error.message || "Erro ao carregar dados do pedido")
     } finally {
       setLoading(false)

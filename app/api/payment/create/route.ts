@@ -29,33 +29,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { order_id, payment_method, customer, billing, credit_card, environment } = body
     
-    // Log do customer recebido no body
-    console.log('[Payment API] Customer recebido no body:', {
-      orderId: order_id,
-      paymentMethod: payment_method,
-      customer: {
-        name: customer?.name || 'N/A',
-        email: customer?.email || 'N/A',
-        hasDocument: !!customer?.document,
-        documentPreview: customer?.document ? `${customer.document.substring(0, 3)}***` : 'N/A',
-        phone: customer?.phone || 'N/A',
-        hasPhone: !!customer?.phone,
-        phoneLength: customer?.phone?.length || 0,
-      },
-    })
-    
-    // Log do credit_card recebido no body
-    if (payment_method === 'credit_card') {
-      console.log('[Payment API] Credit card recebido no body:', {
-        hasCreditCard: !!credit_card,
-        installments: credit_card?.installments,
-        installmentsType: typeof credit_card?.installments,
-        cardToken: credit_card?.card_token ? 'presente' : 'ausente',
-        cardId: credit_card?.card_id ? 'presente' : 'ausente',
-        creditCardKeys: credit_card ? Object.keys(credit_card) : [],
-      })
-    }
-    
     // Detectar ambiente se não foi fornecido ou usar o fornecido
     const detectedEnvironment = environment || detectEnvironment(request)
 
@@ -99,17 +72,6 @@ export async function POST(request: NextRequest) {
 
     const orderItems = itemsResult.rows
 
-    console.log('[Payment API] Itens do pedido encontrados:', {
-      itemsCount: orderItems.length,
-      items: orderItems.map(item => ({
-        id: item.id,
-        productId: item.product_id,
-        title: item.title,
-        price: item.price,
-        quantity: item.quantity,
-      })),
-    })
-
     // Buscar endereço de entrega
     let shippingAddress = null
     if (order.shipping_address_id) {
@@ -129,40 +91,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Log antes de processar telefone
-    console.log('[Payment API] Telefones disponíveis:', {
-      customerPhone: customer.phone,
-      clientWhatsapp: order.client_whatsapp,
-      clientPhone: order.client_phone,
-    })
-
     // Limpar telefone removendo caracteres não numéricos
     let cleanPhone = (customer.phone || order.client_whatsapp || order.client_phone || '').replace(/\D/g, '')
     
     // Remover código do país (55) se presente no início
     if (cleanPhone.startsWith('55') && cleanPhone.length > 11) {
       cleanPhone = cleanPhone.substring(2)
-      console.log('[Payment API] Código do país (55) removido do telefone')
     }
-    
-    console.log('[Payment API] Telefone limpo:', {
-      original: customer.phone || order.client_whatsapp || order.client_phone,
-      cleaned: cleanPhone,
-      length: cleanPhone.length,
-    })
 
     // Validação mais robusta - telefone brasileiro deve ter pelo menos 10 dígitos (DDD + número)
     // Formato esperado: 2 dígitos DDD + 8 ou 9 dígitos do número
     if (!cleanPhone || cleanPhone.length < 10) {
-      console.error('[Payment API] Telefone inválido ou ausente:', {
-        cleanPhone,
-        length: cleanPhone.length,
-        sources: {
-          customerPhone: customer.phone,
-          clientWhatsapp: order.client_whatsapp,
-          clientPhone: order.client_phone,
-        },
-      })
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[Payment API] Telefone inválido ou ausente')
+      }
       return NextResponse.json(
         { error: 'Telefone do cliente é obrigatório e deve ser válido. Por favor, verifique os dados do cliente.' },
         { status: 400 }
@@ -178,11 +120,6 @@ export async function POST(request: NextRequest) {
     // Validar DDD (deve ser entre 11 e 99)
     const areaCodeNum = parseInt(areaCode)
     if (isNaN(areaCodeNum) || areaCodeNum < 11 || areaCodeNum > 99) {
-      console.error('[Payment API] DDD inválido:', {
-        areaCode,
-        areaCodeNum,
-        cleanPhone,
-      })
       return NextResponse.json(
         { error: 'DDD do telefone inválido' },
         { status: 400 }
@@ -191,27 +128,11 @@ export async function POST(request: NextRequest) {
 
     // Validar número (deve ter 8 ou 9 dígitos)
     if (number.length < 8 || number.length > 9) {
-      console.error('[Payment API] Número de telefone inválido após extração:', {
-        areaCode,
-        number,
-        numberLength: number.length,
-        cleanPhone,
-        expectedLength: '8 ou 9 dígitos',
-      })
       return NextResponse.json(
         { error: 'Número de telefone inválido. Deve ter 8 ou 9 dígitos após o DDD.' },
         { status: 400 }
       )
     }
-
-    // Log do telefone formatado
-    console.log('[Payment API] Telefone formatado para Pagar.me:', {
-      country_code: '55',
-      area_code: areaCode,
-      number: number,
-      fullPhone: `+55${areaCode}${number}`,
-      formatValid: true,
-    })
 
     const customerData = {
       name: (customer.name || order.client_name || '').trim(),
@@ -240,22 +161,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Log do customerData completo antes de chamar pagarme.ts
-    console.log('[Payment API] CustomerData completo antes de enviar ao Pagar.me:', {
-      name: customerData.name,
-      email: customerData.email,
-      hasDocument: !!customerData.document,
-      documentPreview: customerData.document ? `${customerData.document.substring(0, 3)}***` : 'N/A',
-      type: customerData.type,
-      phone: {
-        country_code: customerData.phone.country_code,
-        area_code: customerData.phone.area_code,
-        number: customerData.phone.number,
-        fullPhone: `+${customerData.phone.country_code}${customerData.phone.area_code}${customerData.phone.number}`,
-      },
-      hasPhone: !!customerData.phone,
-      phoneValid: !!(customerData.phone?.country_code && customerData.phone?.area_code && customerData.phone?.number),
-    })
 
     // Preparar dados de cobrança (opcional para PIX, mas recomendado)
     let billingData = undefined
@@ -288,21 +193,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('[Payment API] Criando transação', {
-      payment_method,
-      environment: detectedEnvironment,
-      environmentSource: environment ? 'request' : 'detected',
-      amount,
-      amountInReais: (amount / 100).toFixed(2),
-      order_id,
-      hasCustomer: !!customerData,
-      customerName: customerData.name,
-      customerEmail: customerData.email,
-      hasBilling: !!billingData,
-      billingAddress: billingData?.address ? `${billingData.address.street}, ${billingData.address.number}` : 'N/A',
-      nodeEnv: process.env.NODE_ENV,
-      hostname: request.headers.get('host'),
-    })
 
     let transaction
     if (payment_method === 'pix') {
@@ -368,13 +258,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('[Payment API] Transação criada com sucesso', {
-      transactionId: transaction.id,
-      status: transaction.status,
-      payment_method,
-      hasPixQrCode: !!transaction.pix_qr_code,
-      pixQrCodeLength: transaction.pix_qr_code?.length || 0,
-    })
+    // Validar resposta antes de retornar ao frontend
+    if (payment_method === 'pix') {
+      // Para PIX, verificar se pix_qr_code está presente
+      if (!transaction.pix_qr_code) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[Payment API] QR Code PIX não encontrado na transação:', {
+            transactionId: transaction.id,
+            transactionStatus: transaction.status,
+            transactionKeys: Object.keys(transaction),
+          })
+        }
+        return NextResponse.json(
+          { 
+            error: 'QR Code PIX não foi gerado. Verifique a configuração do Pagar.me e se o método PIX está habilitado na sua conta.',
+            details: process.env.NODE_ENV === 'development' ? 'Transaction ID: ' + transaction.id : undefined,
+          },
+          { status: 500 }
+        )
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -387,11 +290,9 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('[Payment API] Erro ao criar pagamento:', {
-      error: error.message,
-      stack: error.stack,
-      name: error.name,
-    })
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Payment API] Erro ao criar pagamento:', error.message)
+    }
     return NextResponse.json(
       { 
         error: error.message || 'Erro ao processar pagamento',

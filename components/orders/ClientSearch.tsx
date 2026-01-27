@@ -70,7 +70,9 @@ export function ClientSearch({
       setSelectedClient(client)
       setSearchTerm(`${client.name} - ${formatCPF(client.cpf)}`)
     } catch (error) {
-      console.error("Erro ao carregar cliente:", error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error("Erro ao carregar cliente:", error)
+      }
     }
   }
 
@@ -90,7 +92,9 @@ export function ClientSearch({
       setResults(response.data)
       setShowResults(true)
     } catch (error) {
-      console.error("Erro ao buscar clientes:", error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error("Erro ao buscar clientes:", error)
+      }
       setResults([])
     } finally {
       setLoading(false)

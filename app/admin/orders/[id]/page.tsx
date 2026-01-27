@@ -52,7 +52,9 @@ export default function OrderFormPage() {
       const response = await clientsApi.list({ per_page: 100 })
       setClients(response.data)
     } catch (error) {
-      console.error('Erro ao carregar clientes:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Erro ao carregar clientes:', error)
+      }
     }
   }
 
@@ -61,7 +63,9 @@ export default function OrderFormPage() {
       const data = await productsApi.list()
       setProducts(data.filter((p: any) => p.active))
     } catch (error) {
-      console.error('Erro ao carregar produtos:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Erro ao carregar produtos:', error)
+      }
     }
   }
 
@@ -79,7 +83,9 @@ export default function OrderFormPage() {
         shipping_address_id: order.shipping_address_id?.toString() || ''
       })
     } catch (error) {
-      console.error('Erro ao carregar pedido:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Erro ao carregar pedido:', error)
+      }
     } finally {
       setLoadingData(false)
     }
