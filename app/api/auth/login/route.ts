@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { query } from '@/lib/database'
-import { generateToken, isSecureConnection } from '@/lib/auth'
+import { generateToken } from '@/lib/auth'
 import { saveLog } from '@/lib/logger'
 import { cookies } from 'next/headers'
-
-// Marca a rota como dinâmica porque usa cookies para autenticação
-export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
@@ -75,20 +72,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Define cookie httpOnly
-    // Detecta se deve usar secure baseado na conexão
-    let secure = false
-    try {
-      secure = isSecureConnection(request)
-    } catch (secureError: any) {
-      console.error('[Login API] Erro ao detectar conexão segura:', secureError)
-      // Fallback: assume seguro se NODE_ENV for production
-      secure = process.env.NODE_ENV === 'production'
-    }
-    
     const cookieStore = cookies()
     cookieStore.set('auth_token', token, {
       httpOnly: true,
-      secure,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60, // 7 dias em segundos
       path: '/',
@@ -111,51 +98,9 @@ export async function POST(request: NextRequest) {
       token
     })
   } catch (error: any) {
-    // Log detalhado do erro para debug
-    let isSecure = false
-    try {
-      isSecure = isSecureConnection(request)
-    } catch {
-      // Ignora erro ao detectar conexão segura no catch
-    }
-    
-    const errorDetails = {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-      // Informações adicionais para debug
-      isSecureConnection: isSecure,
-      url: request.url,
-      headers: {
-        'x-forwarded-proto': request.headers.get('x-forwarded-proto'),
-        'host': request.headers.get('host'),
-      },
-      nodeEnv: process.env.NODE_ENV,
-      forceSecureCookies: process.env.FORCE_SECURE_COOKIES,
-    }
-    
-    console.error('[Login API] Erro detalhado:', errorDetails)
-    
-    // Tenta salvar log, mas não bloqueia se falhar
-    try {
-      await saveLog('error', 'Erro no login', errorDetails)
-    } catch (logError) {
-      console.error('[Login API] Erro ao salvar log de erro:', logError)
-    }
-    
-    // Em desenvolvimento, retorna mais detalhes
-    const isDevelopment = process.env.NODE_ENV === 'development'
-    
-    // Sempre retorna mensagem de erro básica, mas em desenvolvimento inclui mais detalhes
+    await saveLog('error', 'Erro no login', { error: error.message })
     return NextResponse.json(
-      { 
-        error: 'Erro ao realizar login',
-        message: error.message || 'Erro desconhecido',
-        ...(isDevelopment && { 
-          details: errorDetails,
-          stack: error.stack 
-        })
-      },
+      { error: 'Erro ao realizar login' },
       { status: 500 }
     )
   }

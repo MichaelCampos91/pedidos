@@ -43,46 +43,6 @@ export async function requireAuth(request: NextRequest, cookieToken?: string | n
   }
 }
 
-// Detecta se a conexão é segura (HTTPS)
-// Verifica múltiplas fontes para garantir compatibilidade com proxies reversos como Cloud Run
-export function isSecureConnection(request: NextRequest): boolean {
-  try {
-    // 1. Verifica variável de ambiente para override manual
-    if (process.env.FORCE_SECURE_COOKIES === 'true') {
-      return true
-    }
-
-    // 2. Verifica header X-Forwarded-Proto (usado por Cloud Run e outros proxies)
-    const forwardedProto = request.headers.get('x-forwarded-proto')
-    if (forwardedProto === 'https') {
-      return true
-    }
-
-    // 3. Verifica o protocolo da URL da requisição
-    try {
-      const url = new URL(request.url)
-      if (url.protocol === 'https:') {
-        return true
-      }
-    } catch (urlError) {
-      // Se não conseguir parsear a URL, continua para outros métodos
-      console.warn('[isSecureConnection] Erro ao parsear URL:', urlError)
-    }
-
-    // 4. Fallback: verifica NODE_ENV (para compatibilidade)
-    if (process.env.NODE_ENV === 'production') {
-      return true
-    }
-
-    // Por padrão, assume conexão não segura (localhost em desenvolvimento)
-    return false
-  } catch (error) {
-    // Em caso de qualquer erro, loga e retorna false como fallback seguro
-    console.error('[isSecureConnection] Erro inesperado:', error)
-    return false
-  }
-}
-
 // Helper para criar resposta de erro de autenticação
 export function authErrorResponse(message: string = 'Token não fornecido', status: number = 401): NextResponse {
   return NextResponse.json({ error: message }, { status })
