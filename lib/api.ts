@@ -26,7 +26,8 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
-    throw new Error(error.error || 'Erro na requisição')
+    const message = error.message ?? error.error ?? 'Erro na requisição'
+    throw new Error(message)
   }
 
   return response.json()

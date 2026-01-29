@@ -100,7 +100,10 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     await saveLog('error', 'Erro no login', { error: error.message })
     return NextResponse.json(
-      { error: 'Erro ao realizar login' },
+      {
+        error: 'Erro ao realizar login',
+        message: error?.message || 'Erro desconhecido',
+      },
       { status: 500 }
     )
   }

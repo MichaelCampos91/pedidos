@@ -89,8 +89,15 @@ export default function LoginPage() {
               />
             </div>
             {error && (
-              <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
-                {error}
+              <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm space-y-1">
+                {error === "Erro ao realizar login" || error === "Credenciais inválidas" ? (
+                  error
+                ) : (
+                  <>
+                    <p className="font-medium">Erro ao realizar login</p>
+                    <p className="text-xs opacity-90">{error}</p>
+                  </>
+                )}
               </div>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
