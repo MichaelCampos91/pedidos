@@ -3,7 +3,7 @@
 import { ProtectedRoute, useAuth } from "@/lib/auth-context"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { LogOut, ShoppingCart, Users, Package, BarChart3, Truck, Settings, Braces } from "lucide-react"
+import { LogOut, ShoppingCart, Users, Package, BarChart3, Truck, Settings, Braces, FileText } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -59,6 +59,15 @@ export default function AdminLayout({
                 >
                   <BarChart3 className="h-4 w-4 mr-2" />
                   Dashboard
+                </Button>
+              </Link>
+              <Link href="/admin/logs">
+                <Button 
+                  variant="ghost" 
+                  className={`rounded-none border-b-2 ${isActive('/admin/logs') || pathname?.startsWith('/admin/logs/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Logs
                 </Button>
               </Link>
               <Link href="/admin/orders">

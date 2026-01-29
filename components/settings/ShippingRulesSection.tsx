@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RuleModal } from "./RuleModal"
-import { Truck, Plus, Edit, Trash2, Loader2, Gift, Percent, Clock } from "lucide-react"
+import { Truck, Plus, Edit, Trash2, Loader2, Gift, Clock } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 
@@ -14,7 +14,7 @@ export function ShippingRulesSection() {
   const [rules, setRules] = useState<any[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<any>(null)
-  const [newRuleType, setNewRuleType] = useState<'free_shipping' | 'discount' | 'surcharge' | undefined>(undefined)
+  const [newRuleType, setNewRuleType] = useState<'free_shipping' | 'surcharge' | undefined>(undefined)
 
   useEffect(() => {
     loadRules()
@@ -92,7 +92,7 @@ export function ShippingRulesSection() {
     setModalOpen(true)
   }
 
-  const handleNew = (ruleType?: 'free_shipping' | 'discount' | 'surcharge') => {
+  const handleNew = (ruleType?: 'free_shipping' | 'surcharge') => {
     setEditingRule(null)
     setNewRuleType(ruleType)
     setModalOpen(true)
@@ -109,7 +109,6 @@ export function ShippingRulesSection() {
   const getRuleTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
       free_shipping: 'Frete Grátis',
-      discount: 'Desconto',
       surcharge: 'Acréscimo',
       production_days: 'Prazo de Produção',
     }
@@ -191,7 +190,7 @@ export function ShippingRulesSection() {
   }
 
   const freeShippingRules = rules.filter((r) => r.rule_type === 'free_shipping')
-  const discountRules = rules.filter((r) => r.rule_type === 'discount' || r.rule_type === 'surcharge')
+  const surchargeRules = rules.filter((r) => r.rule_type === 'surcharge')
   const productionRules = rules.filter((r) => r.rule_type === 'production_days')
 
   return (
@@ -260,69 +259,6 @@ export function ShippingRulesSection() {
         </CardContent>
       </Card>
 
-      {/* Desconto/Acréscimo - OCULTO */}
-      <Card className="hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Percent className="h-5 w-5 text-blue-600" />
-            Desconto/Acréscimo no Frete
-          </CardTitle>
-          <CardDescription>
-            Configure descontos ou acréscimos no valor do frete
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {discountRules.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nenhuma regra de desconto/acréscimo configurada
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {discountRules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={rule.active ? 'default' : 'outline'}>
-                        {rule.active ? 'Ativo' : 'Inativo'}
-                      </Badge>
-                      <span className="font-medium">{getRuleTypeLabel(rule.rule_type)}</span>
-                      <span className="text-sm text-muted-foreground">
-                        {getDiscountLabel(rule)}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {getConditionLabel(rule)} • Prioridade: {rule.priority}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleEdit(rule)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDeleteRule(rule.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <Button onClick={() => handleNew()} variant="outline">
-            <Plus className="mr-2 h-4 w-4" />
-            Nova Regra de Desconto/Acréscimo
-          </Button>
-        </CardContent>
-      </Card>
 
       {/* Prazo de Produção */}
       {productionRules.length > 0 && (

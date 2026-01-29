@@ -1,28 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createHmac } from 'crypto'
 import { query } from '@/lib/database'
 import { saveLog } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    // Ler body bruto para validação de assinatura (body só pode ser lido uma vez)
+    const rawBody = await request.text()
+    let body: Record<string, unknown>
+    try {
+      body = JSON.parse(rawBody) as Record<string, unknown>
+    } catch {
+      return NextResponse.json({ error: 'Payload inválido' }, { status: 400 })
+    }
 
-    // Verificar assinatura do webhook (se configurada)
+    // Validar assinatura do webhook quando PAGARME_WEBHOOK_SECRET estiver configurado
     const webhookSecret = process.env.PAGARME_WEBHOOK_SECRET
     if (webhookSecret) {
       const signature = request.headers.get('x-pagar-me-signature')
-      // Implementar validação de assinatura se necessário
+      if (!signature || !signature.trim()) {
+        await saveLog('warning', 'Webhook Pagar.me rejeitado: assinatura ausente', {})
+        return NextResponse.json({ error: 'Assinatura do webhook ausente' }, { status: 401 })
+      }
+      const expectedSignature = createHmac('sha256', webhookSecret)
+        .update(rawBody)
+        .digest('hex')
+      const receivedSignature = signature.replace(/^sha256=/i, '').trim().toLowerCase()
+      if (receivedSignature !== expectedSignature.toLowerCase()) {
+        await saveLog('warning', 'Webhook Pagar.me rejeitado: assinatura inválida', {})
+        return NextResponse.json({ error: 'Assinatura do webhook inválida' }, { status: 401 })
+      }
     }
 
     // Processar evento do Pagar.me
-    const event = body.type || body.event
-    const data = body.data || body
+    const event = (body.type ?? body.event) as string | undefined
+    type WebhookData = Record<string, unknown> & {
+      metadata?: { order_id?: string }
+      order?: { metadata?: { order_id?: string } }
+      id?: string
+      charge?: { id?: string; status?: string; last_transaction?: { status?: string } }
+    }
+    const data = (body.data ?? body) as WebhookData
 
     if (!event || !data) {
       return NextResponse.json({ error: 'Dados inválidos' }, { status: 400 })
     }
 
     // Buscar order_id no metadata
-    const orderId = data.metadata?.order_id || data.order?.metadata?.order_id
+    const orderId = data.metadata?.order_id ?? data.order?.metadata?.order_id
 
     if (!orderId) {
       await saveLog('warning', 'Webhook Pagar.me sem order_id', { body })
@@ -30,8 +55,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Verificar status do pagamento
-    const charge = data.charge || data
-    const status = charge.status || charge.last_transaction?.status
+    const charge = (data.charge ?? data) as WebhookData['charge'] & { id?: string }
+    const status = charge?.status ?? (charge as { last_transaction?: { status?: string } })?.last_transaction?.status
 
     if (!status) {
       await saveLog('warning', 'Webhook Pagar.me sem status', { body })

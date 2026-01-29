@@ -111,7 +111,7 @@ export default function SettingsPage() {
 
         {/* Tab Frete */}
         <TabsContent value="frete" className="space-y-6 mt-6">
-          <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <ShippingRulesSection />
 
             {/* Prazo de Produção */}

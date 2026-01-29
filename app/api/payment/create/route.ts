@@ -3,7 +3,8 @@ import { query } from '@/lib/database'
 import { createPixTransaction, createCreditCardTransaction } from '@/lib/pagarme'
 import { getActiveEnvironment } from '@/lib/settings'
 import { getToken } from '@/lib/integrations'
-import { calculatePixDiscount } from '@/lib/payment-rules'
+import { calculatePixDiscount, calculateInstallmentTotal, recalculateOrderTotal } from '@/lib/payment-rules'
+import { saveLog } from '@/lib/logger'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
 // Detectar ambiente baseado em ambiente ativo ou fallback automático
@@ -47,9 +48,15 @@ async function detectEnvironment(request: NextRequest): Promise<'sandbox' | 'pro
 }
 
 export async function POST(request: NextRequest) {
+  let order_id: number | undefined
+  let payment_method: string | undefined
+  
   try {
     const body = await request.json()
-    const { order_id, payment_method, customer, billing, credit_card, environment } = body
+    const parsedBody = body as { order_id?: number; payment_method?: string; customer?: any; billing?: any; credit_card?: any; environment?: string }
+    order_id = parsedBody.order_id
+    payment_method = parsedBody.payment_method
+    const { customer, billing, credit_card, environment } = parsedBody
     
     // Detectar ambiente se não foi fornecido ou usar o fornecido
     const detectedEnvironment = environment || await detectEnvironment(request)
@@ -60,6 +67,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // Log de tentativa de pagamento iniciada
+    await saveLog(
+      'info',
+      `Tentativa de pagamento iniciada para pedido #${order_id}`,
+      {
+        order_id,
+        payment_method,
+        environment: detectedEnvironment,
+      },
+      'payment'
+    )
 
     // Buscar pedido
     const orderResult = await query(
@@ -86,6 +105,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Proteger contra múltiplas tentativas: verificar se já existe pagamento pendente ou aprovado
+    const existingPaymentResult = await query(
+      `SELECT id, status FROM payments WHERE order_id = $1 AND status IN ('pending', 'paid') LIMIT 1`,
+      [order_id]
+    )
+    if (existingPaymentResult.rows.length > 0) {
+      await saveLog(
+        'warning',
+        `Tentativa de pagamento duplicada para pedido #${order_id}`,
+        {
+          order_id,
+          payment_method,
+          existing_payment_status: existingPaymentResult.rows[0].status,
+        },
+        'payment'
+      )
+      return NextResponse.json(
+        { error: 'Já existe um pagamento em processamento ou aprovado para este pedido.' },
+        { status: 400 }
+      )
+    }
+
     // Buscar itens do pedido
     const itemsResult = await query(
       'SELECT id, product_id, title, price, quantity FROM order_items WHERE order_id = $1',
@@ -104,7 +145,7 @@ export async function POST(request: NextRequest) {
       shippingAddress = addressResult.rows[0] || null
     }
 
-    // Preparar dados do cliente
+    // Preparar dados do cliente e validar CPF (pode ser diferente do cliente do pedido se usar cartão de terceiro)
     const cleanCPF = (customer.document || order.client_cpf || '').replace(/\D/g, '')
     if (!cleanCPF || cleanCPF.length !== 11) {
       return NextResponse.json(
@@ -204,36 +245,61 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Calcular valor base
-    let amount = Math.round(parseFloat(order.total) * 100) // Converter para centavos
+    // Recalcular valor total no backend (itens + frete) — nunca confiar no frontend
+    const totalShipping = parseFloat(order.total_shipping || '0')
+    const backendTotal = recalculateOrderTotal(orderItems, totalShipping)
 
-    if (amount <= 0) {
+    if (backendTotal <= 0) {
       return NextResponse.json(
         { error: 'Valor do pedido deve ser maior que zero' },
         { status: 400 }
       )
     }
 
+    // Valor base para cobrança (será ajustado por PIX ou parcelamento)
+    let chargeBaseValue = backendTotal
+    let amount: number
+
     // Aplicar desconto PIX se método for PIX
     let pixDiscountApplied = 0
     if (payment_method === 'pix') {
       try {
-        const discountResult = await calculatePixDiscount(parseFloat(order.total))
+        const discountResult = await calculatePixDiscount(backendTotal)
         if (discountResult.discount > 0) {
-          pixDiscountApplied = Math.round(discountResult.discount * 100) // Converter para centavos
-          amount = Math.round(discountResult.finalValue * 100)
-          
-          // Registrar desconto aplicado no banco (opcional - pode ser salvo em metadata ou tabela separada)
+          pixDiscountApplied = Math.round(discountResult.discount * 100) // centavos
+          chargeBaseValue = discountResult.finalValue
+        }
+        amount = Math.round(chargeBaseValue * 100)
+        if (process.env.NODE_ENV === 'development' && discountResult.discount > 0) {
           console.log('[Payment Create] Desconto PIX aplicado:', {
-            original: parseFloat(order.total),
+            original: backendTotal,
             discount: discountResult.discount,
             final: discountResult.finalValue,
           })
         }
       } catch (error) {
         console.error('[Payment Create] Erro ao calcular desconto PIX:', error)
-        // Continuar sem desconto em caso de erro
+        amount = Math.round(backendTotal * 100)
       }
+    } else if (payment_method === 'credit_card') {
+      // Recalcular valor com juros de parcelamento no backend
+      const installments = Math.max(1, parseInt(String(credit_card?.installments || 1), 10))
+      const installmentResult = await calculateInstallmentTotal(
+        backendTotal,
+        installments,
+        detectedEnvironment as IntegrationEnvironment
+      )
+      chargeBaseValue = installmentResult.totalWithInterest
+      amount = Math.round(chargeBaseValue * 100)
+    } else {
+      amount = Math.round(backendTotal * 100)
+    }
+
+    if (amount <= 0) {
+      return NextResponse.json(
+        { error: 'Valor do pedido deve ser maior que zero' },
+        { status: 400 }
+      )
     }
 
     let transaction
@@ -279,10 +345,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Calcular valor final a ser salvo (com desconto aplicado se houver)
-    const finalAmount = pixDiscountApplied > 0 
-      ? (amount / 100).toFixed(2) // Valor já tem desconto aplicado
-      : order.total
+    // Valor final cobrado (já recalculado no backend: PIX com desconto ou cartão com juros)
+    const finalAmount = (amount / 100).toFixed(2)
 
     // Salvar pagamento no banco
     await query(
@@ -296,6 +360,22 @@ export async function POST(request: NextRequest) {
         finalAmount,
         transaction.status === 'paid' ? 'paid' : 'pending',
       ]
+    )
+
+    // Log de pagamento criado com sucesso
+    await saveLog(
+      'info',
+      `Pagamento criado com sucesso para pedido #${order_id}`,
+      {
+        order_id,
+        transaction_id: transaction.id,
+        payment_method,
+        amount: finalAmount,
+        status: transaction.status,
+        installments: credit_card?.installments || 1,
+        environment: detectedEnvironment,
+      },
+      'payment'
     )
 
     // Se pagamento foi aprovado imediatamente, atualizar pedido
@@ -338,6 +418,19 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error: any) {
+    // Log de erro no pagamento
+    await saveLog(
+      'error',
+      `Falha ao processar pagamento para pedido #${order_id || 'desconhecido'}`,
+      {
+        order_id: order_id || null,
+        payment_method: payment_method || null,
+        error_message: error.message || 'Erro desconhecido',
+        error_stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      },
+      'payment'
+    )
+
     if (process.env.NODE_ENV === 'development') {
       console.error('[Payment API] Erro ao criar pagamento:', error.message)
     }

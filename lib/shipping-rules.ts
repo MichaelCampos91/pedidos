@@ -2,10 +2,10 @@ import { query } from './database'
 
 export interface ShippingRule {
   id: number
-  rule_type: 'free_shipping' | 'discount' | 'surcharge' | 'production_days'
+  rule_type: 'free_shipping' | 'surcharge' | 'production_days' // 'discount' removido - será implementado no futuro
   condition_type: 'all' | 'min_value' | 'states' | 'shipping_methods'
   condition_value: any // JSONB
-  discount_type?: 'percentage' | 'fixed'
+  discount_type?: 'percentage' | 'fixed' // Usado apenas para acréscimo agora
   discount_value?: number
   shipping_methods?: number[] | null
   production_days?: number
@@ -44,8 +44,7 @@ export interface AppliedRule {
   applied: boolean
   originalPrice?: number
   finalPrice?: number
-  discount?: number
-  surcharge?: number
+  surcharge?: number // discount removido - será implementado no futuro
   productionDaysAdded?: number
 }
 
@@ -90,7 +89,12 @@ export async function getProductionDays(): Promise<number> {
 
 /**
  * Verifica se uma regra se aplica baseado nas condições
- * Suporta múltiplas condições combinadas com lógica AND
+ * 
+ * Lógica de condições:
+ * - Se apenas min_value está definido: verifica apenas valor mínimo
+ * - Se apenas states está definido: verifica apenas estados
+ * - Se ambas estão definidas: ambas devem ser atendidas (AND)
+ * - Se nenhuma está definida: aplica para todos
  */
 function ruleApplies(
   rule: ShippingRule,
@@ -105,55 +109,24 @@ function ruleApplies(
   }
 
   const conditionValue = rule.condition_value || {}
-  let allConditionsMet = true
+  
+  // Verificar quais condições estão definidas
+  const hasMinValue = conditionValue.min_value !== undefined && conditionValue.min_value !== null
+  const hasStates = conditionValue.states !== undefined && 
+                    conditionValue.states !== null && 
+                    Array.isArray(conditionValue.states) && 
+                    conditionValue.states.length > 0
+  const hasShippingMethods = (conditionValue.shipping_methods !== undefined && 
+                              conditionValue.shipping_methods !== null &&
+                              Array.isArray(conditionValue.shipping_methods) &&
+                              conditionValue.shipping_methods.length > 0) ||
+                             (rule.shipping_methods !== undefined && 
+                              rule.shipping_methods !== null && 
+                              Array.isArray(rule.shipping_methods) && 
+                              rule.shipping_methods.length > 0)
 
-  // Verificar valor mínimo (se presente)
-  if (conditionValue.min_value !== undefined && conditionValue.min_value !== null) {
-    const minValue = parseFloat(conditionValue.min_value)
-    if (isNaN(minValue) || orderValue < minValue) {
-      return false // Condição não atendida
-    }
-  }
-
-  // Verificar estados (se presente)
-  if (conditionValue.states !== undefined && conditionValue.states !== null) {
-    const states = Array.isArray(conditionValue.states) ? conditionValue.states : []
-    if (states.length > 0) {
-      if (!destinationState) {
-        return false // Estado é obrigatório mas não foi fornecido
-      }
-      const stateUpper = destinationState.toUpperCase()
-      if (!states.includes(stateUpper)) {
-        return false // Estado não está na lista permitida
-      }
-    }
-  }
-
-  // Verificar modalidades de frete (se presente)
-  // Pode estar em condition_value.shipping_methods ou no campo separado rule.shipping_methods
-  const shippingMethods = conditionValue.shipping_methods || rule.shipping_methods
-  if (shippingMethods !== undefined && shippingMethods !== null) {
-    const methods = Array.isArray(shippingMethods) ? shippingMethods : []
-    if (methods.length > 0) {
-      if (!shippingMethodId) {
-        return false // Modalidade é obrigatória mas não foi fornecida
-      }
-      if (!methods.includes(shippingMethodId)) {
-        return false // Modalidade não está na lista permitida
-      }
-    }
-  }
-
-  // Compatibilidade com formato antigo (baseado em condition_type)
-  // Se nenhuma condição específica foi encontrada em condition_value,
-  // verificar condition_type como fallback
-  const hasSpecificConditions = 
-    conditionValue.min_value !== undefined ||
-    (conditionValue.states !== undefined && Array.isArray(conditionValue.states) && conditionValue.states.length > 0) ||
-    (conditionValue.shipping_methods !== undefined && Array.isArray(conditionValue.shipping_methods) && conditionValue.shipping_methods.length > 0) ||
-    (rule.shipping_methods !== undefined && rule.shipping_methods !== null && Array.isArray(rule.shipping_methods) && rule.shipping_methods.length > 0)
-
-  if (!hasSpecificConditions) {
+  // Se nenhuma condição específica está definida, usar fallback baseado em condition_type
+  if (!hasMinValue && !hasStates && !hasShippingMethods) {
     // Fallback para formato antigo baseado em condition_type
     switch (rule.condition_type) {
       case 'min_value':
@@ -167,55 +140,76 @@ function ruleApplies(
 
       case 'shipping_methods':
         if (!shippingMethodId) return false
-        if (!rule.shipping_methods || rule.shipping_methods.length === 0) return true
-        return rule.shipping_methods.includes(shippingMethodId)
+        const methods = rule.shipping_methods || []
+        if (methods.length === 0) return true
+        return methods.includes(shippingMethodId)
 
       default:
         return true
     }
   }
 
-  // Se chegou aqui, todas as condições foram atendidas
-  return allConditionsMet
+  // Verificar valor mínimo (se presente)
+  if (hasMinValue) {
+    const minValue = parseFloat(conditionValue.min_value)
+    if (isNaN(minValue) || orderValue < minValue) {
+      return false // Condição não atendida
+    }
+  }
+
+  // Verificar estados (se presente)
+  if (hasStates) {
+    if (!destinationState) {
+      return false // Estado é obrigatório mas não foi fornecido
+    }
+    const stateUpper = destinationState.toUpperCase()
+    if (!conditionValue.states.includes(stateUpper)) {
+      return false // Estado não está na lista permitida
+    }
+  }
+
+  // Verificar modalidades de frete (se presente)
+  if (hasShippingMethods) {
+    const shippingMethods = conditionValue.shipping_methods || rule.shipping_methods || []
+    if (shippingMethods.length > 0) {
+      if (!shippingMethodId) {
+        return false // Modalidade é obrigatória mas não foi fornecida
+      }
+      if (!shippingMethods.includes(shippingMethodId)) {
+        return false // Modalidade não está na lista permitida
+      }
+    }
+  }
+
+  // Se chegou aqui, todas as condições presentes foram atendidas
+  return true
 }
 
 /**
- * Aplica uma regra de desconto/acréscimo ao preço do frete
+ * Aplica uma regra de acréscimo ao preço do frete
+ * Nota: Desconto no frete foi removido e será implementado no futuro
  */
-function applyDiscountOrSurcharge(
+function applySurcharge(
   price: number,
   rule: ShippingRule
-): { finalPrice: number; discount?: number; surcharge?: number } {
-  if (!rule.discount_type || rule.discount_value === undefined || rule.discount_value === null) {
+): { finalPrice: number; surcharge?: number } {
+  // Apenas aplicar acréscimo, desconto foi removido
+  if (rule.rule_type !== 'surcharge' || !rule.discount_type || rule.discount_value === undefined || rule.discount_value === null) {
     return { finalPrice: price }
   }
 
-  const discountValue = parseFloat(rule.discount_value.toString())
+  const surchargeValue = parseFloat(rule.discount_value.toString())
 
   if (rule.discount_type === 'percentage') {
-    const discount = (price * discountValue) / 100
-    if (rule.rule_type === 'discount') {
-      return {
-        finalPrice: Math.max(0, price - discount),
-        discount: discount,
-      }
-    } else if (rule.rule_type === 'surcharge') {
-      return {
-        finalPrice: price + discount,
-        surcharge: discount,
-      }
+    const surcharge = (price * surchargeValue) / 100
+    return {
+      finalPrice: price + surcharge,
+      surcharge: surcharge,
     }
   } else if (rule.discount_type === 'fixed') {
-    if (rule.rule_type === 'discount') {
-      return {
-        finalPrice: Math.max(0, price - discountValue),
-        discount: discountValue,
-      }
-    } else if (rule.rule_type === 'surcharge') {
-      return {
-        finalPrice: price + discountValue,
-        surcharge: discountValue,
-      }
+    return {
+      finalPrice: price + surchargeValue,
+      surcharge: surchargeValue,
     }
   }
 
@@ -242,13 +236,13 @@ export async function applyShippingRules(
   const appliedRules: AppliedRule[] = []
   const modifiedOptions: ShippingOption[] = []
 
-  // PRIMEIRA PASSADA: Aplicar apenas descontos/acréscimos (sem frete grátis)
+  // PRIMEIRA PASSADA: Aplicar apenas acréscimos (sem frete grátis)
+  // Nota: Desconto no frete foi removido e será implementado no futuro
   for (const option of shippingOptions) {
     let finalPrice = parseFloat(option.price)
-    let optionModified = false
     const optionAppliedRules: AppliedRule[] = []
 
-    // Aplicar regras de desconto/acréscimo na ordem de prioridade
+    // Aplicar regras de acréscimo na ordem de prioridade
     for (const rule of rules) {
       // Verificar se regra se aplica
       if (!ruleApplies(rule, orderValue, destinationState, option.id)) {
@@ -260,26 +254,24 @@ export async function applyShippingRules(
         continue
       }
 
-      // Aplicar desconto ou acréscimo
-      if (rule.rule_type === 'discount' || rule.rule_type === 'surcharge') {
-        const result = applyDiscountOrSurcharge(finalPrice, rule)
+      // Aplicar apenas acréscimo (desconto foi removido)
+      if (rule.rule_type === 'surcharge') {
+        const result = applySurcharge(finalPrice, rule)
         if (result.finalPrice !== finalPrice) {
           finalPrice = result.finalPrice
-          optionModified = true
           optionAppliedRules.push({
             ruleId: rule.id,
             ruleType: rule.rule_type,
             applied: true,
             originalPrice: parseFloat(option.price),
             finalPrice: result.finalPrice,
-            discount: result.discount,
             surcharge: result.surcharge,
           })
         }
       }
     }
 
-    // Criar opção modificada (após descontos/acréscimos)
+    // Criar opção modificada (após acréscimos)
     const modifiedOption: ShippingOption = {
       ...option,
       price: finalPrice.toFixed(2),
@@ -300,7 +292,7 @@ export async function applyShippingRules(
 
   // SEGUNDA PASSADA: Identificar opção mais barata e aplicar frete grátis apenas a ela
   if (modifiedOptions.length > 0) {
-    // Encontrar opção mais barata (após descontos/acréscimos)
+    // Encontrar opção mais barata (após acréscimos)
     const cheapestOption = modifiedOptions.reduce((cheapest, current) => {
       const cheapestPrice = parseFloat(cheapest.price)
       const currentPrice = parseFloat(current.price)
@@ -353,28 +345,29 @@ export async function hasFreeShipping(
 }
 
 /**
- * Calcula o desconto total aplicável ao frete
+ * Calcula o acréscimo total aplicável ao frete
+ * Nota: Desconto no frete foi removido e será implementado no futuro
  */
-export async function calculateShippingDiscount(
+export async function calculateShippingSurcharge(
   originalPrice: number,
   orderValue: number,
   destinationState?: string,
   shippingMethodId?: number
 ): Promise<number> {
   const rules = await getActiveShippingRules()
-  let discount = 0
+  let surcharge = 0
 
   for (const rule of rules) {
     if (
-      rule.rule_type === 'discount' &&
+      rule.rule_type === 'surcharge' &&
       ruleApplies(rule, orderValue, destinationState, shippingMethodId)
     ) {
-      const result = applyDiscountOrSurcharge(originalPrice - discount, rule)
-      if (result.discount) {
-        discount += result.discount
+      const result = applySurcharge(originalPrice + surcharge, rule)
+      if (result.surcharge) {
+        surcharge += result.surcharge
       }
     }
   }
 
-  return discount
+  return surcharge
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
+import { saveLog } from '@/lib/logger'
 
 // Lista pedidos (protegido)
 export async function GET(request: NextRequest) {
@@ -216,6 +217,21 @@ export async function POST(request: NextRequest) {
         ]
       )
     }
+
+    // Log de pedido criado
+    await saveLog(
+      'info',
+      `Pedido #${orderId} criado`,
+      {
+        order_id: orderId,
+        client_id,
+        total_items: calculatedTotalItems,
+        total_shipping: calculatedShipping,
+        total: calculatedTotal,
+        items_count: items.length,
+      },
+      'order'
+    )
 
     return NextResponse.json({ success: true, id: orderId })
   } catch (error: any) {

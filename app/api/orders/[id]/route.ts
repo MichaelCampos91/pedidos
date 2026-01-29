@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
+import { saveLog } from '@/lib/logger'
 
 // Busca pedido por ID (protegido)
 export async function GET(
@@ -133,6 +134,19 @@ export async function PUT(
          VALUES ($1, $2, $3, $4, $5)`,
         [params.id, 'status', currentOrder.status, status, user.id]
       )
+
+      // Log de mudança de status
+      await saveLog(
+        'info',
+        `Status do pedido #${params.id} alterado de "${currentOrder.status}" para "${status}"`,
+        {
+          order_id: parseInt(params.id),
+          old_status: currentOrder.status,
+          new_status: status,
+          changed_by: user.id,
+        },
+        'order'
+      )
     }
 
     // Atualizar pedido
@@ -212,6 +226,23 @@ export async function PUT(
         `UPDATE orders SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
         updateValues
       )
+
+      // Log de atualização de pedido (se não foi apenas mudança de status, que já foi logada acima)
+      if (!status || status === currentOrder.status) {
+        const changedFields = updateFields.map(field => field.split('=')[0].trim()).filter(field => field !== 'status')
+        if (changedFields.length > 0) {
+          await saveLog(
+            'info',
+            `Pedido #${params.id} atualizado`,
+            {
+              order_id: parseInt(params.id),
+              changed_fields: changedFields,
+              updated_by: user.id,
+            },
+            'order'
+          )
+        }
+      }
     }
 
     // Atualizar itens se fornecidos

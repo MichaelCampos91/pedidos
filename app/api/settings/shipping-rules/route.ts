@@ -60,6 +60,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Rejeitar regras do tipo 'discount' (removido, será implementado no futuro)
+    if (rule_type === 'discount') {
+      return NextResponse.json(
+        { error: 'Regras de desconto no frete foram removidas e serão implementadas no futuro' },
+        { status: 400 }
+      )
+    }
+
     if (rule_type === 'free_shipping' && condition_type === 'all') {
       // Frete grátis para todos - validar que não há conflito
     }
@@ -123,6 +131,14 @@ export async function PUT(request: NextRequest) {
     if (!id) {
       return NextResponse.json(
         { error: 'id é obrigatório' },
+        { status: 400 }
+      )
+    }
+
+    // Rejeitar atualização para regras do tipo 'discount' (removido, será implementado no futuro)
+    if (rule_type === 'discount') {
+      return NextResponse.json(
+        { error: 'Regras de desconto no frete foram removidas e serão implementadas no futuro' },
         { status: 400 }
       )
     }

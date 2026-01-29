@@ -3,6 +3,8 @@ import { getToken } from '@/lib/integrations'
 import { getActiveEnvironment } from '@/lib/settings'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
+export const dynamic = 'force-dynamic'
+
 // Detectar ambiente baseado em ambiente ativo ou fallback automático
 async function detectEnvironment(request: NextRequest): Promise<'sandbox' | 'production'> {
   // Primeiro, tentar buscar ambiente ativo configurado

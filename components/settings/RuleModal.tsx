@@ -13,7 +13,7 @@ interface RuleModalProps {
   onOpenChange: (open: boolean) => void
   rule?: any
   onSave: (rule: any) => Promise<void>
-  defaultRuleType?: 'free_shipping' | 'discount' | 'surcharge' | 'production_days'
+  defaultRuleType?: 'free_shipping' | 'surcharge' | 'production_days'
 }
 
 const BRAZILIAN_STATES = [
@@ -25,7 +25,7 @@ const BRAZILIAN_STATES = [
 export function RuleModal({ open, onOpenChange, rule, onSave, defaultRuleType }: RuleModalProps) {
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
-    rule_type: 'discount',
+    rule_type: 'free_shipping',
     condition_type: 'all',
     condition_value: {},
     discount_type: 'percentage',
@@ -52,7 +52,7 @@ export function RuleModal({ open, onOpenChange, rule, onSave, defaultRuleType }:
       setHasShippingMethods(hasMethods)
 
       setFormData({
-        rule_type: rule.rule_type || 'discount',
+        rule_type: rule.rule_type || 'free_shipping',
         condition_type: rule.condition_type || 'all',
         condition_value: conditionValue,
         discount_type: rule.discount_type || 'percentage',
@@ -63,8 +63,8 @@ export function RuleModal({ open, onOpenChange, rule, onSave, defaultRuleType }:
         active: rule.active !== undefined ? rule.active : true,
       })
     } else {
-      // Se não há regra, usar defaultRuleType se fornecido, senão 'discount'
-      const initialRuleType = defaultRuleType || 'discount'
+      // Se não há regra, usar defaultRuleType se fornecido, senão 'free_shipping'
+      const initialRuleType = defaultRuleType || 'free_shipping'
       
       setHasMinValue(false)
       setHasStates(false)
@@ -182,7 +182,6 @@ export function RuleModal({ open, onOpenChange, rule, onSave, defaultRuleType }:
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="free_shipping">Frete Grátis</SelectItem>
-                  <SelectItem value="discount">Desconto</SelectItem>
                   <SelectItem value="surcharge">Acréscimo</SelectItem>
                   <SelectItem value="production_days">Prazo de Produção</SelectItem>
                 </SelectContent>
@@ -334,8 +333,8 @@ export function RuleModal({ open, onOpenChange, rule, onSave, defaultRuleType }:
             </div>
           </div>
 
-          {/* Mostrar campos de desconto/acréscimo apenas quando não for frete grátis */}
-          {(formData.rule_type === 'discount' || formData.rule_type === 'surcharge') && (
+          {/* Mostrar campos de acréscimo apenas quando não for frete grátis */}
+          {formData.rule_type === 'surcharge' && (
             <>
               <div className="space-y-2">
                 <Label htmlFor="discount_type">Tipo</Label>

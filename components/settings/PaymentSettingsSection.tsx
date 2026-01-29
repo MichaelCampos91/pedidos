@@ -205,91 +205,92 @@ export function PaymentSettingsSection({
 
   return (
     <div className="space-y-6">
-      {/* Desconto PIX */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <QrCode className="h-5 w-5 text-green-600" />
-            Desconto PIX
-          </CardTitle>
-          <CardDescription>
-            Configure desconto para pagamentos via PIX
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="pix_active"
-              checked={pixDiscount.active}
-              onChange={(e) => setPixDiscount({ ...pixDiscount, active: e.target.checked })}
-              className="rounded"
-            />
-            <Label htmlFor="pix_active" className="cursor-pointer">
-              Ativar desconto PIX
-            </Label>
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Desconto PIX */}
+        <Card className="md:col-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <QrCode className="h-5 w-5 text-green-600" />
+              Desconto PIX
+            </CardTitle>
+            <CardDescription>
+              Configure desconto para pagamentos via PIX
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="pix_active"
+                checked={pixDiscount.active}
+                onChange={(e) => setPixDiscount({ ...pixDiscount, active: e.target.checked })}
+                className="rounded"
+              />
+              <Label htmlFor="pix_active" className="cursor-pointer">
+                Ativar desconto PIX
+              </Label>
+            </div>
 
-          {pixDiscount.active && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="pix_discount_type">Tipo de Desconto</Label>
-                <Select
-                  value={pixDiscount.discount_type}
-                  onValueChange={(value: 'percentage' | 'fixed') =>
-                    setPixDiscount({ ...pixDiscount, discount_type: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="percentage">Porcentagem (%)</SelectItem>
-                    <SelectItem value="fixed">Valor Fixo (R$)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            {pixDiscount.active && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="pix_discount_type">Tipo de Desconto</Label>
+                  <Select
+                    value={pixDiscount.discount_type}
+                    onValueChange={(value: 'percentage' | 'fixed') =>
+                      setPixDiscount({ ...pixDiscount, discount_type: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="percentage">Porcentagem (%)</SelectItem>
+                      <SelectItem value="fixed">Valor Fixo (R$)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="pix_discount_value">
-                  {pixDiscount.discount_type === 'percentage' ? 'Porcentagem (%)' : 'Valor (R$)'}
-                </Label>
-                <Input
-                  id="pix_discount_value"
-                  type="number"
-                  step="0.01"
-                  value={pixDiscount.discount_value}
-                  onChange={(e) => setPixDiscount({ ...pixDiscount, discount_value: e.target.value })}
-                  placeholder={pixDiscount.discount_type === 'percentage' ? '0.00' : '0.00'}
-                />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pix_discount_value">
+                    {pixDiscount.discount_type === 'percentage' ? 'Porcentagem (%)' : 'Valor (R$)'}
+                  </Label>
+                  <Input
+                    id="pix_discount_value"
+                    type="number"
+                    step="0.01"
+                    value={pixDiscount.discount_value}
+                    onChange={(e) => setPixDiscount({ ...pixDiscount, discount_value: e.target.value })}
+                    placeholder={pixDiscount.discount_type === 'percentage' ? '0.00' : '0.00'}
+                  />
+                </div>
 
-              {pixPreview && (
-                <div className="p-4 bg-muted/50 rounded-lg">
-                  <p className="text-sm font-medium mb-2">Preview (exemplo: R$ {formatCurrency(pixPreview.original)})</p>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span>Valor original:</span>
-                      <span>{formatCurrency(pixPreview.original)}</span>
-                    </div>
-                    <div className="flex justify-between text-green-600">
-                      <span>Desconto:</span>
-                      <span>-{formatCurrency(pixPreview.discount)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold border-t pt-1">
-                      <span>Total com desconto:</span>
-                      <span>{formatCurrency(pixPreview.final)}</span>
+                {pixPreview && (
+                  <div className="p-4 bg-muted/50 rounded-lg">
+                    <p className="text-sm font-medium mb-2">Preview (exemplo: R$ {formatCurrency(pixPreview.original)})</p>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span>Valor original:</span>
+                        <span>{formatCurrency(pixPreview.original)}</span>
+                      </div>
+                      <div className="flex justify-between text-green-600">
+                        <span>Desconto:</span>
+                        <span>-{formatCurrency(pixPreview.discount)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold border-t pt-1">
+                        <span>Total com desconto:</span>
+                        <span>{formatCurrency(pixPreview.final)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
 
-      {/* Juros de Parcelamento */}
-      <Card>
+        {/* Juros de Parcelamento */}
+        <Card className="md:col-span-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5 text-blue-600" />
@@ -327,6 +328,7 @@ export function PaymentSettingsSection({
           />
         </CardContent>
       </Card>
+      </div>
 
       {/* Botão Salvar */}
       <div className="flex justify-end pt-6 border-t">

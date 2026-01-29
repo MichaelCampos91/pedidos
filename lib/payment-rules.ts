@@ -235,3 +235,19 @@ export async function hasPixDiscount(): Promise<boolean> {
   const pixSetting = await getPixDiscount()
   return pixSetting !== null
 }
+
+/**
+ * Recalcula o total do pedido a partir dos itens e do frete (fonte confiável no backend).
+ * orderItems: array com { price, quantity }
+ * totalShipping: valor do frete do pedido
+ */
+export function recalculateOrderTotal(
+  orderItems: Array<{ price: string | number; quantity: number }>,
+  totalShipping: number
+): number {
+  const totalItems = orderItems.reduce(
+    (sum, item) => sum + parseFloat(String(item.price)) * (item.quantity || 1),
+    0
+  )
+  return totalItems + (totalShipping || 0)
+}

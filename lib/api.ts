@@ -163,3 +163,28 @@ export const cepApi = {
     }
   },
 }
+
+// Logs
+export const logsApi = {
+  list: (params: Record<string, any> = {}) => {
+    const query = new URLSearchParams(params).toString()
+    return request<{
+      data: Array<{
+        id: number
+        level: string
+        category: string | null
+        message: string
+        metadata: any
+        created_at: string
+      }>
+      pagination: {
+        current_page: number
+        per_page: number
+        total: number
+        last_page: number
+        from: number
+        to: number
+      }
+    }>(`/logs?${query}`)
+  },
+}

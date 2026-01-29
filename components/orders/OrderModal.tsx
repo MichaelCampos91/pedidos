@@ -434,6 +434,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         orderData.shipping_option_data = {
           delivery_range: selectedShipping.delivery_range,
           packages: selectedShipping.packages,
+          originalPrice: selectedShipping.originalPrice, // Preço original antes do frete grátis
           // environment removido - não é mais necessário
         }
       }
@@ -897,6 +898,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                               quantidade: parseInt(item.quantity || 1),
                             }
                           })}
+                          orderValue={itemsTotal}
+                          destinationState={selectedAddress?.state}
                           // environment removido - componente busca automaticamente ou API usa padrão
                           onSelect={handleShippingSelect}
                         />
