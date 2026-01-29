@@ -3,6 +3,9 @@ import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth } from '@/lib/auth'
 
+// Marca a rota como dinâmica porque usa cookies para autenticação
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     const cookieStore = cookies()

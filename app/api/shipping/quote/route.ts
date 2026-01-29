@@ -6,6 +6,9 @@ import { getToken, updateTokenValidation, type IntegrationEnvironment } from '@/
 import { generateCacheKey, getCachedQuote, setCachedQuote, cleanupExpiredCache } from '@/lib/shipping-cache'
 import { applyShippingRules } from '@/lib/shipping-rules'
 
+// Marca a rota como dinâmica porque usa cookies para autenticação
+export const dynamic = 'force-dynamic'
+
 // Limpar cache expirado periodicamente
 cleanupExpiredCache()
 

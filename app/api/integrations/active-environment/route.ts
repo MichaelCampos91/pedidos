@@ -5,6 +5,9 @@ import { getActiveEnvironment, setActiveEnvironment } from '@/lib/settings'
 import { getToken } from '@/lib/integrations'
 import type { IntegrationProvider, IntegrationEnvironment } from '@/lib/integrations-types'
 
+// Marca a rota como dinâmica porque usa cookies para autenticação
+export const dynamic = 'force-dynamic'
+
 // GET: Retornar ambiente ativo por provider
 export async function GET(request: NextRequest) {
   try {

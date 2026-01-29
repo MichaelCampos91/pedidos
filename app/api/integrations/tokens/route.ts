@@ -3,6 +3,9 @@ import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { getAllTokens, getToken, upsertToken, type IntegrationProvider, type IntegrationEnvironment } from '@/lib/integrations'
 
+// Marca a rota como dinâmica porque usa cookies para autenticação
+export const dynamic = 'force-dynamic'
+
 // Lista todos os tokens
 export async function GET(request: NextRequest) {
   try {

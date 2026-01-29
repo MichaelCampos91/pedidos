@@ -4,6 +4,9 @@ import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { saveLog } from '@/lib/logger'
 
+// Marca a rota como dinâmica porque usa cookies para autenticação
+export const dynamic = 'force-dynamic'
+
 // Lista pedidos (protegido)
 export async function GET(request: NextRequest) {
   try {

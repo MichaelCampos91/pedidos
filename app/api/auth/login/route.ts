@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { query } from '@/lib/database'
-import { generateToken } from '@/lib/auth'
+import { generateToken, isSecureConnection } from '@/lib/auth'
 import { saveLog } from '@/lib/logger'
 import { cookies } from 'next/headers'
+
+// Marca a rota como dinâmica porque usa cookies para autenticação
+export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
     const cookieStore = cookies()
     cookieStore.set('auth_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isSecureConnection(request),
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60, // 7 dias em segundos
       path: '/',

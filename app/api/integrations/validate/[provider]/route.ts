@@ -5,6 +5,9 @@ import { getToken, updateTokenValidation, type IntegrationProvider, type Integra
 import { validateToken as validateMelhorEnvio } from '@/lib/melhor-envio'
 import { validateToken as validatePagarme } from '@/lib/pagarme'
 
+// Marca a rota como dinâmica porque usa cookies para autenticação
+export const dynamic = 'force-dynamic'
+
 // Valida token de uma integração específica
 export async function POST(
   request: NextRequest,
