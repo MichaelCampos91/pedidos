@@ -19,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import type { IntegrationEnvironment } from "@/lib/integrations-types"
 
@@ -68,8 +69,8 @@ export default function ShippingPage() {
   const [showModal, setShowModal] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [productSearch, setProductSearch] = useState('')
-  const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [productPopoverOpen, setProductPopoverOpen] = useState(false)
 
   // Buscar ambiente ativo ao montar componente
   useEffect(() => {
@@ -99,18 +100,12 @@ export default function ShippingPage() {
     loadProducts()
   }, [])
 
-  // Filtrar produtos conforme busca
-  useEffect(() => {
-    if (!productSearch.trim()) {
-      setFilteredProducts([])
-      return
-    }
-
-    const filtered = products.filter(product =>
-      product.name.toLowerCase().includes(productSearch.toLowerCase())
-    )
-    setFilteredProducts(filtered.slice(0, 5)) // Limitar a 5 resultados
-  }, [productSearch, products])
+  // Lista filtrada para o combobox (usada apenas dentro do popover)
+  const filteredProducts = productSearch.trim()
+    ? products.filter(product =>
+        product.name.toLowerCase().includes(productSearch.toLowerCase())
+      ).slice(0, 20)
+    : products.slice(0, 20)
 
   const loadProducts = async () => {
     setLoadingProducts(true)
@@ -127,7 +122,6 @@ export default function ShippingPage() {
   const handleProductSelect = (product: Product) => {
     setSelectedProduct(product)
     setProductSearch(product.name)
-    setFilteredProducts([])
 
     // Preencher dimensões, peso e preço se disponíveis
     setFormData(prev => ({
@@ -138,6 +132,13 @@ export default function ShippingPage() {
       peso: product.weight ? String(product.weight) : prev.peso,
       valor: product.base_price ? String(product.base_price) : prev.valor,
     }))
+    setProductPopoverOpen(false)
+  }
+
+  const handleClearProduct = () => {
+    setSelectedProduct(null)
+    setProductSearch('')
+    setProductPopoverOpen(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -240,66 +241,74 @@ export default function ShippingPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Busca de Produtos */}
-            <div className="space-y-2 relative">
-              <Label htmlFor="product_search">Buscar Produto (Opcional)</Label>
-              <div className="relative">
-                <Input
-                  id="product_search"
-                  type="text"
-                  value={productSearch}
-                  onChange={(e) => {
-                    setProductSearch(e.target.value)
-                    if (!e.target.value) {
-                      setSelectedProduct(null)
-                    }
-                  }}
-                  placeholder="Digite o nome do produto..."
-                  className="pr-10"
-                />
-                <Package className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              </div>
-              
-              {/* Dropdown de resultados */}
-              {filteredProducts.length > 0 && (
-                <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-60 overflow-auto">
-                  {filteredProducts.map((product) => (
-                    <button
-                      key={product.id}
-                      type="button"
-                      onClick={() => handleProductSelect(product)}
-                      className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground transition-colors"
-                    >
-                      <div className="font-medium">{product.name}</div>
-                      {(product.width || product.height || product.length || product.weight) && (
-                        <div className="text-xs text-muted-foreground">
-                          {product.width && `L: ${product.width}cm`}
-                          {product.height && ` × A: ${product.height}cm`}
-                          {product.length && ` × C: ${product.length}cm`}
-                          {product.weight && ` | P: ${product.weight}kg`}
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {selectedProduct && (
-                <p className="text-xs text-muted-foreground">
-                  Produto selecionado: <strong>{selectedProduct.name}</strong>
-                  {' '}
-                  <button
+            {/* Produto (opcional) – combobox com busca */}
+            <div className="space-y-2">
+              <Label>Produto (opcional)</Label>
+              <Popover open={productPopoverOpen} onOpenChange={setProductPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
                     type="button"
-                    onClick={() => {
-                      setSelectedProduct(null)
-                      setProductSearch('')
-                    }}
-                    className="text-primary hover:underline"
+                    variant="outline"
+                    className="w-full justify-between font-normal"
                   >
-                    (limpar)
-                  </button>
-                </p>
-              )}
+                    <span className={selectedProduct ? "text-foreground" : "text-muted-foreground"}>
+                      {selectedProduct ? selectedProduct.name : "Selecione ou busque um produto"}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {selectedProduct && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleClearProduct()
+                          }}
+                          className="rounded p-0.5 hover:bg-muted"
+                          aria-label="Limpar seleção"
+                        >
+                          ×
+                        </button>
+                      )}
+                      <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </div>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <div className="p-2 border-b">
+                    <Input
+                      placeholder="Digite para buscar..."
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="max-h-60 overflow-auto">
+                    {filteredProducts.length === 0 ? (
+                      <p className="p-4 text-sm text-muted-foreground text-center">
+                        Nenhum produto encontrado
+                      </p>
+                    ) : (
+                      filteredProducts.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => handleProductSelect(product)}
+                          className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground transition-colors border-b last:border-b-0"
+                        >
+                          <div className="font-medium">{product.name}</div>
+                          {(product.width || product.height || product.length || product.weight) && (
+                            <div className="text-xs text-muted-foreground">
+                              {product.width && `L: ${product.width}cm`}
+                              {product.height && ` × A: ${product.height}cm`}
+                              {product.length && ` × C: ${product.length}cm`}
+                              {product.weight && ` | P: ${product.weight}kg`}
+                            </div>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

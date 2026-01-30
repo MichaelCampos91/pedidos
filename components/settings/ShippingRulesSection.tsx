@@ -213,43 +213,49 @@ export function ShippingRulesSection() {
             </p>
           ) : (
             <div className="space-y-2">
-              {freeShippingRules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={rule.active ? 'default' : 'outline'}>
-                        {rule.active ? 'Ativo' : 'Inativo'}
-                      </Badge>
+              {freeShippingRules.map((rule) => {
+                const conditionLabel = getConditionLabel(rule)
+                const conditionParts = conditionLabel ? conditionLabel.split(' • ').filter(Boolean) : []
+                return (
+                  <div
+                    key={rule.id}
+                    className="flex flex-col gap-2 p-4 border rounded-lg"
+                  >
+                    <div className="flex items-center justify-between">
                       <span className="font-medium">{getRuleTypeLabel(rule.rule_type)}</span>
-                      <span className="text-sm text-muted-foreground">
-                        ({getConditionLabel(rule)})
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={rule.active ? 'default' : 'outline'}>
+                          {rule.active ? 'Ativo' : 'Inativo'}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEdit(rule)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteRule(rule.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">
+                    {conditionParts.length > 0 && (
+                      <div className="text-sm text-muted-foreground space-y-0.5">
+                        {conditionParts.map((part: string, i: number) => (
+                          <div key={i}>{part.trim()}</div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
                       Prioridade: {rule.priority}
                     </p>
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleEdit(rule)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDeleteRule(rule.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
           <Button onClick={() => handleNew('free_shipping')} variant="outline">

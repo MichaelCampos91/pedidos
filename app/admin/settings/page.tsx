@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { ShippingRulesSection } from "@/components/settings/ShippingRulesSection"
+import { ActiveModalitiesSection } from "@/components/settings/ActiveModalitiesSection"
 import { PaymentSettingsSection } from "@/components/settings/PaymentSettingsSection"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -144,6 +145,8 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </div>
+
+          <ActiveModalitiesSection />
 
           {/* Botão Salvar Frete */}
           <div className="flex justify-end pt-6 border-t">

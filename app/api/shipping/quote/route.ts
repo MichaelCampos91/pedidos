@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
+import { query } from '@/lib/database'
 import { calculateShipping } from '@/lib/melhor-envio'
 import { getToken, updateTokenValidation, type IntegrationEnvironment } from '@/lib/integrations'
 import { generateCacheKey, getCachedQuote, setCachedQuote, cleanupExpiredCache } from '@/lib/shipping-cache'
@@ -235,7 +236,7 @@ export async function POST(request: NextRequest) {
     }, environment)
 
     // Filtrar opções com preço inválido ou undefined
-    const validOptions = (shippingOptions || []).filter(option => {
+    let validOptions = (shippingOptions || []).filter(option => {
       if (!option || !option.price) return false
       const price = parseFloat(option.price)
       return !isNaN(price) && isFinite(price) && price > 0
@@ -246,6 +247,20 @@ export async function POST(request: NextRequest) {
       validas: validOptions.length,
       invalidas: (shippingOptions?.length || 0) - validOptions.length,
     })
+
+    // Filtrar por modalidades ativas (se houver alguma cadastrada para o ambiente)
+    try {
+      const activeModalitiesResult = await query(
+        'SELECT id FROM shipping_modalities WHERE environment = $1 AND active = true',
+        [environment]
+      )
+      if (activeModalitiesResult.rows.length > 0) {
+        const activeIds = new Set(activeModalitiesResult.rows.map((r: { id: number }) => r.id))
+        validOptions = validOptions.filter(opt => activeIds.has(opt.id))
+      }
+    } catch (modErr) {
+      console.warn('[Shipping Quote] Erro ao filtrar modalidades ativas, retornando todas:', modErr)
+    }
 
     // Tratar resposta vazia
     if (!validOptions || validOptions.length === 0) {
