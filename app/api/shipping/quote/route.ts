@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const { cep_destino, peso, altura, largura, comprimento, valor, produtos, order_value, destination_state } = body
+    const applyRules = body.apply_rules !== false
 
     // Determinar environment: usar do body se fornecido, senão buscar ambiente ativo
     if (body.environment === 'sandbox' || body.environment === 'production') {
@@ -207,10 +208,10 @@ export async function POST(request: NextRequest) {
       }]
     }
 
-    // Verificar cache
+    // Verificar cache (apenas quando regras são aplicadas)
     const cacheKey = generateCacheKey(cleanCepDestino, productsList, environment)
-    const cachedOptions = getCachedQuote(cacheKey)
-    
+    const cachedOptions = applyRules ? getCachedQuote(cacheKey) : null
+
     if (cachedOptions) {
       console.log('[Shipping Quote] Retornando do cache', { cacheKey })
       return NextResponse.json({
@@ -253,6 +254,22 @@ export async function POST(request: NextRequest) {
         options: [],
         message: '[Melhor Envio] Nenhum serviço de entrega disponível para este CEP e dimensões. Tente outro endereço ou ajuste as dimensões do produto.',
         source: 'integration',
+      })
+    }
+
+    // Sem regras (ex.: tela consultiva admin): retornar opções brutas, sem cache
+    if (!applyRules) {
+      const optionsNormalized = validOptions.map(option => ({
+        ...option,
+        delivery_range: option.delivery_range || {
+          min: option.delivery_time,
+          max: option.delivery_time,
+        },
+      }))
+      return NextResponse.json({
+        success: true,
+        options: optionsNormalized,
+        cached: false,
       })
     }
 

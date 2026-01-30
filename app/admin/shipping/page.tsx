@@ -37,7 +37,6 @@ interface ShippingOption {
     max: number
   }
   packages: number
-  originalPrice?: number
 }
 
 interface Product {
@@ -153,7 +152,7 @@ export default function ShippingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
-          // environment removido - API usa ambiente ativo automaticamente
+          apply_rules: false,
         }),
         credentials: 'include',
       })
@@ -479,20 +478,9 @@ export default function ShippingPage() {
                         </p>
                       </div>
                       <div className="text-right">
-                        {optionPrice === 0 && option.originalPrice != null ? (
-                          <div>
-                            <p className="text-sm text-muted-foreground line-through">
-                              {formatShippingPrice(option.originalPrice.toString())}
-                            </p>
-                            <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                              {formatShippingPrice(option.price)}
-                            </p>
-                          </div>
-                        ) : (
-                          <p className="text-2xl font-bold">
-                            {formatShippingPrice(option.price)}
-                          </p>
-                        )}
+                        <p className="text-2xl font-bold">
+                          {formatShippingPrice(option.price)}
+                        </p>
                         {option.packages > 1 && (
                           <p className="text-xs text-muted-foreground">
                             {option.packages} volumes
