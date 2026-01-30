@@ -363,32 +363,33 @@ export default function OrdersPage() {
                     <TableCell>
                       <div>
                         <div className="font-medium">{order.client_name}</div>
-                        <div className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <IdCard className="h-4 w-4 shrink-0" />
-                          <span>{formatCPF(order.client_cpf)}</span>
+                        <div className="mt-1 flex flex-col gap-0.5">
+                          <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <IdCard className="h-3 w-3 shrink-0" />
+                            <span>{formatCPF(order.client_cpf)}</span>
+                          </div>
+                          {order.client_whatsapp && (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline w-fit"
+                              onClick={() => {
+                                const clean = String(order.client_whatsapp).replace(/\D/g, "")
+                                const phone = clean.length === 11 ? `55${clean}` : clean
+                                const msg = encodeURIComponent(
+                                  `Olá, estamos entrando em contato sobre o seu pedido #${order.id}.`
+                                )
+                                window.open(
+                                  `https://wa.me/${phone}?text=${msg}`,
+                                  "_blank",
+                                  "noopener,noreferrer"
+                                )
+                              }}
+                            >
+                              <MessageCircle className="h-3 w-3" />
+                              <span>{order.client_whatsapp}</span>
+                            </button>
+                          )}
                         </div>
-                        <br/>
-                        {order.client_whatsapp && (
-                          <button
-                            type="button"
-                            className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
-                            onClick={() => {
-                              const clean = String(order.client_whatsapp).replace(/\D/g, "")
-                              const phone = clean.length === 11 ? `55${clean}` : clean
-                              const msg = encodeURIComponent(
-                                `Olá, estamos entrando em contato sobre o seu pedido #${order.id}.`
-                              )
-                              window.open(
-                                `https://wa.me/${phone}?text=${msg}`,
-                                "_blank",
-                                "noopener,noreferrer"
-                              )
-                            }}
-                          >
-                            <MessageCircle className="h-4 w-4" />
-                            <span>{order.client_whatsapp}</span>
-                          </button>
-                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -448,7 +449,9 @@ export default function OrdersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {formatCurrency(parseFloat(order.total))}
+                      <div className="font-medium">
+                        {formatCurrency(parseFloat(order.total))}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
