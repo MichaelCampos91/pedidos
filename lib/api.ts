@@ -116,6 +116,15 @@ export const ordersApi = {
     request<{ success: boolean }>(`/orders/${id}`, { method: 'PUT', body: data }),
 }
 
+// Bling
+export const blingApi = {
+  syncOrder: (orderId: number) =>
+    request<{ success: boolean; blingId?: number | string; message?: string }>('/bling/sync-order', {
+      method: 'POST',
+      body: { orderId },
+    }),
+}
+
 // Metrics
 export const metricsApi = {
   orders: (params: Record<string, any> = {}) => {

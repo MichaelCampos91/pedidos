@@ -33,8 +33,9 @@ import {
   Tag,
   Banknote,
   IdCard,
+  Send,
 } from "lucide-react"
-import { ordersApi } from "@/lib/api"
+import { ordersApi, blingApi } from "@/lib/api"
 import { cn, formatCurrency, formatDateTime, formatCPF } from "@/lib/utils"
 import { PaymentLinkModal } from "@/components/orders/PaymentLinkModal"
 import { OrderModal } from "@/components/orders/OrderModal"
@@ -105,6 +106,7 @@ export default function OrdersPage() {
     tags: string
   }>({ open: false, orderId: null, tags: "" })
   const [actionsOpenOrderId, setActionsOpenOrderId] = useState<number | null>(null)
+  const [blingSyncingOrderId, setBlingSyncingOrderId] = useState<number | null>(null)
 
   const loadOrders = async () => {
     setLoading(true)
@@ -207,6 +209,19 @@ export default function OrdersPage() {
       loadOrders()
     } catch (err: any) {
       toast.error(err.message || "Erro ao aprovar pagamento")
+    }
+  }
+
+  const handleSyncToBling = async (orderId: number) => {
+    setBlingSyncingOrderId(orderId)
+    try {
+      const res = await blingApi.syncOrder(orderId)
+      toast.success(res.message ?? "Pedido enviado ao Bling com sucesso.")
+      loadOrders()
+    } catch (err: any) {
+      toast.error(err.message ?? "Erro ao enviar pedido ao Bling.")
+    } finally {
+      setBlingSyncingOrderId(null)
     }
   }
 
@@ -352,6 +367,7 @@ export default function OrdersPage() {
                   <TableHead>Total</TableHead>
                   <TableHead>Frete</TableHead>
                   <TableHead>Tags</TableHead>
+                  <TableHead>Bling</TableHead>
                   <TableHead>Criado em</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
@@ -498,6 +514,38 @@ export default function OrdersPage() {
                           )}
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {order.bling_sync_status === "synced" && (
+                          <Badge
+                            variant="outline"
+                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-emerald-50 text-emerald-800 border-emerald-200"
+                          >
+                            <CheckCircle2 className="h-2.5 w-2.5" />
+                            Enviado
+                          </Badge>
+                        )}
+                        {order.bling_sync_status === "error" && (
+                          <Badge
+                            variant="outline"
+                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-rose-50 text-rose-800 border-rose-200"
+                            title={order.bling_sync_error ?? undefined}
+                          >
+                            <XCircle className="h-2.5 w-2.5" />
+                            Erro
+                          </Badge>
+                        )}
+                        {(order.bling_sync_status === "pending" || order.bling_sync_status == null) && (
+                          <Badge
+                            variant="outline"
+                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-muted text-muted-foreground border-muted"
+                          >
+                            <Clock className="h-2.5 w-2.5" />
+                            Pendente
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatDateTime(order.created_at)}
                     </TableCell>
@@ -590,6 +638,22 @@ export default function OrdersPage() {
                             <Tag className="h-4 w-4" />
                             Adicionar Tags
                           </Button>
+                          {order.payment_status === "paid" && order.bling_sync_status !== "synced" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="justify-start gap-2"
+                              disabled={blingSyncingOrderId === order.id}
+                              onClick={() => { setActionsOpenOrderId(null); handleSyncToBling(order.id) }}
+                            >
+                              {blingSyncingOrderId === order.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              Enviar ao Bling
+                            </Button>
+                          )}
                         </div>
                       </PopoverContent>
                     </Popover>

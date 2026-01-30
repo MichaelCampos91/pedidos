@@ -4,6 +4,7 @@ import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { getToken, updateTokenValidation, type IntegrationProvider, type IntegrationEnvironment } from '@/lib/integrations'
 import { validateToken as validateMelhorEnvio } from '@/lib/melhor-envio'
 import { validateToken as validatePagarme } from '@/lib/pagarme'
+import { validateToken as validateBling } from '@/lib/bling'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -56,11 +57,7 @@ export async function POST(
         break
       
       case 'bling':
-        // TODO: Implementar validação do Bling
-        validationResult = {
-          valid: false,
-          message: '[Sistema] Validação do Bling ainda não implementada',
-        }
+        validationResult = await validateBling(token.token_value)
         break
       
       default:

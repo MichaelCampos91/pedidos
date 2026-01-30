@@ -5,6 +5,7 @@ import { getActiveEnvironment } from '@/lib/settings'
 import { getToken } from '@/lib/integrations'
 import { calculatePixDiscount, calculateInstallmentTotal, recalculateOrderTotal } from '@/lib/payment-rules'
 import { saveLog } from '@/lib/logger'
+import { syncOrderToBling } from '@/lib/bling'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
 // Detectar ambiente baseado em ambiente ativo ou fallback automático
@@ -384,6 +385,11 @@ export async function POST(request: NextRequest) {
         'UPDATE orders SET status = $1, paid_at = CURRENT_TIMESTAMP WHERE id = $2',
         ['aguardando_producao', order_id]
       )
+      try {
+        await syncOrderToBling(order_id)
+      } catch (_e) {
+        // Falha no Bling não quebra o fluxo de pagamento; status fica pendente para reenvio manual
+      }
     }
 
     // Validar resposta antes de retornar ao frontend

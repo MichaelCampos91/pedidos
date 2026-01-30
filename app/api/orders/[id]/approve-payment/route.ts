@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
+import { syncOrderToBling } from '@/lib/bling'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,6 +53,12 @@ export async function POST(
        WHERE id = $2`,
       [observationLine, orderId]
     )
+
+    try {
+      await syncOrderToBling(orderId)
+    } catch (_e) {
+      // Falha no Bling não quebra o fluxo de aprovação; status fica pendente para reenvio manual
+    }
 
     return NextResponse.json({ success: true, message: 'Pagamento aprovado manualmente' })
   } catch (error: any) {

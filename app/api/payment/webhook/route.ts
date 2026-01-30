@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createHmac } from 'crypto'
 import { query } from '@/lib/database'
 import { saveLog } from '@/lib/logger'
+import { syncOrderToBling } from '@/lib/bling'
 
 export async function POST(request: NextRequest) {
   try {
@@ -111,6 +112,12 @@ export async function POST(request: NextRequest) {
         paymentId: payment.id,
         transactionId: data.id,
       })
+
+      try {
+        await syncOrderToBling(Number(payment.order_id))
+      } catch (_e) {
+        // Falha no Bling não quebra o webhook; status fica pendente para reenvio manual
+      }
     }
 
     return NextResponse.json({ success: true })
