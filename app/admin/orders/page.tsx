@@ -364,9 +364,10 @@ export default function OrdersPage() {
                       <div>
                         <div className="font-medium">{order.client_name}</div>
                         <div className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <IdCard className="h-3 w-3 shrink-0" />
+                          <IdCard className="h-4 w-4 shrink-0" />
                           <span>{formatCPF(order.client_cpf)}</span>
                         </div>
+                        <br/>
                         {order.client_whatsapp && (
                           <button
                             type="button"
@@ -384,7 +385,7 @@ export default function OrdersPage() {
                               )
                             }}
                           >
-                            <MessageCircle className="h-3 w-3" />
+                            <MessageCircle className="h-4 w-4" />
                             <span>{order.client_whatsapp}</span>
                           </button>
                         )}
