@@ -79,6 +79,7 @@ export default function ClientFormPage() {
       } else {
         await clientsApi.update(parseInt(id), dataToSend)
       }
+      toast.success(isNew ? 'Cliente cadastrado com sucesso.' : 'Cliente atualizado com sucesso.')
       router.push('/admin/clients')
     } catch (error: any) {
       toast.error(error.message || 'Erro ao salvar cliente')

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { query } from '@/lib/database'
+import { query, getDatabase } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { validateCPF } from '@/lib/utils'
 
@@ -88,43 +88,49 @@ export async function PUT(
       )
     }
 
-    // Atualiza cliente
-    await query(
-      `UPDATE clients SET
-        cpf = $1,
-        cnpj = $2,
-        name = $3,
-        email = $4,
-        phone = $5,
-        whatsapp = $6
-      WHERE id = $7`,
-      [cleanCPF, cnpj?.replace(/\D/g, '') || null, name?.trim() || null, email || null, (phone != null && String(phone).trim() !== '') ? String(phone).trim() : null, (whatsapp != null && String(whatsapp).trim() !== '') ? String(whatsapp).trim() : null, params.id]
-    )
-
-    // Remove endereços existentes e insere novos
-    if (addresses && Array.isArray(addresses)) {
-      await query('DELETE FROM client_addresses WHERE client_id = $1', [params.id])
-      
-      for (const address of addresses) {
-        await query(
-          `INSERT INTO client_addresses (client_id, cep, street, number, complement, neighborhood, city, state, is_default)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [
-            params.id,
-            address.cep?.replace(/\D/g, ''),
-            address.street,
-            address.number,
-            address.complement || null,
-            address.neighborhood || null,
-            address.city,
-            address.state,
-            address.is_default || false
-          ]
-        )
+    const pool = getDatabase()
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        `UPDATE clients SET
+          cpf = $1,
+          cnpj = $2,
+          name = $3,
+          email = $4,
+          phone = $5,
+          whatsapp = $6
+        WHERE id = $7`,
+        [cleanCPF, cnpj?.replace(/\D/g, '') || null, name?.trim() || null, email || null, (phone != null && String(phone).trim() !== '') ? String(phone).trim() : null, (whatsapp != null && String(whatsapp).trim() !== '') ? String(whatsapp).trim() : null, params.id]
+      )
+      await client.query('DELETE FROM client_addresses WHERE client_id = $1', [params.id])
+      if (addresses && Array.isArray(addresses)) {
+        for (const address of addresses) {
+          await client.query(
+            `INSERT INTO client_addresses (client_id, cep, street, number, complement, neighborhood, city, state, is_default)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              params.id,
+              address.cep?.replace(/\D/g, ''),
+              address.street,
+              address.number,
+              address.complement || null,
+              address.neighborhood || null,
+              address.city,
+              address.state,
+              address.is_default || false
+            ]
+          )
+        }
       }
+      await client.query('COMMIT')
+      return NextResponse.json({ success: true })
+    } catch (txError: any) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw txError
+    } finally {
+      client.release()
     }
-
-    return NextResponse.json({ success: true })
   } catch (error: any) {
     if (error.code === '23505') {
       return NextResponse.json(

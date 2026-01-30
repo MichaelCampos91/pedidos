@@ -32,6 +32,7 @@ import {
   MoreHorizontal,
   Tag,
   Banknote,
+  IdCard,
 } from "lucide-react"
 import { ordersApi } from "@/lib/api"
 import { cn, formatCurrency, formatDateTime, formatCPF } from "@/lib/utils"
@@ -346,7 +347,8 @@ export default function OrdersPage() {
                 <TableRow>
                   <TableHead>ID</TableHead>
                   <TableHead>Cliente</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Status Envio</TableHead>
+                  <TableHead>Status Pagamento</TableHead>
                   <TableHead>Total</TableHead>
                   <TableHead>Frete</TableHead>
                   <TableHead>Tags</TableHead>
@@ -361,134 +363,145 @@ export default function OrdersPage() {
                     <TableCell>
                       <div>
                         <div className="font-medium">{order.client_name}</div>
-                        <div className="text-sm text-muted-foreground">{formatCPF(order.client_cpf)}</div>
-                      {order.client_whatsapp && (
-                        <button
-                          type="button"
-                          className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
-                          onClick={() => {
-                            const clean = String(order.client_whatsapp).replace(/\D/g, "")
-                            const phone = clean.length === 11 ? `55${clean}` : clean
-                            const msg = encodeURIComponent(
-                              `Olá, estamos entrando em contato sobre o seu pedido #${order.id}.`
-                            )
-                            window.open(
-                              `https://wa.me/${phone}?text=${msg}`,
-                              "_blank",
-                              "noopener,noreferrer"
-                            )
-                          }}
-                        >
-                          <MessageCircle className="h-3 w-3" />
-                          <span>{order.client_whatsapp}</span>
-                        </button>
-                      )}
+                        <div className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <IdCard className="h-3 w-3 shrink-0" />
+                          <span>{formatCPF(order.client_cpf)}</span>
+                        </div>
+                        {order.client_whatsapp && (
+                          <button
+                            type="button"
+                            className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
+                            onClick={() => {
+                              const clean = String(order.client_whatsapp).replace(/\D/g, "")
+                              const phone = clean.length === 11 ? `55${clean}` : clean
+                              const msg = encodeURIComponent(
+                                `Olá, estamos entrando em contato sobre o seu pedido #${order.id}.`
+                              )
+                              window.open(
+                                `https://wa.me/${phone}?text=${msg}`,
+                                "_blank",
+                                "noopener,noreferrer"
+                              )
+                            }}
+                          >
+                            <MessageCircle className="h-3 w-3" />
+                            <span>{order.client_whatsapp}</span>
+                          </button>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                      {(() => {
-                        const config =
-                          ORDER_STATUS_CONFIG[order.status] || {
-                            label: STATUS_LABELS[order.status] || order.status,
-                            className: "",
-                          }
-                        const Icon = config.icon
-                        return (
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
-                              config.className
-                            )}
-                          >
-                            {Icon && <Icon className="h-2.5 w-2.5" />}
-                            {config.label}
-                          </Badge>
-                        )
-                      })()}
+                        {(() => {
+                          const config =
+                            ORDER_STATUS_CONFIG[order.status] || {
+                              label: STATUS_LABELS[order.status] || order.status,
+                              className: "",
+                            }
+                          const Icon = config.icon
+                          return (
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
+                                config.className
+                              )}
+                            >
+                              {Icon && <Icon className="h-2.5 w-2.5" />}
+                              {config.label}
+                            </Badge>
+                          )
+                        })()}
                       </div>
                     </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {order.tags
-                        ? (Array.isArray(order.tags)
-                            ? order.tags
-                            : String(order.tags).split(",").map((t: string) => t.trim()).filter(Boolean)
-                          ).map((tag: string, i: number) => (
+                    <TableCell>
+                      <div className="space-y-1">
+                        {order.payment_status && (
+                          <div className="flex flex-wrap items-center gap-1">
                             <Badge
-                              key={i}
-                              className="text-[10px] px-1.5 py-0 rounded-md bg-blue-600 text-white border-0"
+                              variant="outline"
+                              className={cn(
+                                "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
+                                order.payment_status === "paid" &&
+                                  "bg-emerald-50 text-emerald-800 border-emerald-200",
+                                order.payment_status === "pending" &&
+                                  "bg-amber-50 text-amber-800 border-amber-200",
+                                order.payment_status === "failed" &&
+                                  "bg-rose-50 text-rose-800 border-rose-200"
+                              )}
                             >
-                              {tag}
+                              {order.payment_status === "paid" && <CheckCircle2 className="h-2.5 w-2.5" />}
+                              {order.payment_status === "pending" && <Clock className="h-2.5 w-2.5" />}
+                              {order.payment_status === "failed" && <XCircle className="h-2.5 w-2.5" />}
+                              {order.payment_status === "paid" && "Aprovado"}
+                              {order.payment_status === "pending" && "Pendente"}
+                              {order.payment_status === "failed" && "Recusado"}
                             </Badge>
-                          ))
-                        : "—"}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <div>{formatCurrency(parseFloat(order.total))}</div>
-                      {order.payment_status && (
-                        <div className="flex flex-wrap items-center gap-1">
+                            {order.payment_status === "paid" && getPaymentMethodLabel(order) && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full border border-muted">
+                                ({getPaymentMethodLabel(order)})
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {formatCurrency(parseFloat(order.total))}
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="font-medium">
+                          {formatCurrency(parseFloat(order.total_shipping || 0))}
+                        </div>
+                        {order.shipping_method && (
                           <Badge
                             variant="outline"
-                            className={cn(
-                              "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
-                              order.payment_status === "paid" &&
-                                "bg-emerald-50 text-emerald-800 border-emerald-200",
-                              order.payment_status === "pending" &&
-                                "bg-amber-50 text-amber-800 border-amber-200",
-                              order.payment_status === "failed" &&
-                                "bg-rose-50 text-rose-800 border-rose-200"
-                            )}
+                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-amber-50 text-amber-800 border-amber-200"
                           >
-                            {order.payment_status === "paid" && <CheckCircle2 className="h-2.5 w-2.5" />}
-                            {order.payment_status === "pending" && <Clock className="h-2.5 w-2.5" />}
-                            {order.payment_status === "failed" && <XCircle className="h-2.5 w-2.5" />}
-                            {order.payment_status === "paid" && "Aprovado"}
-                            {order.payment_status === "pending" && "Pendente"}
-                            {order.payment_status === "failed" && "Recusado"}
+                            <Truck className="h-3 w-3" />
+                            <span>
+                              {order.shipping_method}
+                              {order.shipping_company_name
+                                ? ` - ${order.shipping_company_name}`
+                                : ""}
+                            </span>
                           </Badge>
-                          {order.payment_status === "paid" && getPaymentMethodLabel(order) && (
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full border border-muted">
-                              ({getPaymentMethodLabel(order)})
-                            </Badge>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <div className="font-medium">
-                        {formatCurrency(parseFloat(order.total_shipping || 0))}
+                        )}
                       </div>
-                      {order.shipping_method && (
-                        <Badge
-                          variant="outline"
-                          className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-amber-50 text-amber-800 border-amber-200"
-                        >
-                          <Truck className="h-3 w-3" />
-                          <span>
-                            {order.shipping_method}
-                            {order.shipping_company_name
-                              ? ` - ${order.shipping_company_name}`
-                              : ""}
-                          </span>
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1 items-center">
+                        {order.tags && (Array.isArray(order.tags) ? order.tags : String(order.tags).split(",").map((t: string) => t.trim()).filter(Boolean)).length > 0
+                          ? (Array.isArray(order.tags) ? order.tags : String(order.tags).split(",").map((t: string) => t.trim()).filter(Boolean)).map((tag: string, i: number) => (
+                              <Badge
+                                key={i}
+                                className="text-[10px] px-1.5 py-0 rounded-md bg-blue-600 text-white border-0"
+                              >
+                                {tag}
+                              </Badge>
+                            ))
+                          : (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                              onClick={() => handleOpenTagsModal(order)}
+                            >
+                              +Adicionar
+                            </Button>
+                          )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatDateTime(order.created_at)}
                     </TableCell>
                     <TableCell>
                     <Popover open={actionsOpenOrderId === order.id} onOpenChange={(open) => setActionsOpenOrderId(open ? order.id : null)}>
                       <PopoverTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 gap-1">
-                          <MoreHorizontal className="h-4 w-4" />
-                          <span className="text-xs">[...]</span>
+                        <Button size="sm" className="h-8 bg-primary text-primary-foreground hover:bg-primary/90">
+                          <MoreHorizontal className="h-5 w-5" />
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-56 p-1" align="end">
@@ -529,7 +542,7 @@ export default function OrdersPage() {
                               onClick={() => { setActionsOpenOrderId(null); handleApprovePaymentManually(order.id) }}
                             >
                               <Banknote className="h-4 w-4" />
-                              Aprovar Pagamento Manualmente
+                              Aprovar Pagamento
                             </Button>
                           )}
                           {order.payment_link_token ? (
