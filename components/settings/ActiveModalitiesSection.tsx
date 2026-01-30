@@ -133,7 +133,7 @@ export function ActiveModalitiesSection() {
               Modalidades Ativas
             </CardTitle>
             <CardDescription>
-              Apenas as modalidades ativas aparecem na cotação de frete e na criação de pedidos. Sincronize com o Melhor Envio e ative ou desative cada uma.
+              Gerencie as modalidades de frete ativas.
             </CardDescription>
           </div>
           <Button
@@ -162,7 +162,7 @@ export function ActiveModalitiesSection() {
             Nenhuma modalidade carregada. Clique em &quot;Sincronizar&quot; para buscar as modalidades do Melhor Envio.
           </p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-[300px] overflow-y-auto">
             {modalities.map((mod) => (
               <div
                 key={`${mod.id}-${mod.environment}`}

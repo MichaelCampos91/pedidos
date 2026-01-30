@@ -104,6 +104,7 @@ export default function DashboardPage() {
               <DatePicker
                 date={startDate}
                 onDateChange={setStartDate}
+                disablePastDates={false}
               />
             </PopoverContent>
           </Popover>
@@ -118,6 +119,7 @@ export default function DashboardPage() {
               <DatePicker
                 date={endDate}
                 onDateChange={setEndDate}
+                disablePastDates={false}
               />
             </PopoverContent>
           </Popover>
@@ -212,13 +214,13 @@ export default function DashboardPage() {
       </Card>
 
       {/* Distribuição por forma de pagamento */}
-      {metrics?.by_payment_method && metrics.by_payment_method.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Distribuição por Forma de Pagamento</CardTitle>
-            <CardDescription>Pedidos pagos no período, por método</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>Distribuição por Forma de Pagamento</CardTitle>
+          <CardDescription>Pedidos pagos no período, por método</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {metrics?.by_payment_method && metrics.by_payment_method.length > 0 ? (
             <div className="space-y-4">
               {metrics.by_payment_method.map((item: any) => {
                 const Icon = getPaymentMethodIcon(item.method)
@@ -234,8 +236,8 @@ export default function DashboardPage() {
                     <div className="w-full bg-muted rounded-full h-2">
                       <div
                         className={cn("h-2 rounded-full transition-all", item.method === "pix" || item.method === "pix_manual" ? "bg-emerald-500" : item.method === "credit_card" ? "bg-blue-500" : "bg-primary")}
-                        style={{ 
-                          width: `${metrics.total > 0 ? (item.count / metrics.total) * 100 : 0}%` 
+                        style={{
+                          width: `${metrics.total > 0 ? (item.count / metrics.total) * 100 : 0}%`
                         }}
                       />
                     </div>
@@ -243,9 +245,13 @@ export default function DashboardPage() {
                 )
               })}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <p className="text-sm text-muted-foreground py-4">
+              {startDate && endDate ? "Nenhum pedido pago no período." : "Nenhum pedido pago."}
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

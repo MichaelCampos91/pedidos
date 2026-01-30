@@ -112,7 +112,9 @@ export default function SettingsPage() {
 
         {/* Tab Frete */}
         <TabsContent value="frete" className="space-y-6 mt-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+            <ActiveModalitiesSection />
+
             <ShippingRulesSection />
 
             {/* Prazo de Produção */}
@@ -145,8 +147,6 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </div>
-
-          <ActiveModalitiesSection />
 
           {/* Botão Salvar Frete */}
           <div className="flex justify-end pt-6 border-t">

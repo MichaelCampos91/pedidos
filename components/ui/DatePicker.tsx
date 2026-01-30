@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { format } from "date-fns"
+import { format, startOfDay } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { CalendarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -14,9 +14,12 @@ interface DatePickerProps {
   onDateChange: (date: Date | undefined) => void
   placeholder?: string
   disabled?: boolean
+  /** Quando true (padrão), desabilita datas passadas. Use false para permitir seleção retroativa (ex.: dashboard). */
+  disablePastDates?: boolean
 }
 
-export function DatePicker({ date, onDateChange, placeholder = "Selecione a data", disabled }: DatePickerProps) {
+export function DatePicker({ date, onDateChange, placeholder = "Selecione a data", disabled, disablePastDates = true }: DatePickerProps) {
+  const todayStart = startOfDay(new Date())
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -37,7 +40,7 @@ export function DatePicker({ date, onDateChange, placeholder = "Selecione a data
           mode="single"
           selected={date}
           onSelect={onDateChange}
-          disabled={(date) => date < new Date()}
+          disabled={disablePastDates ? (d) => startOfDay(d) < todayStart : undefined}
           initialFocus
         />
       </PopoverContent>
