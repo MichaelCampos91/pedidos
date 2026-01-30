@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Dialog,
   DialogContent,
@@ -31,10 +31,17 @@ export function PaymentLinkModal({
   expiresAt,
   onGenerateNew,
 }: PaymentLinkModalProps) {
-  const [link, setLink] = useState<string | null>(existingLink || null)
+  const [link, setLink] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      const initial = existingLink ?? null
+      setLink(initial && !String(initial).includes('undefined') ? initial : null)
+    }
+  }, [open, existingLink])
 
   const handleGenerate = async () => {
     setLoading(true)

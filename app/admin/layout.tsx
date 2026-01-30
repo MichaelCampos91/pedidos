@@ -22,6 +22,9 @@ export default function AdminLayout({
   }
 
   const isActive = (path: string) => pathname === path
+  const isActiveWithChildren = (path: string) => pathname === path || (pathname?.startsWith(path + '/') ?? false)
+  const navLinkClass = (active: boolean) =>
+    `rounded-none border-b-2 ${active ? 'border-primary text-foreground font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-primary'}`
 
   return (
     <ProtectedRoute>
@@ -53,73 +56,49 @@ export default function AdminLayout({
           <div className="container mx-auto px-4">
             <div className="flex gap-4">
               <Link href="/admin/dashboard">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/dashboard') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/dashboard'))}>
                   <BarChart3 className="h-4 w-4 mr-2" />
                   Dashboard
                 </Button>
               </Link>
               <Link href="/admin/logs">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/logs') || pathname?.startsWith('/admin/logs/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/logs') || isActiveWithChildren('/admin/logs'))}>
                   <FileText className="h-4 w-4 mr-2" />
                   Logs
                 </Button>
               </Link>
               <Link href="/admin/orders">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/orders') || pathname?.startsWith('/admin/orders/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/orders') || isActiveWithChildren('/admin/orders'))}>
                   <ShoppingCart className="h-4 w-4 mr-2" />
                   Pedidos
                 </Button>
               </Link>
               <Link href="/admin/clients">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/clients') || pathname?.startsWith('/admin/clients/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/clients') || isActiveWithChildren('/admin/clients'))}>
                   <Users className="h-4 w-4 mr-2" />
                   Clientes
                 </Button>
               </Link>
               <Link href="/admin/products">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/products') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/products'))}>
                   <Package className="h-4 w-4 mr-2" />
                   Produtos
                 </Button>
               </Link>
               <Link href="/admin/shipping">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/shipping') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/shipping'))}>
                   <Truck className="h-4 w-4 mr-2" />
                   Frete
                 </Button>
               </Link>
               <Link href="/admin/integrations">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/integrations') || pathname?.startsWith('/admin/integrations/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/integrations') || isActiveWithChildren('/admin/integrations'))}>
                   <Braces className="h-4 w-4 mr-2" />
                   Integrações
                 </Button>
               </Link>
               <Link href="/admin/settings">
-                <Button 
-                  variant="ghost" 
-                  className={`rounded-none border-b-2 ${isActive('/admin/settings') || pathname?.startsWith('/admin/settings/') ? 'border-primary' : 'border-transparent'} hover:border-primary`}
-                >
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/settings') || isActiveWithChildren('/admin/settings'))}>
                   <Settings className="h-4 w-4 mr-2" />
                   Configurações
                 </Button>

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, Save, Plus, Trash2 } from "lucide-react"
 import { clientsApi, cepApi } from "@/lib/api"
-import { formatCPF, formatCNPJ, formatPhone, maskPhone, maskCEP, capitalizeName, unmaskPhone, unmaskCEP } from "@/lib/utils"
+import { formatCPF, formatCNPJ, formatPhone, maskPhone, maskCEP, unmaskPhone, unmaskCEP } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 
 export default function ClientFormPage() {
@@ -60,13 +60,14 @@ export default function ClientFormPage() {
     setLoading(true)
 
     try {
-      // Preparar dados para envio (limpar máscaras)
+      // Preparar dados para envio: trim no nome; CPF/CNPJ/CEP sem máscara; phone/whatsapp com máscara
       const dataToSend = {
         ...formData,
+        name: formData.name.trim(),
         cpf: formData.cpf.replace(/\D/g, ''),
         cnpj: formData.cnpj ? formData.cnpj.replace(/\D/g, '') : '',
-        phone: formData.phone ? unmaskPhone(formData.phone) : '',
-        whatsapp: formData.whatsapp ? unmaskPhone(formData.whatsapp) : '',
+        phone: formData.phone ? formData.phone.trim() : '',
+        whatsapp: formData.whatsapp ? formData.whatsapp.trim() : '',
         addresses: formData.addresses.map(addr => ({
           ...addr,
           cep: addr.cep ? unmaskCEP(addr.cep) : ''
@@ -179,7 +180,7 @@ export default function ClientFormPage() {
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: capitalizeName(e.target.value) })}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required
                 />
               </div>
@@ -250,10 +251,28 @@ export default function ClientFormPage() {
                     <div className="flex gap-2">
                       <Input
                         value={address.cep}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const newAddresses = [...formData.addresses]
                           newAddresses[index].cep = maskCEP(e.target.value)
                           setFormData({ ...formData, addresses: newAddresses })
+                          const cleanCep = unmaskCEP(newAddresses[index].cep)
+                          if (cleanCep.length === 8) {
+                            try {
+                              const cepData = await cepApi.search(cleanCep)
+                              const updated = [...formData.addresses]
+                              updated[index] = {
+                                ...updated[index],
+                                cep: newAddresses[index].cep,
+                                street: cepData.street || updated[index].street,
+                                neighborhood: cepData.neighborhood || updated[index].neighborhood,
+                                city: cepData.city || updated[index].city,
+                                state: cepData.state || updated[index].state,
+                              }
+                              setFormData({ ...formData, addresses: updated })
+                            } catch (err: any) {
+                              toast.error(err.message || 'Erro ao buscar CEP')
+                            }
+                          }
                         }}
                         placeholder="00000-000"
                         maxLength={9}

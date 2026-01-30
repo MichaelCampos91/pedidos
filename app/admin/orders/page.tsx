@@ -29,6 +29,9 @@ import {
   Copy,
   RefreshCw,
   MessageCircle,
+  MoreHorizontal,
+  Tag,
+  Banknote,
 } from "lucide-react"
 import { ordersApi } from "@/lib/api"
 import { cn, formatCurrency, formatDateTime, formatCPF } from "@/lib/utils"
@@ -38,6 +41,14 @@ import { Badge } from "@/components/ui/badge"
 import { OrderStatusModal } from "@/components/orders/OrderStatusModal"
 import { OrderDetailsModal } from "@/components/orders/OrderDetailsModal"
 import { STATUS_LABELS, ORDER_STATUS_CONFIG } from "@/components/orders/order-status-config"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 export default function OrdersPage() {
   const router = useRouter()
@@ -45,8 +56,8 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [startDate, setStartDate] = useState<Date | undefined>()
-  const [endDate, setEndDate] = useState<Date | undefined>()
+  const [startDate, setStartDate] = useState<Date | undefined>(() => new Date())
+  const [endDate, setEndDate] = useState<Date | undefined>(() => new Date())
   const [pagination, setPagination] = useState({
     current_page: 1,
     per_page: 20,
@@ -87,6 +98,12 @@ export default function OrdersPage() {
     open: false,
     orderId: null,
   })
+  const [tagsModal, setTagsModal] = useState<{
+    open: boolean
+    orderId: number | null
+    tags: string
+  }>({ open: false, orderId: null, tags: "" })
+  const [actionsOpenOrderId, setActionsOpenOrderId] = useState<number | null>(null)
 
   const loadOrders = async () => {
     setLoading(true)
@@ -142,13 +159,10 @@ export default function OrdersPage() {
   }
 
   const handleOpenPaymentLink = (order: any) => {
-    // Construir link se existir token
-    let link = null
-    if (order.payment_link_token) {
-      const baseUrl = typeof window !== "undefined" ? window.location.origin : ""
-      link = `${baseUrl}/checkout/${order.id}?token=${order.payment_link_token}`
+    let link: string | null = null
+    if (order.payment_link_token && typeof window !== "undefined" && window.location?.origin) {
+      link = `${window.location.origin}/checkout/${order.id}?token=${order.payment_link_token}`
     }
-
     setPaymentLinkModal({
       open: true,
       orderId: order.id,
@@ -181,6 +195,57 @@ export default function OrdersPage() {
     loadOrders()
   }
 
+  const handleApprovePaymentManually = async (orderId: number) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/approve-payment`, { method: "POST", credentials: "include" })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Erro ao aprovar pagamento")
+      }
+      toast.success("Pagamento aprovado manualmente.")
+      loadOrders()
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao aprovar pagamento")
+    }
+  }
+
+  const handleOpenTagsModal = (order: any) => {
+    const tagsStr = order.tags ? (Array.isArray(order.tags) ? order.tags.join(", ") : String(order.tags)) : ""
+    setTagsModal({ open: true, orderId: order.id, tags: tagsStr })
+  }
+
+  const handleSaveTags = async () => {
+    if (tagsModal.orderId == null) return
+    try {
+      const tagsArray = tagsModal.tags.split(",").map((t) => t.trim()).filter(Boolean)
+      const res = await fetch(`/api/orders/${tagsModal.orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: tagsArray }),
+        credentials: "include",
+      })
+      if (!res.ok) throw new Error("Erro ao salvar tags")
+      toast.success("Tags salvas.")
+      setTagsModal((prev) => ({ ...prev, open: false }))
+      loadOrders()
+    } catch (err: any) {
+      toast.error("Erro ao salvar tags")
+    }
+  }
+
+  const getPaymentMethodLabel = (order: any) => {
+    if (order.payment_status !== "paid") return null
+    const method = order.payment_method || ""
+    const installments = order.installments
+    if (method === "pix_manual") return "Pix Manual"
+    if (method === "pix") return "Pix"
+    if (method === "credit_card") {
+      if (installments === 1) return "Cartão à vista"
+      return `Cartão em ${installments}x`
+    }
+    return method ? String(method) : null
+  }
+
   const getPageNumbers = () => {
     const pages = []
     const maxVisible = 5
@@ -209,20 +274,20 @@ export default function OrdersPage() {
       </div>
 
       {/* Filtros */}
-      <div className="bg-white p-4 rounded-lg border space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="relative">
+      <div className="bg-white p-4 rounded-lg border">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[180px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Buscar por ID, nome ou CPF..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              className="pl-9"
+              className="pl-9 h-9"
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger>
+            <SelectTrigger className="w-[160px] h-9">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -234,7 +299,7 @@ export default function OrdersPage() {
           </Select>
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="w-full justify-start text-left font-normal">
+              <Button variant="outline" size="sm" className="h-9 min-w-[120px] justify-start text-left font-normal">
                 <CalendarIcon className="mr-2 h-4 w-4" />
                 {startDate ? format(startDate, "dd/MM/yyyy") : "Data inicial"}
               </Button>
@@ -248,7 +313,7 @@ export default function OrdersPage() {
           </Popover>
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="w-full justify-start text-left font-normal">
+              <Button variant="outline" size="sm" className="h-9 min-w-[120px] justify-start text-left font-normal">
                 <CalendarIcon className="mr-2 h-4 w-4" />
                 {endDate ? format(endDate, "dd/MM/yyyy") : "Data final"}
               </Button>
@@ -260,8 +325,8 @@ export default function OrdersPage() {
               />
             </PopoverContent>
           </Popover>
+          <Button size="sm" className="h-9" onClick={handleSearch}>Buscar</Button>
         </div>
-        <Button onClick={handleSearch}>Buscar</Button>
       </div>
 
       {/* Tabela */}
@@ -282,8 +347,9 @@ export default function OrdersPage() {
                   <TableHead>ID</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Status</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Frete</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Frete</TableHead>
+                  <TableHead>Tags</TableHead>
                   <TableHead>Criado em</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
@@ -332,11 +398,11 @@ export default function OrdersPage() {
                           <Badge
                             variant="outline"
                             className={cn(
-                              "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border",
+                              "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
                               config.className
                             )}
                           >
-                            {Icon && <Icon className="h-3 w-3" />}
+                            {Icon && <Icon className="h-2.5 w-2.5" />}
                             {config.label}
                           </Badge>
                         )
@@ -344,30 +410,52 @@ export default function OrdersPage() {
                       </div>
                     </TableCell>
                   <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {order.tags
+                        ? (Array.isArray(order.tags)
+                            ? order.tags
+                            : String(order.tags).split(",").map((t: string) => t.trim()).filter(Boolean)
+                          ).map((tag: string, i: number) => (
+                            <Badge
+                              key={i}
+                              className="text-[10px] px-1.5 py-0 rounded-md bg-blue-600 text-white border-0"
+                            >
+                              {tag}
+                            </Badge>
+                          ))
+                        : "—"}
+                    </div>
+                  </TableCell>
+                  <TableCell>
                     <div className="space-y-1">
                       <div>{formatCurrency(parseFloat(order.total))}</div>
                       {order.payment_status && (
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border",
-                            order.payment_status === "paid" &&
-                              "bg-emerald-50 text-emerald-800 border-emerald-200",
-                            order.payment_status === "pending" &&
-                              "bg-amber-50 text-amber-800 border-amber-200",
-                            order.payment_status === "failed" &&
-                              "bg-rose-50 text-rose-800 border-rose-200"
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
+                              order.payment_status === "paid" &&
+                                "bg-emerald-50 text-emerald-800 border-emerald-200",
+                              order.payment_status === "pending" &&
+                                "bg-amber-50 text-amber-800 border-amber-200",
+                              order.payment_status === "failed" &&
+                                "bg-rose-50 text-rose-800 border-rose-200"
+                            )}
+                          >
+                            {order.payment_status === "paid" && <CheckCircle2 className="h-2.5 w-2.5" />}
+                            {order.payment_status === "pending" && <Clock className="h-2.5 w-2.5" />}
+                            {order.payment_status === "failed" && <XCircle className="h-2.5 w-2.5" />}
+                            {order.payment_status === "paid" && "Aprovado"}
+                            {order.payment_status === "pending" && "Pendente"}
+                            {order.payment_status === "failed" && "Recusado"}
+                          </Badge>
+                          {order.payment_status === "paid" && getPaymentMethodLabel(order) && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full border border-muted">
+                              ({getPaymentMethodLabel(order)})
+                            </Badge>
                           )}
-                        >
-                          {order.payment_status === "paid" && (
-                            <CheckCircle2 className="h-3 w-3" />
-                          )}
-                          {order.payment_status === "pending" && <Clock className="h-3 w-3" />}
-                          {order.payment_status === "failed" && <XCircle className="h-3 w-3" />}
-                          {order.payment_status === "paid" && "Pagamento Aprovado"}
-                          {order.payment_status === "pending" && "Pagamento Pendente"}
-                          {order.payment_status === "failed" && "Pagamento Recusado"}
-                        </Badge>
+                        </div>
                       )}
                     </div>
                   </TableCell>
@@ -379,7 +467,7 @@ export default function OrdersPage() {
                       {order.shipping_method && (
                         <Badge
                           variant="outline"
-                          className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-800 border-amber-200"
+                          className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-amber-50 text-amber-800 border-amber-200"
                         >
                           <Truck className="h-3 w-3" />
                           <span>
@@ -396,66 +484,98 @@ export default function OrdersPage() {
                       {formatDateTime(order.created_at)}
                     </TableCell>
                     <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setDetailsModal({ open: true, orderId: order.id })}
-                        title="Ver detalhes"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => router.push(`/admin/orders/${order.id}`)}
-                        title="Editar pedido"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setStatusModal({ open: true, order })}
-                        disabled={order.status === "enviado"}
-                        title={
-                          order.status === "enviado"
-                            ? "Status não pode mais ser alterado"
-                            : "Alterar status"
-                        }
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </Button>
-                      {order.payment_link_token ? (
-                        <>
+                    <Popover open={actionsOpenOrderId === order.id} onOpenChange={(open) => setActionsOpenOrderId(open ? order.id : null)}>
+                      <PopoverTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 gap-1">
+                          <MoreHorizontal className="h-4 w-4" />
+                          <span className="text-xs">[...]</span>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-56 p-1" align="end">
+                        <div className="flex flex-col gap-0.5">
                           <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleCopyPaymentLink(order)}
-                            title="Copiar link de pagamento"
+                            variant="ghost"
+                            size="sm"
+                            className="justify-start gap-2"
+                            onClick={() => { setActionsOpenOrderId(null); setDetailsModal({ open: true, orderId: order.id }) }}
                           >
-                            <Copy className="h-4 w-4" />
+                            <Eye className="h-4 w-4" />
+                            Visualizar Pedido
                           </Button>
                           <Button
                             variant="ghost"
-                            size="icon"
-                            onClick={() => handleOpenPaymentLink(order)}
-                            title="Gerenciar link de pagamento"
+                            size="sm"
+                            className="justify-start gap-2"
+                            onClick={() => { setActionsOpenOrderId(null); router.push(`/admin/orders/${order.id}`) }}
                           >
-                            <Link2 className="h-4 w-4" />
+                            <Pencil className="h-4 w-4" />
+                            Editar Pedido
                           </Button>
-                        </>
-                      ) : !order.payment_status || order.payment_status !== "paid" ? (
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleOpenPaymentLink(order)}
-                          title="Gerar link de pagamento"
-                        >
-                          <Link2 className="h-4 w-4" />
-                        </Button>
-                      ) : null}
-                    </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="justify-start gap-2"
+                            disabled={order.status === "enviado"}
+                            onClick={() => { setActionsOpenOrderId(null); setStatusModal({ open: true, order }) }}
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                            Mudar Status
+                          </Button>
+                          {order.payment_status !== "paid" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="justify-start gap-2"
+                              onClick={() => { setActionsOpenOrderId(null); handleApprovePaymentManually(order.id) }}
+                            >
+                              <Banknote className="h-4 w-4" />
+                              Aprovar Pagamento Manualmente
+                            </Button>
+                          )}
+                          {order.payment_link_token ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="justify-start gap-2"
+                                onClick={() => { setActionsOpenOrderId(null); handleCopyPaymentLink(order) }}
+                              >
+                                <Copy className="h-4 w-4" />
+                                Copiar Link
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="justify-start gap-2"
+                                onClick={() => { setActionsOpenOrderId(null); handleOpenPaymentLink(order) }}
+                              >
+                                <Link2 className="h-4 w-4" />
+                                Gerenciar Link
+                              </Button>
+                            </>
+                          ) : (!order.payment_status || order.payment_status !== "paid") && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="justify-start gap-2"
+                              onClick={() => { setActionsOpenOrderId(null); handleOpenPaymentLink(order) }}
+                            >
+                              <Link2 className="h-4 w-4" />
+                              Gerar Link de Pagamento
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="justify-start gap-2"
+                            onClick={() => { setActionsOpenOrderId(null); handleOpenTagsModal(order) }}
+                          >
+                            <Tag className="h-4 w-4" />
+                            Adicionar Tags
+                          </Button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -555,6 +675,40 @@ export default function OrdersPage() {
           onSuccess={handleRefreshOrders}
         />
       )}
+
+      {/* Modal de Tags */}
+      <Dialog open={tagsModal.open} onOpenChange={(open) => setTagsModal((prev) => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar Tags</DialogTitle>
+            <DialogDescription>
+              Digite as tags separadas por vírgula. Elas serão exibidas na listagem do pedido.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Input
+              placeholder="Ex: urgente, presente, natal"
+              value={tagsModal.tags}
+              onChange={(e) => setTagsModal((prev) => ({ ...prev, tags: e.target.value }))}
+            />
+            {tagsModal.tags.trim() && (
+              <div className="flex flex-wrap gap-1.5">
+                {tagsModal.tags.split(",").map((t) => t.trim()).filter(Boolean).map((tag, i) => (
+                  <Badge key={i} className="text-xs px-2 py-0.5 rounded-md bg-blue-600 text-white border-0">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTagsModal((prev) => ({ ...prev, open: false }))}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveTags}>Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de Detalhes do Pedido */}
       {detailsModal.orderId && (

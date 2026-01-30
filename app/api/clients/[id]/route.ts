@@ -65,7 +65,7 @@ export async function PUT(
     const cleanCPF = cpf?.replace(/\D/g, '')
     const cleanWhatsApp = whatsapp?.replace(/\D/g, '')
 
-    if (!cleanCPF || !name || !cleanWhatsApp) {
+    if (!cleanCPF || !name?.trim() || !cleanWhatsApp) {
       return NextResponse.json(
         { error: 'Campos obrigatórios: CPF, nome e WhatsApp' },
         { status: 400 }
@@ -98,7 +98,7 @@ export async function PUT(
         phone = $5,
         whatsapp = $6
       WHERE id = $7`,
-      [cleanCPF, cnpj?.replace(/\D/g, '') || null, name, email || null, phone?.replace(/\D/g, '') || null, cleanWhatsApp, params.id]
+      [cleanCPF, cnpj?.replace(/\D/g, '') || null, name?.trim() || null, email || null, (phone != null && String(phone).trim() !== '') ? String(phone).trim() : null, (whatsapp != null && String(whatsapp).trim() !== '') ? String(whatsapp).trim() : null, params.id]
     )
 
     // Remove endereços existentes e insere novos

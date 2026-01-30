@@ -66,13 +66,39 @@ export async function GET(request: NextRequest) {
       count: parseInt(row.count)
     }))
 
+    // Distribuição por forma de pagamento (pedidos com pagamento aprovado)
+    const byPaymentResult = dateFilter
+      ? await query(
+          `SELECT p.method, COUNT(*) as count, COALESCE(SUM(p.amount), 0) as total
+           FROM payments p
+           JOIN orders o ON o.id = p.order_id
+           WHERE p.status = 'paid' AND DATE(o.created_at) BETWEEN $1 AND $2
+           GROUP BY p.method
+           ORDER BY count DESC`,
+          params
+        )
+      : await query(
+          `SELECT p.method, COUNT(*) as count, COALESCE(SUM(p.amount), 0) as total
+           FROM payments p
+           WHERE p.status = 'paid'
+           GROUP BY p.method
+           ORDER BY count DESC`,
+          []
+        )
+    const by_payment_method = byPaymentResult.rows.map((row: any) => ({
+      method: row.method,
+      count: parseInt(row.count),
+      total: parseFloat(row.total || 0)
+    }))
+
     return NextResponse.json({
       total,
       total_period,
       revenue,
       revenue_period,
       awaiting_payment,
-      by_status
+      by_status,
+      by_payment_method
     })
   } catch (error: any) {
     if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {

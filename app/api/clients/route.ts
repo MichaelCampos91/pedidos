@@ -99,9 +99,9 @@ export async function POST(request: NextRequest) {
     const { cpf, cnpj, name, email, phone, whatsapp, addresses } = body
 
     const cleanCPF = cpf?.replace(/\D/g, '')
-    const cleanWhatsApp = whatsapp?.replace(/\D/g, '')
+    const cleanWhatsApp = whatsapp?.replace(/\D/g, '') // apenas para validação de preenchimento
 
-    if (!cleanCPF || !name || !cleanWhatsApp) {
+    if (!cleanCPF || !name?.trim() || !cleanWhatsApp) {
       return NextResponse.json(
         { error: 'Campos obrigatórios: CPF, nome e WhatsApp' },
         { status: 400 }
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
       `INSERT INTO clients (cpf, cnpj, name, email, phone, whatsapp)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
-      [cleanCPF, cnpj?.replace(/\D/g, '') || null, name, email || null, phone?.replace(/\D/g, '') || null, cleanWhatsApp]
+      [cleanCPF, cnpj?.replace(/\D/g, '') || null, name?.trim() || null, email || null, (phone != null && String(phone).trim() !== '') ? String(phone).trim() : null, (whatsapp != null && String(whatsapp).trim() !== '') ? String(whatsapp).trim() : null]
     )
 
     const clientId = result.rows[0].id

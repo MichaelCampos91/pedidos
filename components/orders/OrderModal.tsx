@@ -41,9 +41,8 @@ const STATUS_OPTIONS = [
 const STEPS = [
   { id: 1, name: "Cliente", description: "Selecione o cliente", icon: User },
   { id: 2, name: "Itens", description: "Adicione os itens", icon: Package },
-  { id: 3, name: "Endereço", description: "Confirme o endereço", icon: MapPin },
-  { id: 4, name: "Frete", description: "Escolha o frete", icon: Truck },
-  { id: 5, name: "Revisão", description: "Revise o pedido", icon: FileText },
+  { id: 3, name: "Endereço e Frete", description: "Endereço e modalidade de frete", icon: Truck },
+  { id: 4, name: "Revisão", description: "Revise o pedido", icon: FileText },
 ]
 
 interface OrderModalProps {
@@ -349,7 +348,10 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
       toast.warning('Selecione um endereço de entrega')
       return
     }
-    // Step 4 (Frete) não precisa validação - frete é opcional
+    if (currentStep === 3 && !selectedShipping) {
+      toast.warning('Selecione uma modalidade de frete')
+      return
+    }
 
     if (currentStep < STEPS.length) {
       setCurrentStep(currentStep + 1)
@@ -399,6 +401,10 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     }
     if (!formData.shipping_address_id) {
       toast.warning('Selecione um endereço de entrega antes de salvar o pedido')
+      return
+    }
+    if (!selectedShipping) {
+      toast.warning('Selecione uma modalidade de frete antes de salvar o pedido')
       return
     }
 
@@ -566,26 +572,17 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                       Nenhum item adicionado. Clique em "Adicionar Item" para começar.
                     </p>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Produto</TableHead>
-                          <TableHead>Título</TableHead>
-                          <TableHead>Preço</TableHead>
-                          <TableHead>Quantidade</TableHead>
-                          <TableHead>Observações</TableHead>
-                          <TableHead>Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {formData.items.map((item, index) => (
-                          <TableRow key={index}>
-                            <TableCell>
+                    <div className="space-y-4">
+                      {formData.items.map((item, index) => (
+                        <div key={index} className="border rounded-lg p-4 space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                              <label className="text-xs text-muted-foreground">Produto</label>
                               <Select
                                 value={item.product_id}
                                 onValueChange={(value) => updateItem(index, 'product_id', value)}
                               >
-                                <SelectTrigger>
+                                <SelectTrigger className="mt-1">
                                   <SelectValue placeholder="Selecione" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -597,17 +594,9 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                value={item.title}
-                                onChange={(e) => updateItem(index, 'title', e.target.value)}
-                                onKeyDown={handleInputKeyDown}
-                                placeholder="Título do item"
-                                required
-                              />
-                            </TableCell>
-                            <TableCell>
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground">Preço</label>
                               <Input
                                 type="number"
                                 step="0.01"
@@ -615,41 +604,60 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                                 onChange={(e) => updateItem(index, 'price', e.target.value)}
                                 onKeyDown={handleInputKeyDown}
                                 placeholder="0.00"
+                                className="mt-1"
                                 required
                               />
-                            </TableCell>
-                            <TableCell>
+                            </div>
+                            <div className="flex gap-2 items-end">
+                              <div className="flex-1">
+                                <label className="text-xs text-muted-foreground">Quantidade</label>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) => updateItem(index, 'quantity', e.target.value)}
+                                  onKeyDown={handleInputKeyDown}
+                                  className="mt-1"
+                                  required
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeItem(index)}
+                                className="shrink-0"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs text-muted-foreground">Título</label>
                               <Input
-                                type="number"
-                                min="1"
-                                value={item.quantity}
-                                onChange={(e) => updateItem(index, 'quantity', e.target.value)}
+                                value={item.title}
+                                onChange={(e) => updateItem(index, 'title', e.target.value)}
                                 onKeyDown={handleInputKeyDown}
+                                placeholder="Título do item"
+                                className="mt-1"
                                 required
                               />
-                            </TableCell>
-                            <TableCell>
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground">Observações</label>
                               <Input
                                 value={item.observations}
                                 onChange={(e) => updateItem(index, 'observations', e.target.value)}
                                 onKeyDown={handleInputKeyDown}
                                 placeholder="Observações"
+                                className="mt-1"
                               />
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeItem(index)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                   {formData.items.length > 0 && (
                     <div className="mt-4 flex justify-end">
@@ -663,8 +671,9 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
               </Card>
             )}
 
-            {/* Step 3: Endereço */}
+            {/* Step 3: Endereço e Frete */}
             {currentStep === 3 && (
+              <div className="space-y-4">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -820,10 +829,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                   )}
                 </CardContent>
               </Card>
-            )}
 
-            {/* Step 4: Frete */}
-            {currentStep === 4 && (
               <Card>
                 <CardHeader>
                   <div className="flex items-start justify-between">
@@ -850,7 +856,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                   )}
                   {!selectedAddress ? (
                     <p className="text-center text-muted-foreground py-8">
-                      Selecione um endereço na etapa anterior
+                      Selecione um endereço acima
                     </p>
                   ) : (
                     <>
@@ -908,10 +914,11 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                   )}
                 </CardContent>
               </Card>
+              </div>
             )}
 
-            {/* Step 5: Revisão */}
-            {currentStep === 5 && (
+            {/* Step 4: Revisão */}
+            {currentStep === 4 && (
               <div className="space-y-4">
                 {/* Dados do Cliente */}
                 <Card>
@@ -1109,7 +1116,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => handleEditStep(4)}
+                          onClick={() => handleEditStep(3)}
                         >
                           <Edit className="h-4 w-4 mr-2" />
                           Editar
@@ -1160,7 +1167,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => handleEditStep(4)}
+                          onClick={() => handleEditStep(3)}
                         >
                           <Truck className="h-4 w-4 mr-2" />
                           Selecionar Frete
@@ -1290,7 +1297,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
               ) : (
                 <Button 
                   type="submit" 
-                  disabled={loading || !formData.client_id || formData.items.length === 0 || !formData.shipping_address_id}
+                  disabled={loading || !formData.client_id || formData.items.length === 0 || !formData.shipping_address_id || !selectedShipping}
                 >
                   {loading ? (
                     <>

@@ -69,14 +69,16 @@ export async function GET(request: NextRequest) {
         c.name as client_name,
         c.cpf as client_cpf,
         c.whatsapp as client_whatsapp,
-        pay.payment_status
+        pay.payment_status,
+        pay.payment_method,
+        pay.installments
       FROM orders o
       JOIN clients c ON o.client_id = c.id
       LEFT JOIN LATERAL (
-        SELECT p.status as payment_status
+        SELECT p.status as payment_status, p.method as payment_method, p.installments
         FROM payments p
         WHERE p.order_id = o.id
-        ORDER BY p.created_at DESC
+        ORDER BY p.paid_at DESC NULLS LAST, p.created_at DESC
         LIMIT 1
       ) pay ON true
       WHERE ${whereClause}

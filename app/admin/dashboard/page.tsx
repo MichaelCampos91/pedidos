@@ -5,10 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DatePicker } from "@/components/ui/DatePicker"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
-import { CalendarIcon, ShoppingCart, DollarSign, Clock, Loader2 } from "lucide-react"
+import { CalendarIcon, ShoppingCart, DollarSign, Clock, Loader2, CreditCard, Smartphone, Banknote } from "lucide-react"
 import { metricsApi } from "@/lib/api"
 import { formatCurrency } from "@/lib/utils"
 import { format } from "date-fns"
+import { cn } from "@/lib/utils"
 
 const STATUS_LABELS: Record<string, string> = {
   aguardando_pagamento: "Aguardando Pagamento",
@@ -20,11 +21,40 @@ const STATUS_LABELS: Record<string, string> = {
   cancelados: "Cancelados"
 }
 
+const STATUS_BAR_COLORS: Record<string, string> = {
+  aguardando_pagamento: "bg-amber-500",
+  aguardando_producao: "bg-blue-500",
+  em_producao: "bg-indigo-500",
+  aguardando_envio: "bg-cyan-500",
+  enviado: "bg-emerald-500",
+  nao_pagos: "bg-rose-500",
+  cancelados: "bg-gray-500"
+}
+
+function getPaymentMethodLabel(method: string): string {
+  if (method === "pix_manual") return "Pix Manual"
+  if (method === "pix") return "Pix"
+  if (method === "credit_card") return "Cartão"
+  return method || "Outro"
+}
+
+function getPaymentMethodIcon(method: string) {
+  if (method === "pix_manual" || method === "pix") return Smartphone
+  if (method === "credit_card") return CreditCard
+  return Banknote
+}
+
+function getPaymentMethodColor(method: string): string {
+  if (method === "pix_manual" || method === "pix") return "text-emerald-600 bg-emerald-50 border-emerald-200"
+  if (method === "credit_card") return "text-blue-600 bg-blue-50 border-blue-200"
+  return "text-muted-foreground bg-muted border-muted"
+}
+
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [startDate, setStartDate] = useState<Date | undefined>()
-  const [endDate, setEndDate] = useState<Date | undefined>()
+  const [startDate, setStartDate] = useState<Date | undefined>(() => new Date())
+  const [endDate, setEndDate] = useState<Date | undefined>(() => new Date())
 
   const loadMetrics = async () => {
     setLoading(true)
@@ -169,7 +199,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="w-full bg-muted rounded-full h-2">
                   <div
-                    className="h-2 rounded-full bg-primary transition-all"
+                    className={cn("h-2 rounded-full transition-all", STATUS_BAR_COLORS[item.status] || "bg-primary")}
                     style={{ 
                       width: `${metrics.total > 0 ? (item.count / metrics.total) * 100 : 0}%` 
                     }}
@@ -180,6 +210,42 @@ export default function DashboardPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Distribuição por forma de pagamento */}
+      {metrics?.by_payment_method && metrics.by_payment_method.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Distribuição por Forma de Pagamento</CardTitle>
+            <CardDescription>Pedidos pagos no período, por método</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {metrics.by_payment_method.map((item: any) => {
+                const Icon = getPaymentMethodIcon(item.method)
+                return (
+                  <div key={item.method} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className={cn("inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs font-medium", getPaymentMethodColor(item.method))}>
+                        <Icon className="h-3.5 w-3.5" />
+                        {getPaymentMethodLabel(item.method)}
+                      </span>
+                      <span className="text-muted-foreground">{item.count} pedidos · {formatCurrency(item.total || 0)}</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2">
+                      <div
+                        className={cn("h-2 rounded-full transition-all", item.method === "pix" || item.method === "pix_manual" ? "bg-emerald-500" : item.method === "credit_card" ? "bg-blue-500" : "bg-primary")}
+                        style={{ 
+                          width: `${metrics.total > 0 ? (item.count / metrics.total) * 100 : 0}%` 
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

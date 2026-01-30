@@ -278,3 +278,44 @@ export async function PUT(
     )
   }
 }
+
+// Atualiza tags do pedido (protegido)
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const cookieStore = cookies()
+    const cookieToken = cookieStore.get('auth_token')?.value
+    await requireAuth(request, cookieToken)
+
+    const body = await request.json()
+    const { tags } = body
+
+    const orderResult = await query('SELECT id FROM orders WHERE id = $1', [params.id])
+    if (orderResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Pedido não encontrado' }, { status: 404 })
+    }
+
+    const tagsValue = Array.isArray(tags)
+      ? tags.join(', ')
+      : typeof tags === 'string'
+        ? tags.trim()
+        : ''
+
+    await query(
+      'UPDATE orders SET tags = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [tagsValue || null, params.id]
+    )
+
+    return NextResponse.json({ success: true })
+  } catch (error: any) {
+    if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {
+      return authErrorResponse(error.message, 401)
+    }
+    return NextResponse.json(
+      { error: 'Erro ao atualizar tags' },
+      { status: 500 }
+    )
+  }
+}

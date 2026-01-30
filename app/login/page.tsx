@@ -45,17 +45,15 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 p-4">
-      <div className="w-full max-w-md space-y-8">
-        {/* Logo */}
-        <div className="flex justify-center">
-          <img
-            src="/logo.png"
-            alt="Cenario Logo"
-            className="h-24 w-auto object-contain"
-          />
-        </div>
-        
+      <div className="w-full max-w-md">
         <Card className="w-full">
+          <div className="flex justify-center pt-6">
+            <img
+              src="/logo.png"
+              alt="Cenario Logo"
+              className="max-w-[150px] w-full h-auto object-contain"
+            />
+          </div>
           <CardHeader>
             <CardTitle className="text-2xl text-center">Login Administrativo</CardTitle>
             <CardDescription className="text-center">

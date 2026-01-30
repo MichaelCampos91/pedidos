@@ -59,11 +59,23 @@ export async function POST(
       [token, expiresAt, orderId]
     )
 
-    // Construir URL base
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
-                   process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 
-                   'http://localhost:3000'
-    
+    // Construir URL base (evitar undefined)
+    let baseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || ''
+    if (!baseUrl && process.env.VERCEL_URL) {
+      baseUrl = `https://${process.env.VERCEL_URL}`
+    }
+    if (!baseUrl) {
+      try {
+        const reqUrl = request.url
+        if (reqUrl) {
+          const u = new URL(reqUrl)
+          baseUrl = u.origin
+        }
+      } catch (_) {}
+    }
+    if (!baseUrl) {
+      baseUrl = 'http://localhost:3000'
+    }
     const paymentLink = `${baseUrl}/checkout/${orderId}?token=${token}`
 
     return NextResponse.json({
