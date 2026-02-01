@@ -66,6 +66,13 @@ function validateDimensions(width: number, height: number, length: number, weigh
   return { valid: true }
 }
 
+/** Garante valor numérico válido para a API: nunca 0 nem NaN; usa fallback e mínimo. */
+function ensureDimension(value: unknown, fallback: number, min: number): number {
+  const n = Number(value)
+  const v = (isNaN(n) || n <= 0 ? fallback : n)
+  return v < min ? min : v
+}
+
 async function getCepOrigem(environment: IntegrationEnvironment): Promise<string> {
   // Tentar obter do token (additional_data)
   try {
@@ -174,20 +181,20 @@ export async function POST(request: NextRequest) {
       
       productsList = produtos.map((p: any, index: number) => ({
         id: p.id || `produto-${index + 1}`,
-        width: p.largura || p.width || 20,
-        height: p.altura || p.height || 10,
-        length: p.comprimento || p.length || 30,
-        weight: p.peso || p.weight || 0.3,
-        insurance_value: p.valor || p.insurance_value || p.valor_seguro || 100,
-        quantity: p.quantidade || p.quantity || 1,
+        width: ensureDimension(p.largura ?? p.width, 20, DIMENSIONS_MIN.width),
+        height: ensureDimension(p.altura ?? p.height, 10, DIMENSIONS_MIN.height),
+        length: ensureDimension(p.comprimento ?? p.length, 30, DIMENSIONS_MIN.length),
+        weight: ensureDimension(p.peso ?? p.weight, 0.3, WEIGHT_MIN),
+        insurance_value: Math.max(Number(p.valor ?? p.insurance_value ?? p.valor_seguro) || 100, 0),
+        quantity: Math.max(parseInt(p.quantidade ?? p.quantity, 10) || 1, 1),
       }))
     } else {
-      // Modo legacy: valores únicos
-      const weight = Number(peso) || 0.3
-      const height = Number(altura) || 10
-      const width = Number(largura) || 20
-      const length = Number(comprimento) || 30
-      const insuranceValue = Number(valor) || 100
+      // Modo legacy: valores únicos (garantir que nunca sejam 0 ou NaN)
+      const weight = ensureDimension(peso, 0.3, WEIGHT_MIN)
+      const height = ensureDimension(altura, 10, DIMENSIONS_MIN.height)
+      const width = ensureDimension(largura, 20, DIMENSIONS_MIN.width)
+      const length = ensureDimension(comprimento, 30, DIMENSIONS_MIN.length)
+      const insuranceValue = Math.max(Number(valor) || 100, 0)
 
       // Validar dimensões
       const validation = validateDimensions(width, height, length, weight)
@@ -249,17 +256,31 @@ export async function POST(request: NextRequest) {
     })
 
     // Filtrar por modalidades ativas (se houver alguma cadastrada para o ambiente)
+    const validCountBeforeModalities = validOptions.length
     try {
       const activeModalitiesResult = await query(
         'SELECT id FROM shipping_modalities WHERE environment = $1 AND active = true',
         [environment]
       )
       if (activeModalitiesResult.rows.length > 0) {
-        const activeIds = new Set(activeModalitiesResult.rows.map((r: { id: number }) => r.id))
-        validOptions = validOptions.filter(opt => activeIds.has(opt.id))
+        const activeIds = new Set(activeModalitiesResult.rows.map((r: { id: number }) => Number(r.id)))
+        validOptions = validOptions.filter(opt => activeIds.has(Number(opt.id)))
       }
     } catch (modErr) {
       console.warn('[Shipping Quote] Erro ao filtrar modalidades ativas, retornando todas:', modErr)
+    }
+
+    // Log de diagnóstico quando resultado fica vazio
+    if (!validOptions || validOptions.length === 0) {
+      console.log('[Shipping Quote] Diagnóstico: resultado vazio', {
+        environment,
+        opcoesDaApi: shippingOptions?.length ?? 0,
+        opcoesComPrecoValido: validCountBeforeModalities,
+        opcoesAposModalidades: validOptions?.length ?? 0,
+        ...(validCountBeforeModalities > 0 && (validOptions?.length ?? 0) === 0
+          ? { aviso: 'Todas as opções podem ter sido removidas pelo filtro de modalidades (verifique IDs ou tipo number/string).' }
+          : {}),
+      })
     }
 
     // Tratar resposta vazia
