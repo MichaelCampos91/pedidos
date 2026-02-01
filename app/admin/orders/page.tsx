@@ -107,6 +107,7 @@ export default function OrdersPage() {
   }>({ open: false, orderId: null, tags: "" })
   const [actionsOpenOrderId, setActionsOpenOrderId] = useState<number | null>(null)
   const [blingSyncingOrderId, setBlingSyncingOrderId] = useState<number | null>(null)
+  const [blingErrorModal, setBlingErrorModal] = useState<{ open: boolean; message: string }>({ open: false, message: '' })
 
   const loadOrders = async () => {
     setLoading(true)
@@ -219,9 +220,21 @@ export default function OrdersPage() {
       toast.success(res.message ?? "Pedido enviado ao Bling com sucesso.")
       loadOrders()
     } catch (err: any) {
-      toast.error(err.message ?? "Erro ao enviar pedido ao Bling.")
+      const message = err.message ?? "Erro ao enviar pedido ao Bling."
+      toast.error("Falha ao enviar ao Bling. Ver detalhes no modal.")
+      setBlingErrorModal({ open: true, message })
     } finally {
       setBlingSyncingOrderId(null)
+    }
+  }
+
+  const handleCopyBlingError = async () => {
+    if (!blingErrorModal.message) return
+    try {
+      await navigator.clipboard.writeText(blingErrorModal.message)
+      toast.success("Mensagem copiada para a área de transferência.")
+    } catch {
+      toast.error("Não foi possível copiar.")
     }
   }
 
@@ -803,6 +816,32 @@ export default function OrdersPage() {
           orderId={detailsModal.orderId}
         />
       )}
+
+      {/* Modal de erro ao enviar pedido ao Bling */}
+      <Dialog open={blingErrorModal.open} onOpenChange={(open) => setBlingErrorModal((prev) => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Erro ao enviar pedido ao Bling</DialogTitle>
+            <DialogDescription>
+              A mensagem abaixo contém os detalhes retornados pelo Bling. Você pode copiá-la para enviar ao suporte.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <pre className="text-sm text-foreground whitespace-pre-wrap break-words rounded-md bg-muted p-3 max-h-64 overflow-y-auto">
+              {blingErrorModal.message}
+            </pre>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={handleCopyBlingError}>
+                <Copy className="h-4 w-4 mr-2" />
+                Copiar
+              </Button>
+              <Button size="sm" onClick={() => setBlingErrorModal({ open: false, message: '' })}>
+                Fechar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

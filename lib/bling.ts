@@ -246,9 +246,12 @@ export async function sendOrderToBling(
       errMsg = (responseData as { message: string }).message
     }
 
+    const snippet = responseText.trim().slice(0, 400)
+    const details = snippet ? ` Detalhes: ${snippet}` : ''
+
     await updateOrderSync(orderId, 'error', errMsg)
     await insertLog(orderId, 'error', errMsg, responseText.slice(0, 1000))
-    return { success: false, error: `[Bling] ${errMsg}` }
+    return { success: false, error: `[Bling] ${errMsg}.${details}` }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     await updateOrderSync(orderId, 'error', message)

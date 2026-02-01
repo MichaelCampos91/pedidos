@@ -41,8 +41,9 @@ export async function POST(request: NextRequest) {
         return authErrorResponse(msg, 401)
       }
     }
+    const errorMessage = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Erro ao sincronizar pedido com o Bling.'
     return NextResponse.json(
-      { error: 'Erro ao sincronizar pedido com o Bling.' },
+      { error: errorMessage || 'Erro ao sincronizar pedido com o Bling.' },
       { status: 500 }
     )
   }
