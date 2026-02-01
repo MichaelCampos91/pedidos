@@ -54,9 +54,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // NOTA: Apenas modo "Token direto (legacy)" funciona
-    // NOTA: Tipo de token sempre será "bearer" (definido automaticamente)
-    if (!token_value) {
+    // Bling OAuth: permite salvar apenas client_id e client_secret (configuração pré-OAuth) com token_value placeholder
+    const isBlingOAuthConfig = provider === 'bling' &&
+      additional_data?.client_id &&
+      additional_data?.client_secret &&
+      (token_value === undefined || token_value === null || String(token_value).trim() === '' || String(token_value).trim() === '__oauth_pending__')
+
+    if (isBlingOAuthConfig) {
+      // Validar que client_id e client_secret estão presentes (já garantido acima)
+      const clientId = String(additional_data.client_id).trim()
+      const clientSecret = String(additional_data.client_secret).trim()
+      if (!clientId || !clientSecret) {
+        return NextResponse.json(
+          { error: '[Sistema] Para Bling (OAuth), Client ID e Client Secret são obrigatórios em additional_data' },
+          { status: 400 }
+        )
+      }
+    } else if (!token_value) {
+      // NOTA: Para outros providers, token_value é obrigatório
       return NextResponse.json(
         { error: '[Sistema] token_value é obrigatório' },
         { status: 400 }
@@ -77,12 +92,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verificar se o token não está mascarado
-    if (token_value.includes('****') || token_value.startsWith('****')) {
+    // Verificar se o token não está mascarado (exceto Bling OAuth config que usa placeholder)
+    if (!isBlingOAuthConfig && (String(token_value).includes('****') || String(token_value).startsWith('****'))) {
       console.error('[Integrations] Tentativa de salvar token mascarado rejeitada', {
         provider,
         environment,
-        tokenPreview: token_value.substring(0, 20),
+        tokenPreview: String(token_value).substring(0, 20),
       })
       return NextResponse.json(
         { error: '[Sistema] Token não pode estar mascarado. Por favor, cole o token completo.' },
@@ -90,11 +105,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Limpar o token (remover espaços e "Bearer " se presente)
-    const cleanTokenValue = token_value.trim().replace(/^Bearer\s+/i, '')
+    // Limpar o token (remover espaços e "Bearer " se presente). Bling OAuth config usa placeholder,
+    // mas ao editar preservamos o access_token existente se já houver um token real.
+    let cleanTokenValue: string
+    if (isBlingOAuthConfig) {
+      const existingBling = await getToken(provider as IntegrationProvider, environment as IntegrationEnvironment)
+      const hasRealToken = existingBling?.token_value &&
+        existingBling.token_value !== '__oauth_pending__' &&
+        !existingBling.token_value.includes('****')
+      cleanTokenValue = hasRealToken ? existingBling!.token_value : '__oauth_pending__'
+    } else {
+      cleanTokenValue = String(token_value).trim().replace(/^Bearer\s+/i, '')
+    }
 
-    // Validação adicional de tamanho mínimo
-    if (cleanTokenValue.length < 20) {
+    // Validação adicional de tamanho mínimo (não aplicar para Bling OAuth placeholder)
+    if (!isBlingOAuthConfig && cleanTokenValue.length < 20) {
       console.warn('[Integrations] Token muito curto', {
         provider,
         environment,

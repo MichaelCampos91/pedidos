@@ -24,12 +24,12 @@ interface TokenFormProps {
   isSaving?: boolean
 }
 
+const BLING_OAUTH_PLACEHOLDER = '__oauth_pending__'
+
 export function TokenForm({ provider, token, onSave, onCancel, isSaving = false }: TokenFormProps) {
   const isMelhorEnvio = provider === 'melhor_envio'
   const isPagarme = provider === 'pagarme'
-  
-  // NOTA: Apenas "Token direto (legacy)" funciona para Melhor Envio
-  // NOTA: Apenas "Bearer" funciona como tipo de token (definido automaticamente no backend)
+  const isBling = provider === 'bling'
 
   const [formData, setFormData] = useState({
     environment: (token?.environment || 'production') as IntegrationEnvironment,
@@ -38,18 +38,34 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
       : '',
     cep_origem: token?.additional_data?.cep_origem || '',
     public_key: token?.additional_data?.public_key || '', // Para Pagar.me
+    // Bling OAuth
+    client_id: token?.additional_data?.client_id || '',
+    client_secret: token?.additional_data?.client_secret || '',
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // Validação: token é obrigatório
+
+    if (isBling) {
+      if (!formData.client_id?.trim() || !formData.client_secret?.trim()) {
+        toast.warning('Client ID e Client Secret são obrigatórios para o Bling')
+        return
+      }
+      await onSave({
+        provider,
+        environment: formData.environment,
+        token_value: BLING_OAUTH_PLACEHOLDER,
+        additional_data: { client_id: formData.client_id.trim(), client_secret: formData.client_secret.trim() },
+      })
+      return
+    }
+
+    // Validação: token é obrigatório (Melhor Envio e Pagar.me)
     if (!formData.token_value) {
       toast.warning(isPagarme ? 'Secret Key é obrigatória' : 'Token é obrigatório')
       return
     }
-    
-    // Salvar sempre como token direto (legacy) e bearer (definido no backend)
+
     await onSave({
       provider,
       environment: formData.environment,
@@ -66,9 +82,11 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
           {token ? 'Editar' : 'Adicionar'} Token - {provider.replace('_', ' ').toUpperCase()}
         </CardTitle>
         <CardDescription>
-          {isMelhorEnvio 
-            ? 'Configure o token direto para o ambiente selecionado. Apenas o método "Token direto (legacy)" funciona.'
-            : `Configure o token para o ambiente ${formData.environment === 'sandbox' ? 'Sandbox' : 'Produção'}`
+          {isBling
+            ? 'Configure Client ID e Client Secret (Informações do app no Bling). Depois use "Conectar com Bling" para obter o token OAuth.'
+            : isMelhorEnvio
+              ? 'Configure o token direto para o ambiente selecionado. Apenas o método "Token direto (legacy)" funciona.'
+              : `Configure o token para o ambiente ${formData.environment === 'sandbox' ? 'Sandbox' : 'Produção'}`
           }
         </CardDescription>
       </CardHeader>
@@ -88,37 +106,71 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
             </select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="token_value">
-              {isPagarme ? 'Secret Key *' : 'Token *'}
-            </Label>
-            <Input
-              id="token_value"
-              type="password"
-              value={formData.token_value}
-              onChange={(e) => setFormData({ ...formData, token_value: e.target.value })}
-              placeholder={isPagarme ? "Cole a Secret Key aqui (sk_live_... ou sk_test_...)" : "Cole o token aqui"}
-              required
-            />
-            {isPagarme && (
-              <p className="text-xs text-muted-foreground">
-                Secret Key do Pagar.me. Encontre no painel em Configurações → Chaves de API.
-                A Secret Key começa com <code className="text-xs bg-muted px-1 py-0.5 rounded">sk_live_</code> (produção) ou <code className="text-xs bg-muted px-1 py-0.5 rounded">sk_test_</code> (sandbox).
+          {isBling && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="client_id">Client ID *</Label>
+                <Input
+                  id="client_id"
+                  type="text"
+                  value={formData.client_id}
+                  onChange={(e) => setFormData({ ...formData, client_id: e.target.value })}
+                  placeholder="Client ID do app Bling"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Encontre em: Bling → Configurações → Informações do app
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="client_secret">Client Secret *</Label>
+                <Input
+                  id="client_secret"
+                  type="password"
+                  value={formData.client_secret}
+                  onChange={(e) => setFormData({ ...formData, client_secret: e.target.value })}
+                  placeholder="Client Secret do app Bling"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  O token de acesso será obtido ao clicar em &quot;Conectar com Bling&quot; após salvar.
+                </p>
+              </div>
+            </>
+          )}
+
+          {!isBling && (
+            <div className="space-y-2">
+              <Label htmlFor="token_value">
+                {isPagarme ? 'Secret Key *' : 'Token *'}
+              </Label>
+              <Input
+                id="token_value"
+                type="password"
+                value={formData.token_value}
+                onChange={(e) => setFormData({ ...formData, token_value: e.target.value })}
+                placeholder={isPagarme ? "Cole a Secret Key aqui (sk_live_... ou sk_test_...)" : "Cole o token aqui"}
+                required
+              />
+              {isPagarme && (
+                <p className="text-xs text-muted-foreground">
+                  Secret Key do Pagar.me. Encontre no painel em Configurações → Chaves de API.
+                  A Secret Key começa com <code className="text-xs bg-muted px-1 py-0.5 rounded">sk_live_</code> (produção) ou <code className="text-xs bg-muted px-1 py-0.5 rounded">sk_test_</code> (sandbox).
+                </p>
+              )}
+              {isMelhorEnvio && (
+                <p className="text-xs text-muted-foreground">
+                  Token do Melhor Envio. Obtenha em: {formData.environment === 'sandbox'
+                    ? 'https://app-sandbox.melhorenvio.com.br/integracoes/area-dev'
+                    : 'https://melhorenvio.com.br/integracoes/area-dev'
+                  }
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground italic">
+                Tipo de token: Bearer (definido automaticamente)
               </p>
-            )}
-            {isMelhorEnvio && (
-              <p className="text-xs text-muted-foreground">
-                Token do Melhor Envio. Obtenha em: {formData.environment === 'sandbox' 
-                  ? 'https://app-sandbox.melhorenvio.com.br/integracoes/area-dev'
-                  : 'https://melhorenvio.com.br/integracoes/area-dev'
-                }
-              </p>
-            )}
-            {/* NOTA: Tipo de token sempre será "Bearer" (definido automaticamente no backend) */}
-            <p className="text-xs text-muted-foreground italic">
-              Tipo de token: Bearer (definido automaticamente)
-            </p>
-          </div>
+            </div>
+          )}
 
           {isMelhorEnvio && (
             <div className="space-y-2">

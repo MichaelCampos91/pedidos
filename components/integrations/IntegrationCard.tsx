@@ -67,8 +67,10 @@ export function IntegrationCard({
   const [internalSaving, setInternalSaving] = useState(false)
   const [activeEnvironment, setActiveEnvironment] = useState<IntegrationEnvironment | null>(null)
   const [loadingActiveEnv, setLoadingActiveEnv] = useState(true)
-  
+  const [connectingBling, setConnectingBling] = useState(false)
+
   const saving = externalSaving || internalSaving
+  const isBling = provider === 'bling'
 
   const hasAnyToken = !!sandboxToken || !!productionToken
   const hasBothTokens = !!sandboxToken && !!productionToken
@@ -186,6 +188,30 @@ export function IntegrationCard({
       throw error
     } finally {
       setInternalSaving(false)
+    }
+  }
+
+  const handleConnectBling = async () => {
+    const env = activeEnvironment || getDefaultEnvironment()
+    setConnectingBling(true)
+    try {
+      const response = await fetch(`/api/integrations/bling/authorize?environment=${env}`, {
+        credentials: 'include',
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        toast.error(data.error || 'Erro ao obter URL de autorização. Configure Client ID e Client Secret na integração Bling.')
+        return
+      }
+      if (data.authorization_url) {
+        window.location.href = data.authorization_url
+      } else {
+        toast.error('URL de autorização não retornada.')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao conectar com Bling.')
+    } finally {
+      setConnectingBling(false)
     }
   }
 
@@ -349,17 +375,39 @@ export function IntegrationCard({
               <div className="flex-1">
                 <CardTitle className="text-lg mb-2">{providerLabel}</CardTitle>
                 <CardDescription className="mt-1">
-                  {hasAnyToken 
-                    ? hasBothTokens 
-                      ? 'Ambos os ambientes configurados'
-                      : sandboxToken 
-                        ? 'Apenas sandbox configurado'
-                        : 'Apenas produção configurado'
-                    : 'Nenhum token configurado'}
+                  {isBling
+                    ? 'Conecte com Bling para enviar pedidos aprovados. Configure Client ID e Client Secret (Informações do app no Bling) e clique em Conectar com Bling.'
+                    : hasAnyToken
+                      ? hasBothTokens
+                        ? 'Ambos os ambientes configurados'
+                        : sandboxToken
+                          ? 'Apenas sandbox configurado'
+                          : 'Apenas produção configurado'
+                      : 'Nenhum token configurado'}
                 </CardDescription>
               </div>
             </div>
             <div className="flex items-center gap-3">
+              {isBling && (
+                <Button
+                  onClick={handleConnectBling}
+                  disabled={connectingBling || saving}
+                  size="sm"
+                  className="shrink-0"
+                >
+                  {connectingBling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Redirecionando...
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="h-4 w-4 mr-2" />
+                      Conectar com Bling
+                    </>
+                  )}
+                </Button>
+              )}
               {hasAnyToken && !loadingActiveEnv && (
                 <Select
                   value={currentActiveEnv}
