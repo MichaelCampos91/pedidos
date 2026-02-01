@@ -3,7 +3,7 @@
  * Documentação: https://developer.bling.com.br/
  * Referência: https://developer.bling.com.br/referencia
  * Base: https://api.bling.com.br/Api/v3 (confirmado na documentação oficial)
- * Endpoints usados: GET /contatos?limite=1 (validação), POST /pedidos/vendas (envio).
+ * Endpoints usados: GET /pedidos/vendas?limite=1 (validação), POST /pedidos/vendas (envio).
  */
 
 import { query } from '@/lib/database'
@@ -18,7 +18,8 @@ export interface BlingValidateResult {
 }
 
 /**
- * Valida o token Bling fazendo uma requisição leve (GET contatos com limite 1).
+ * Valida o token Bling fazendo uma requisição leve (GET pedidos/vendas com limite 1).
+ * Usa pedidos/vendas em vez de contatos para respeitar os escopos solicitados (Pedidos de Venda).
  */
 export async function validateToken(accessToken: string): Promise<BlingValidateResult> {
   const token = accessToken.trim().replace(/^Bearer\s+/i, '')
@@ -27,7 +28,7 @@ export async function validateToken(accessToken: string): Promise<BlingValidateR
   }
 
   try {
-    const url = `${BLING_API_BASE}/contatos?limite=1`
+    const url = `${BLING_API_BASE}/pedidos/vendas?limite=1`
     const response = await fetch(url, {
       method: 'GET',
       headers: {

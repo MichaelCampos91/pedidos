@@ -7,6 +7,22 @@ export const dynamic = 'force-dynamic'
 
 const BLING_AUTHORIZE_URL = 'https://www.bling.com.br/Api/v3/oauth/authorize'
 
+/** IDs de escopo do Bling (data-scope do painel): Integrações Logísticas, Pedidos de Venda, Produtos e sub-escopos. */
+const BLING_SCOPE_IDS = [
+  '220621674', // Integrações Logísticas
+  '98310',     // Pedidos de Venda
+  '318257568', // Pedidos de Venda: Exclusão
+  '318257556', // Pedidos de Venda: Gerenciar
+  '791588404', // Pedidos de Venda: Gerenciar situações
+  '363921589', // Pedidos de Venda: Lançar contas
+  '363921592', // Pedidos de Venda: Lançar estoque
+  '98309',     // Produtos
+  '318257583', // Produtos: Exclusão
+  '318257570', // Produtos: Gerenciar
+  '106168710', // Produtos: Salvar imagens
+  '199272829', // Produtos: Salvar variações
+]
+
 function getAppBaseUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL
     || process.env.APP_URL
@@ -57,7 +73,8 @@ export async function GET(request: NextRequest) {
     const redirectUri = process.env.BLING_REDIRECT_URI
       || `${appBaseUrl}/api/auth/callback/bling`
 
-    const authorizationUrl = `${BLING_AUTHORIZE_URL}?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(environment)}`
+    const scopeString = BLING_SCOPE_IDS.join(' ')
+    const authorizationUrl = `${BLING_AUTHORIZE_URL}?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(environment)}&scope=${encodeURIComponent(scopeString)}`
 
     return NextResponse.json({
       authorization_url: authorizationUrl,
