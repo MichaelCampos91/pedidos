@@ -324,6 +324,7 @@ export default function OrdersPage() {
               <DatePicker
                 date={startDate}
                 onDateChange={setStartDate}
+                disablePastDates={false}
               />
             </PopoverContent>
           </Popover>
@@ -338,6 +339,7 @@ export default function OrdersPage() {
               <DatePicker
                 date={endDate}
                 onDateChange={setEndDate}
+                disablePastDates={false}
               />
             </PopoverContent>
           </Popover>
