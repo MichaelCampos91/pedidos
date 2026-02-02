@@ -84,6 +84,8 @@ export interface OrderForBling {
   total_shipping: number
   created_at: string
   observations?: string | null
+  /** Número da venda no Bling (único por pedido). Se preenchido, reutilizado em reenvios. */
+  bling_sale_numero?: string | null
   client_name: string
   client_cpf: string
   client_email?: string | null
@@ -104,6 +106,20 @@ export interface OrderForBling {
     quantity: number
     observations?: string | null
   }>
+}
+
+/**
+ * Gera um número único para a venda no Bling (formato PED-YYYYMMDD-XXXXXX).
+ * Evita colisão com numeros já existentes na conta Bling.
+ */
+function generateBlingSaleNumero(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const datePart = `${y}${m}${d}`
+  const randomPart = Math.random().toString(16).slice(2, 8).toUpperCase()
+  return `PED-${datePart}-${randomPart}`
 }
 
 /**
@@ -279,12 +295,12 @@ async function createOrFindContactInBling(
 
 /**
  * Monta o payload para POST /pedidos/vendas conforme estrutura esperada pela API Bling v3.
- * Ajuste os campos conforme a documentação oficial se a API retornar erro de schema.
  * @param order Dados do pedido
  * @param blingContactId ID do contato no Bling (obrigatório na API v3). Se não fornecido, usa dados inline (compatibilidade).
+ * @param numeroBling Número da venda no Bling (único por conta). Não usar order.id para evitar conflito com vendas já existentes.
  */
-export function mapOrderToBlingSale(order: OrderForBling, blingContactId?: number | null): Record<string, unknown> {
-  const numero = String(order.id)
+export function mapOrderToBlingSale(order: OrderForBling, blingContactId?: number | null, numeroBling?: string): Record<string, unknown> {
+  const numero = numeroBling != null && numeroBling.trim() !== '' ? numeroBling.trim() : String(order.id)
   const dataEmissao = order.created_at ? order.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10)
 
   // API v3 exige contato.id quando disponível
@@ -402,7 +418,9 @@ export async function sendOrderToBling(
     return { success: false, error: `[Bling] Não foi possível cadastrar o cliente no Bling. ${contactErrorMsg}` }
   }
 
-  const payload = mapOrderToBlingSale(order, blingContactId)
+  // Número único da venda no Bling: reutilizar o já salvo ou gerar novo (evita conflito com numeros já existentes na conta)
+  const numeroBling = order.bling_sale_numero?.trim() || generateBlingSaleNumero()
+  const payload = mapOrderToBlingSale(order, blingContactId, numeroBling)
   const url = `${BLING_API_BASE}/pedidos/vendas`
 
   try {
@@ -428,6 +446,24 @@ export async function sendOrderToBling(
       const blingId = extractBlingIdFromResponse(responseData)
       await updateOrderSync(orderId, 'synced', null)
       await insertLog(orderId, 'success', null, blingId != null ? JSON.stringify({ id: blingId }) : responseText.slice(0, 500))
+      // Persistir numero usado no Bling para reenvios e rastreabilidade; opcionalmente registrar em observations
+      await query(
+        `UPDATE orders SET bling_sale_numero = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [numeroBling, orderId]
+      )
+      const obsResult = await query(
+        'SELECT observations FROM orders WHERE id = $1',
+        [orderId]
+      )
+      const currentObs = (obsResult.rows[0] as { observations: string | null } | undefined)?.observations ?? null
+      if (currentObs == null || !currentObs.includes('#ID_BLING_')) {
+        const newObs = (currentObs?.trim() ? currentObs + '\n' : '') + `#ID_BLING_${numeroBling}`
+        await query(
+          'UPDATE orders SET observations = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [newObs, orderId]
+        )
+      }
       return { success: true, blingId }
     }
 
@@ -469,11 +505,12 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
 
   let orderResult: { rows: Record<string, unknown>[] }
   let observationsValue: string | null = null
+  let blingSaleNumeroValue: string | null = null
 
   try {
     orderResult = await query(
       `SELECT o.id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
-              o.observations,
+              o.observations, o.bling_sale_numero,
               c.name as client_name, c.cpf as client_cpf, c.email as client_email,
               c.whatsapp as client_whatsapp, c.phone as client_phone
        FROM orders o
@@ -482,7 +519,9 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
       [orderId]
     ) as { rows: Record<string, unknown>[] }
     if (orderResult.rows.length > 0) {
-      observationsValue = (orderResult.rows[0].observations as string | null) ?? null
+      const r = orderResult.rows[0]
+      observationsValue = (r.observations as string | null) ?? null
+      blingSaleNumeroValue = (r.bling_sale_numero as string | null) ?? null
     }
   } catch {
     orderResult = await query(baseSelect, [orderId]) as { rows: Record<string, unknown>[] }
@@ -524,6 +563,7 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
     total_shipping: Number(row.total_shipping) ?? 0,
     created_at: row.created_at ? new Date(row.created_at as string).toISOString() : new Date().toISOString(),
     observations: observationsValue,
+    bling_sale_numero: blingSaleNumeroValue ?? (row.bling_sale_numero as string | null) ?? null,
     client_name: (row.client_name as string) ?? '',
     client_cpf: (row.client_cpf as string) ?? '',
     client_email: (row.client_email as string | null) ?? null,
