@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, Save } from "lucide-react"
-import { productsApi } from "@/lib/api"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { productsApi, productCategoriesApi } from "@/lib/api"
 import { toast } from "@/lib/toast"
 
 export default function ProductFormPage() {
@@ -18,6 +19,7 @@ export default function ProductFormPage() {
 
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(!isNew)
+  const [categories, setCategories] = useState<any[]>([])
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -26,10 +28,12 @@ export default function ProductFormPage() {
     height: '',
     length: '',
     weight: '',
-    active: true
+    active: true,
+    category_id: null as number | null
   })
 
   useEffect(() => {
+    productCategoriesApi.list().then(setCategories).catch(() => {})
     if (!isNew) {
       loadProduct()
     }
@@ -47,7 +51,8 @@ export default function ProductFormPage() {
         height: product.height || '',
         length: product.length || '',
         weight: product.weight || '',
-        active: product.active !== false
+        active: product.active !== false,
+        category_id: product.category_id != null ? Number(product.category_id) : null
       })
     } catch (error) {
       console.error('Erro ao carregar produto:', error)
@@ -114,6 +119,23 @@ export default function ProductFormPage() {
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Categoria</Label>
+              <Select
+                value={formData.category_id != null ? String(formData.category_id) : "__none__"}
+                onValueChange={(v) => setFormData({ ...formData, category_id: v === "__none__" ? null : Number(v) })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Nenhuma" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Nenhuma</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">

@@ -6,41 +6,41 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Plus, Edit, Trash2, Loader2 } from "lucide-react"
-import { productsApi } from "@/lib/api"
+import { productCategoriesApi } from "@/lib/api"
 import { toast } from "@/lib/toast"
-import { formatCurrency } from "@/lib/utils"
 
-export default function ProductsPage() {
+export default function ProductCategoriesPage() {
   const router = useRouter()
-  const [products, setProducts] = useState<any[]>([])
+  const [categories, setCategories] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
-  const loadProducts = async () => {
+  const loadCategories = async () => {
     setLoading(true)
     try {
-      const data = await productsApi.list()
-      setProducts(data)
+      const data = await productCategoriesApi.list()
+      setCategories(data)
     } catch (error) {
-      console.error("Erro ao carregar produtos:", error)
+      console.error("Erro ao carregar categorias:", error)
+      toast.error("Erro ao carregar categorias")
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadProducts()
+    loadCategories()
   }, [])
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Tem certeza que deseja excluir este produto?')) {
+    if (!confirm("Tem certeza que deseja excluir esta categoria? Produtos vinculados ficarão sem categoria.")) {
       return
     }
-
     try {
-      await productsApi.delete(id)
-      loadProducts()
+      await productCategoriesApi.delete(id)
+      toast.success("Categoria excluída com sucesso")
+      loadCategories()
     } catch (error: any) {
-      toast.error(error.message || 'Erro ao excluir produto')
+      toast.error(error.message || "Erro ao excluir categoria")
     }
   }
 
@@ -48,28 +48,28 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Produtos</h2>
-          <p className="text-muted-foreground">Gerencie os produtos disponíveis</p>
+          <h2 className="text-2xl font-bold">Categorias de Produtos</h2>
+          <p className="text-muted-foreground">Gerencie as categorias para organizar os produtos</p>
         </div>
-        <Button onClick={() => router.push('/admin/products/new')}>
+        <Button onClick={() => router.push("/admin/products/categories/new")}>
           <Plus className="h-4 w-4 mr-2" />
-          Novo Produto
+          Nova Categoria
         </Button>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Lista de Produtos</CardTitle>
-          <CardDescription>Todos os produtos cadastrados no sistema</CardDescription>
+          <CardTitle>Lista de Categorias</CardTitle>
+          <CardDescription>Todas as categorias cadastradas no sistema</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
-          ) : products.length === 0 ? (
+          ) : categories.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <p className="text-sm text-muted-foreground">Nenhum produto cadastrado</p>
+              <p className="text-sm text-muted-foreground">Nenhuma categoria cadastrada</p>
             </div>
           ) : (
             <Table>
@@ -77,30 +77,20 @@ export default function ProductsPage() {
                 <TableRow>
                   <TableHead>Nome</TableHead>
                   <TableHead>Descrição</TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead>Preço Base</TableHead>
-                  <TableHead>Status</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {products.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell className="font-medium">{product.name}</TableCell>
-                    <TableCell>{product.description || "—"}</TableCell>
-                    <TableCell>{product.category_name || "—"}</TableCell>
-                    <TableCell>{formatCurrency(parseFloat(product.base_price))}</TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-1 rounded text-xs ${product.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                        {product.active ? 'Ativo' : 'Inativo'}
-                      </span>
-                    </TableCell>
+                {categories.map((cat) => (
+                  <TableRow key={cat.id}>
+                    <TableCell className="font-medium">{cat.name}</TableCell>
+                    <TableCell>{cat.description || "—"}</TableCell>
                     <TableCell>
                       <div className="flex gap-2">
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => router.push(`/admin/products/${product.id}`)}
+                          onClick={() => router.push(`/admin/products/categories/${cat.id}`)}
                         >
                           <Edit className="h-4 w-4 mr-2" />
                           Editar
@@ -108,7 +98,8 @@ export default function ProductsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDelete(product.id)}
+                          onClick={() => handleDelete(cat.id)}
+                          className="text-destructive hover:text-destructive"
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
                           Excluir

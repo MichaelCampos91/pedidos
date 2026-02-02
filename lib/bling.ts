@@ -3,7 +3,10 @@
  * Documentação: https://developer.bling.com.br/
  * Referência: https://developer.bling.com.br/referencia
  * Base: https://api.bling.com.br/Api/v3 (confirmado na documentação oficial)
- * Endpoints usados: GET /pedidos/vendas?limite=1 (validação), POST /pedidos/vendas (envio).
+ * Endpoints usados: GET /pedidos/vendas?limite=1 (validação), POST /pedidos/vendas (envio), POST /contatos (criação de contato).
+ * 
+ * IMPORTANTE: Para criar pedidos de venda, o app Bling precisa ter escopo de Contatos (criação).
+ * O sistema cria o contato no Bling antes de criar a venda, pois a API v3 exige contato.id na venda.
  */
 
 import { query } from '@/lib/database'
@@ -104,21 +107,201 @@ export interface OrderForBling {
 }
 
 /**
+ * Decodifica sequências Unicode escapadas (\uXXXX) em uma string.
+ * Exemplo: "N\u00e3o foi poss\u00edvel" -> "Não foi possível"
+ * 
+ * O JavaScript não decodifica automaticamente sequências Unicode escapadas quando
+ * extraídas de objetos JSON parseados ou quando presentes em strings JSON brutas.
+ * Esta função decodifica essas sequências usando substituição direta com regex.
+ */
+function decodeUnicodeEscapes(str: string): string {
+  if (!str || typeof str !== 'string') return str
+  
+  // Se a string não contém sequências Unicode escapadas, retornar como está
+  if (!/\\u[0-9a-fA-F]{4}/.test(str)) return str
+  
+  try {
+    // Substituir sequências Unicode escapadas (\uXXXX) pelo caractere correspondente
+    return str.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => {
+      return String.fromCharCode(parseInt(hex, 16))
+    })
+  } catch {
+    // Se falhar, retornar string original
+    return str
+  }
+}
+
+/**
+ * Cria ou busca um contato no Bling usando os dados do pedido.
+ * Retorna o ID do contato criado/encontrado no Bling.
+ * 
+ * IMPORTANTE: Requer escopo de Contatos no app Bling (OAuth).
+ * Se o token não tiver permissão para criar contatos, esta função falhará.
+ * O usuário deve garantir que o escopo de Contatos está selecionado no painel do Bling
+ * e reautorizar o app se necessário.
+ */
+async function createOrFindContactInBling(
+  order: OrderForBling,
+  accessToken: string
+): Promise<number> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token) {
+    throw new Error('[Sistema] Token Bling não configurado.')
+  }
+
+  const cleanCpf = (order.client_cpf || '').replace(/\D/g, '')
+  if (!cleanCpf) {
+    throw new Error('[Sistema] CPF/CNPJ do cliente é obrigatório para criar contato no Bling.')
+  }
+
+  const tipo = cleanCpf.length === 11 ? 'F' : 'J'
+
+  // Montar payload do contato conforme API Bling v3
+  const contactPayload: Record<string, unknown> = {
+    nome: order.client_name || 'Cliente',
+    numeroDocumento: cleanCpf,
+    tipo,
+  }
+
+  if (order.client_email) contactPayload.email = order.client_email
+  if (order.client_whatsapp) contactPayload.celular = order.client_whatsapp
+  if (order.client_phone) contactPayload.telefone = order.client_phone
+
+  // Adicionar endereço se disponível
+  if (order.address) {
+    contactPayload.endereco = {
+      endereco: order.address.street || '',
+      numero: order.address.number || 'S/N',
+      complemento: order.address.complement || '',
+      bairro: order.address.neighborhood || '',
+      municipio: order.address.city || '',
+      uf: order.address.state || '',
+      cep: (order.address.cep || '').replace(/\D/g, ''),
+    }
+  }
+
+  const url = `${BLING_API_BASE}/contatos`
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(contactPayload),
+    })
+
+    const responseText = await response.text()
+    let responseData: unknown = null
+    try {
+      responseData = responseText ? JSON.parse(responseText) : null
+    } catch {
+      responseData = responseText.slice(0, 500)
+    }
+
+    if (response.ok) {
+      // Extrair ID do contato criado (estrutura comum: data.id ou data.data.id)
+      const contactId = extractBlingIdFromResponse(responseData)
+      if (contactId != null) {
+        return Number(contactId)
+      }
+      throw new Error('Resposta do Bling não contém ID do contato criado.')
+    }
+
+    // Se o contato já existe (409 Conflict ou mensagem específica), tentar buscar por CPF
+    if (response.status === 409 || (responseData && typeof responseData === 'object' && 'error' in responseData)) {
+      const errorData = responseData as { error?: { message?: string } }
+      const errorMsg = errorData?.error?.message ? decodeUnicodeEscapes(errorData.error.message) : ''
+      
+      // Tentar buscar contato existente por CPF/CNPJ
+      // A API Bling pode usar diferentes formatos de query: ?numeroDocumento=... ou filtros no body
+      try {
+        // Tentar busca por query parameter (formato comum em APIs REST)
+        const searchUrl = `${BLING_API_BASE}/contatos?numeroDocumento=${encodeURIComponent(cleanCpf)}`
+        const searchResponse = await fetch(searchUrl, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+        })
+
+        if (searchResponse.ok) {
+          const searchData = await searchResponse.json()
+          // A API pode retornar array ou objeto com data
+          let contacts: unknown[] = []
+          if (Array.isArray(searchData)) {
+            contacts = searchData
+          } else if (searchData && typeof searchData === 'object' && 'data' in searchData) {
+            const data = (searchData as { data: unknown }).data
+            contacts = Array.isArray(data) ? data : []
+          }
+
+          if (contacts.length > 0 && typeof contacts[0] === 'object') {
+            const firstContact = contacts[0] as Record<string, unknown>
+            if (firstContact.id != null) {
+              console.log(`[Bling] Contato encontrado por CPF/CNPJ: ${firstContact.id}`)
+              return Number(firstContact.id)
+            }
+          }
+        }
+      } catch (searchErr) {
+        // Se a busca falhar, continuar com erro original
+        console.warn('[Bling] Erro ao buscar contato existente:', searchErr)
+      }
+
+      // Se não encontrou por busca, lançar erro informando que o contato pode já existir
+      throw new Error(`Contato já existe ou erro ao criar: ${errorMsg || response.statusText}. Verifique se o CPF/CNPJ já está cadastrado no Bling.`)
+    }
+
+    // Outros erros
+    let errMsg = `Erro HTTP ${response.status}.`
+    if (responseData && typeof responseData === 'object' && 'error' in responseData) {
+      const err = (responseData as { error?: { message?: string } }).error
+      errMsg = err?.message ? decodeUnicodeEscapes(err.message) : errMsg
+    }
+    if (responseData && typeof responseData === 'object' && 'message' in responseData) {
+      const msg = (responseData as { message: string }).message
+      errMsg = decodeUnicodeEscapes(msg)
+    }
+
+    const snippet = decodeUnicodeEscapes(responseText.trim().slice(0, 300))
+    throw new Error(`Não foi possível criar contato no Bling: ${errMsg}${snippet ? `. Detalhes: ${snippet}` : ''}`)
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      throw err
+    }
+    throw new Error(`Erro ao criar contato no Bling: ${String(err)}`)
+  }
+}
+
+/**
  * Monta o payload para POST /pedidos/vendas conforme estrutura esperada pela API Bling v3.
  * Ajuste os campos conforme a documentação oficial se a API retornar erro de schema.
+ * @param order Dados do pedido
+ * @param blingContactId ID do contato no Bling (obrigatório na API v3). Se não fornecido, usa dados inline (compatibilidade).
  */
-export function mapOrderToBlingSale(order: OrderForBling): Record<string, unknown> {
+export function mapOrderToBlingSale(order: OrderForBling, blingContactId?: number | null): Record<string, unknown> {
   const numero = String(order.id)
   const dataEmissao = order.created_at ? order.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10)
 
-  const contato: Record<string, unknown> = {
-    nome: order.client_name || 'Cliente',
-    numeroDocumento: (order.client_cpf || '').replace(/\D/g, ''),
-    tipo: (order.client_cpf || '').replace(/\D/g, '').length === 11 ? 'F' : 'J',
+  // API v3 exige contato.id quando disponível
+  const contato: Record<string, unknown> = blingContactId != null
+    ? { id: blingContactId }
+    : {
+        nome: order.client_name || 'Cliente',
+        numeroDocumento: (order.client_cpf || '').replace(/\D/g, ''),
+        tipo: (order.client_cpf || '').replace(/\D/g, '').length === 11 ? 'F' : 'J',
+      }
+  
+  // Se não usar id, adicionar campos opcionais inline (compatibilidade)
+  if (blingContactId == null) {
+    if (order.client_email) contato.email = order.client_email
+    if (order.client_whatsapp) contato.celular = order.client_whatsapp
+    if (order.client_phone) contato.telefone = order.client_phone
   }
-  if (order.client_email) contato.email = order.client_email
-  if (order.client_whatsapp) contato.celular = order.client_whatsapp
-  if (order.client_phone) contato.telefone = order.client_phone
 
   const itens = order.items.map((item, idx) => ({
     descricao: item.title || `Item ${idx + 1}`,
@@ -208,7 +391,18 @@ export async function sendOrderToBling(
     return { success: false, error: 'Pedido sem endereço de entrega. Informe o endereço antes de enviar ao Bling.' }
   }
 
-  const payload = mapOrderToBlingSale(order)
+  // Criar ou buscar contato no Bling antes de criar a venda (API v3 exige contato.id)
+  let blingContactId: number
+  try {
+    blingContactId = await createOrFindContactInBling(order, accessToken)
+  } catch (contactErr: unknown) {
+    const contactErrorMsg = contactErr instanceof Error ? contactErr.message : String(contactErr)
+    await updateOrderSync(orderId, 'error', contactErrorMsg)
+    await insertLog(orderId, 'error', contactErrorMsg, null)
+    return { success: false, error: `[Bling] Não foi possível cadastrar o cliente no Bling. ${contactErrorMsg}` }
+  }
+
+  const payload = mapOrderToBlingSale(order, blingContactId)
   const url = `${BLING_API_BASE}/pedidos/vendas`
 
   try {
@@ -240,13 +434,14 @@ export async function sendOrderToBling(
     let errMsg = `Erro HTTP ${response.status}.`
     if (responseData && typeof responseData === 'object' && 'error' in responseData) {
       const err = (responseData as { error?: { message?: string } }).error
-      errMsg = err?.message || errMsg
+      errMsg = err?.message ? decodeUnicodeEscapes(err.message) : errMsg
     }
     if (responseData && typeof responseData === 'object' && 'message' in responseData) {
-      errMsg = (responseData as { message: string }).message
+      const msg = (responseData as { message: string }).message
+      errMsg = decodeUnicodeEscapes(msg)
     }
 
-    const snippet = responseText.trim().slice(0, 400)
+    const snippet = decodeUnicodeEscapes(responseText.trim().slice(0, 400))
     const details = snippet ? ` Detalhes: ${snippet}` : ''
 
     await updateOrderSync(orderId, 'error', errMsg)
@@ -404,4 +599,211 @@ export async function syncOrderToBling(orderId: number): Promise<SendOrderToBlin
     updateOrderSync,
     insertLog
   )
+}
+
+// --- Sincronização em lote (categorias, produtos, clientes, pedidos) ---
+
+export type BlingSyncEntityType = 'categories' | 'products' | 'contacts' | 'orders'
+
+export interface BlingSyncResult {
+  success: boolean
+  syncedCount: number
+  error?: string
+}
+
+async function upsertBlingSyncStatus(entityType: BlingSyncEntityType): Promise<void> {
+  await query(
+    `INSERT INTO bling_sync_status (entity_type, last_synced_at, updated_at)
+     VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT (entity_type) DO UPDATE SET last_synced_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`,
+    [entityType]
+  )
+}
+
+export async function getBlingSyncStatus(): Promise<Record<BlingSyncEntityType, string | null>> {
+  const result = await query(
+    'SELECT entity_type, last_synced_at FROM bling_sync_status',
+    []
+  )
+  const status: Record<BlingSyncEntityType, string | null> = {
+    categories: null,
+    products: null,
+    contacts: null,
+    orders: null,
+  }
+  for (const row of result.rows as { entity_type: string; last_synced_at: string | null }[]) {
+    if (row.entity_type in status) {
+      status[row.entity_type as BlingSyncEntityType] = row.last_synced_at
+        ? new Date(row.last_synced_at).toISOString()
+        : null
+    }
+  }
+  return status
+}
+
+function buildBlingError(responseText: string, response: Response): string {
+  let errMsg = `Erro HTTP ${response.status}.`
+  try {
+    const data = JSON.parse(responseText)
+    if (data?.error?.message) errMsg = decodeUnicodeEscapes(data.error.message)
+    else if (data?.message) errMsg = decodeUnicodeEscapes(data.message)
+  } catch {
+    errMsg = decodeUnicodeEscapes(responseText.trim().slice(0, 300))
+  }
+  return `[Bling] ${errMsg}`
+}
+
+export async function syncCategoriesToBling(sinceDate: string, accessToken: string): Promise<BlingSyncResult> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token) {
+    return { success: false, syncedCount: 0, error: '[Sistema] Token Bling não configurado.' }
+  }
+  const rows = await query(
+    'SELECT id, name, description FROM product_categories WHERE created_at >= $1::date ORDER BY id',
+    [sinceDate]
+  )
+  let syncedCount = 0
+  const url = `${BLING_API_BASE}/categorias/produtos`
+  for (const row of rows.rows as { id: number; name: string; description: string | null }[]) {
+    const body = { descricao: row.name || 'Categoria', nome: row.name }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    const responseText = await response.text()
+    if (!response.ok) {
+      return { success: false, syncedCount, error: buildBlingError(responseText, response) }
+    }
+    syncedCount++
+  }
+  await upsertBlingSyncStatus('categories')
+  return { success: true, syncedCount }
+}
+
+export async function syncProductsToBling(sinceDate: string, accessToken: string): Promise<BlingSyncResult> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token) {
+    return { success: false, syncedCount: 0, error: '[Sistema] Token Bling não configurado.' }
+  }
+  const rows = await query(
+    `SELECT p.id, p.name, p.description, p.base_price, p.width, p.height, p.length, p.weight, p.active
+     FROM products p WHERE p.created_at >= $1::date ORDER BY p.id`,
+    [sinceDate]
+  )
+  let syncedCount = 0
+  const url = `${BLING_API_BASE}/produtos`
+  for (const row of rows.rows as Record<string, unknown>[]) {
+    const body = {
+      nome: row.name || 'Produto',
+      codigo: String(row.id),
+      preco: Number(row.base_price) || 0,
+      descricao: (row.description as string) || undefined,
+      situacao: (row.active as boolean) !== false ? 'A' : 'I',
+      ...(row.width != null && { largura: Number(row.width) }),
+      ...(row.height != null && { altura: Number(row.height) }),
+      ...(row.length != null && { profundidade: Number(row.length) }),
+      ...(row.weight != null && { peso: Number(row.weight) }),
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    const responseText = await response.text()
+    if (!response.ok) {
+      return { success: false, syncedCount, error: buildBlingError(responseText, response) }
+    }
+    syncedCount++
+  }
+  await upsertBlingSyncStatus('products')
+  return { success: true, syncedCount }
+}
+
+export async function syncContactsToBling(sinceDate: string, accessToken: string): Promise<BlingSyncResult> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token) {
+    return { success: false, syncedCount: 0, error: '[Sistema] Token Bling não configurado.' }
+  }
+  const clientsResult = await query(
+    `SELECT c.id, c.name, c.cpf, c.email, c.phone, c.whatsapp, c.created_at
+     FROM clients c WHERE c.created_at >= $1::date ORDER BY c.id`,
+    [sinceDate]
+  )
+  let syncedCount = 0
+  const url = `${BLING_API_BASE}/contatos`
+  for (const row of clientsResult.rows as Record<string, unknown>[]) {
+    const cleanCpf = String(row.cpf || '').replace(/\D/g, '')
+    if (!cleanCpf) continue
+    const tipo = cleanCpf.length === 11 ? 'F' : 'J'
+    const contactPayload: Record<string, unknown> = {
+      nome: row.name || 'Cliente',
+      numeroDocumento: cleanCpf,
+      tipo,
+    }
+    if (row.email) contactPayload.email = row.email
+    if (row.whatsapp) contactPayload.celular = row.whatsapp
+    if (row.phone) contactPayload.telefone = row.phone
+    const addrResult = await query(
+      'SELECT street, number, complement, neighborhood, city, state, cep FROM client_addresses WHERE client_id = $1 ORDER BY is_default DESC LIMIT 1',
+      [row.id]
+    )
+    if (addrResult.rows.length > 0) {
+      const a = addrResult.rows[0] as Record<string, unknown>
+      contactPayload.endereco = {
+        endereco: a.street || '',
+        numero: a.number || 'S/N',
+        complemento: a.complement || '',
+        bairro: a.neighborhood || '',
+        municipio: a.city || '',
+        uf: a.state || '',
+        cep: String(a.cep || '').replace(/\D/g, ''),
+      }
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(contactPayload),
+    })
+    const responseText = await response.text()
+    if (!response.ok) {
+      return { success: false, syncedCount, error: buildBlingError(responseText, response) }
+    }
+    syncedCount++
+  }
+  await upsertBlingSyncStatus('contacts')
+  return { success: true, syncedCount }
+}
+
+export async function syncOrdersToBling(sinceDate: string, accessToken: string): Promise<BlingSyncResult> {
+  const tokenObj = await getToken('bling', 'production')
+  if (!tokenObj) {
+    return { success: false, syncedCount: 0, error: '[Sistema] Integração Bling não configurada.' }
+  }
+  const ordersResult = await query(
+    `SELECT id FROM orders WHERE created_at >= $1::date AND (bling_sync_status IS NULL OR bling_sync_status != 'synced') ORDER BY id`,
+    [sinceDate]
+  )
+  let syncedCount = 0
+  for (const row of ordersResult.rows as { id: number }[]) {
+    const result = await syncOrderToBling(row.id)
+    if (!result.success) {
+      return { success: false, syncedCount, error: result.error || '[Bling] Erro ao sincronizar pedido.' }
+    }
+    syncedCount++
+  }
+  await upsertBlingSyncStatus('orders')
+  return { success: true, syncedCount }
 }

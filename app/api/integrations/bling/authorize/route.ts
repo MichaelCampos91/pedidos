@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 const BLING_AUTHORIZE_URL = 'https://www.bling.com.br/Api/v3/oauth/authorize'
 
-/** IDs de escopo do Bling (data-scope do painel): Integrações Logísticas, Pedidos de Venda, Produtos e sub-escopos. */
+/** IDs de escopo do Bling (data-scope do painel): Integrações Logísticas, Pedidos de Venda, Clientes e Fornecedores (Contatos), Produtos e sub-escopos. */
 const BLING_SCOPE_IDS = [
   '220621674', // Integrações Logísticas
   '98310',     // Pedidos de Venda
@@ -16,6 +16,8 @@ const BLING_SCOPE_IDS = [
   '791588404', // Pedidos de Venda: Gerenciar situações
   '363921589', // Pedidos de Venda: Lançar contas
   '363921592', // Pedidos de Venda: Lançar estoque
+  '98308',     // Clientes e Fornecedores
+  '318257565', // Clientes e Fornecedores: Gerenciar Contatos
   '98309',     // Produtos
   '318257583', // Produtos: Exclusão
   '318257570', // Produtos: Gerenciar

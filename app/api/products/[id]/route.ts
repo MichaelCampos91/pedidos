@@ -16,7 +16,12 @@ export async function GET(
     const cookieToken = cookieStore.get('auth_token')?.value
     await requireAuth(request, cookieToken)
 
-    const result = await query('SELECT * FROM products WHERE id = $1', [params.id])
+    const result = await query(
+      `SELECT p.*, pc.name as category_name FROM products p
+       LEFT JOIN product_categories pc ON p.category_id = pc.id
+       WHERE p.id = $1`,
+      [params.id]
+    )
     
     if (result.rows.length === 0) {
       return NextResponse.json(
@@ -48,7 +53,7 @@ export async function PUT(
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { name, description, base_price, width, height, length, weight, active } = body
+    const { name, description, base_price, width, height, length, weight, active, category_id } = body
 
     if (!name || base_price === undefined) {
       return NextResponse.json(
@@ -66,8 +71,9 @@ export async function PUT(
         height = $5,
         length = $6,
         weight = $7,
-        active = $8
-      WHERE id = $9`,
+        active = $8,
+        category_id = $9
+      WHERE id = $10`,
       [
         name, 
         description || null, 
@@ -77,6 +83,7 @@ export async function PUT(
         length ? parseFloat(length) : null,
         weight ? parseFloat(weight) : null,
         active !== false,
+        category_id != null ? Number(category_id) : null,
         params.id
       ]
     )

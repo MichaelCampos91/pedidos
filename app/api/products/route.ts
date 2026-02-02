@@ -25,7 +25,11 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await query(
-      `SELECT * FROM products WHERE ${whereClause} ORDER BY name ASC`,
+      `SELECT p.*, pc.name as category_name
+       FROM products p
+       LEFT JOIN product_categories pc ON p.category_id = pc.id
+       WHERE ${whereClause}
+       ORDER BY p.name ASC`,
       params
     )
 
@@ -49,7 +53,7 @@ export async function POST(request: NextRequest) {
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { name, description, base_price, width, height, length, weight, active } = body
+    const { name, description, base_price, width, height, length, weight, active, category_id } = body
 
     if (!name || base_price === undefined) {
       return NextResponse.json(
@@ -59,8 +63,8 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await query(
-      `INSERT INTO products (name, description, base_price, width, height, length, weight, active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO products (name, description, base_price, width, height, length, weight, active, category_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id`,
       [
         name, 
@@ -70,7 +74,8 @@ export async function POST(request: NextRequest) {
         height ? parseFloat(height) : null,
         length ? parseFloat(length) : null,
         weight ? parseFloat(weight) : null,
-        active !== false
+        active !== false,
+        category_id != null ? Number(category_id) : null
       ]
     )
 

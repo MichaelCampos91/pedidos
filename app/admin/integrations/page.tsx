@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { IntegrationCard } from "@/components/integrations/IntegrationCard"
+import { BlingSyncCard } from "@/components/integrations/BlingSyncCard"
 import { Loader2, Truck, CreditCard, Package } from "lucide-react"
 import type { IntegrationProvider, IntegrationEnvironment, TokenType, IntegrationToken } from "@/lib/integrations-types"
 
@@ -231,6 +232,10 @@ export default function IntegrationsPage() {
             />
           )
         })}
+
+        {getTokensForProvider('bling').length > 0 && (
+          <BlingSyncCard />
+        )}
       </div>
     </div>
   )

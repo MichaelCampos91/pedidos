@@ -76,6 +76,18 @@ export const clientsApi = {
     }),
 }
 
+// Product categories
+export const productCategoriesApi = {
+  list: () => request<any[]>('/products/categories'),
+  get: (id: number) => request<any>(`/products/categories/${id}`),
+  create: (data: { name: string; description?: string }) =>
+    request<{ success: boolean; id: number }>('/products/categories', { method: 'POST', body: data }),
+  update: (id: number, data: { name: string; description?: string }) =>
+    request<{ success: boolean }>(`/products/categories/${id}`, { method: 'PUT', body: data }),
+  delete: (id: number) =>
+    request<{ success: boolean }>(`/products/categories/${id}`, { method: 'DELETE' }),
+}
+
 // Products
 export const productsApi = {
   list: () => request<any[]>('/products'),
@@ -122,6 +134,28 @@ export const blingApi = {
     request<{ success: boolean; blingId?: number | string; message?: string }>('/bling/sync-order', {
       method: 'POST',
       body: { orderId },
+    }),
+  getSyncStatus: () =>
+    request<{ categories?: string | null; products?: string | null; contacts?: string | null; orders?: string | null }>('/bling/sync/status'),
+  syncCategories: (sinceDate: string) =>
+    request<{ success: boolean; syncedCount?: number; error?: string }>('/bling/sync/categories', {
+      method: 'POST',
+      body: { sinceDate },
+    }),
+  syncProducts: (sinceDate: string) =>
+    request<{ success: boolean; syncedCount?: number; error?: string }>('/bling/sync/products', {
+      method: 'POST',
+      body: { sinceDate },
+    }),
+  syncContacts: (sinceDate: string) =>
+    request<{ success: boolean; syncedCount?: number; error?: string }>('/bling/sync/contacts', {
+      method: 'POST',
+      body: { sinceDate },
+    }),
+  syncOrders: (sinceDate: string) =>
+    request<{ success: boolean; syncedCount?: number; error?: string }>('/bling/sync/orders', {
+      method: 'POST',
+      body: { sinceDate },
     }),
 }
 

@@ -85,6 +85,12 @@ export default function AdminLayout({
                   Produtos
                 </Button>
               </Link>
+              <Link href="/admin/products/categories">
+                <Button variant="ghost" className={navLinkClass(isActive('/admin/products/categories') || isActiveWithChildren('/admin/products/categories'))}>
+                  <Package className="h-4 w-4 mr-2" />
+                  Categorias de Produtos
+                </Button>
+              </Link>
               <Link href="/admin/shipping">
                 <Button variant="ghost" className={navLinkClass(isActive('/admin/shipping'))}>
                   <Truck className="h-4 w-4 mr-2" />
