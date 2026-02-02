@@ -352,6 +352,7 @@ export function mapOrderToBlingSale(order: OrderForBling, blingContactId?: numbe
         uf: order.address.state || '',
         cep: (order.address.cep || '').replace(/\D/g, ''),
       },
+      valorFrete: Number(order.total_shipping) || 0,
     }
   }
 
