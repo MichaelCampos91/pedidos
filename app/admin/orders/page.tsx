@@ -450,11 +450,11 @@ export default function OrdersPage() {
                     <TableCell>
                       <div className="space-y-1">
                         {order.payment_status && (
-                          <div className="flex flex-wrap items-center gap-1">
+                          <div className="flex flex-col gap-1">
                             <Badge
                               variant="outline"
                               className={cn(
-                                "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
+                                "inline-flex w-fit items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
                                 order.payment_status === "paid" &&
                                   "bg-emerald-50 text-emerald-800 border-emerald-200",
                                 order.payment_status === "pending" &&
@@ -471,8 +471,8 @@ export default function OrdersPage() {
                               {order.payment_status === "failed" && "Recusado"}
                             </Badge>
                             {order.payment_status === "paid" && getPaymentMethodLabel(order) && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full border border-muted">
-                                ({getPaymentMethodLabel(order)})
+                              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 rounded-full border border-muted bg-white text-muted-foreground">
+                                {getPaymentMethodLabel(order)}
                               </Badge>
                             )}
                           </div>

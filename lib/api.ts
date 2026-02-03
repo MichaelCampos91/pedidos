@@ -170,6 +170,18 @@ export const metricsApi = {
       revenue_period: number
       awaiting_payment: number
       by_status: { status: string; count: number }[]
+      by_payment_method: { method: string; count: number; total: number }[]
+      paid_count: number
+      average_order_value: number
+      conversion_rate: number
+      new_clients_count: number
+      avg_hours_to_payment: number | null
+      shipping_total: number
+      shipping_avg: number
+      revenue_avista: number
+      revenue_parcelado: number
+      top_products: { product_id: number | null; title: string; quantity: number; revenue: number }[]
+      by_state: { state: string; count: number; total: number }[]
     }>(`/metrics/orders?${query}`)
   },
 }

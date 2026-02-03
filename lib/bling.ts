@@ -424,6 +424,7 @@ export async function sendOrderToBling(
   const payload = mapOrderToBlingSale(order, blingContactId, numeroBling)
   const url = `${BLING_API_BASE}/pedidos/vendas`
 
+  let syncedInThisRun = false
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -446,6 +447,7 @@ export async function sendOrderToBling(
     if (response.ok) {
       const blingId = extractBlingIdFromResponse(responseData)
       await updateOrderSync(orderId, 'synced', null)
+      syncedInThisRun = true
       await insertLog(orderId, 'success', null, blingId != null ? JSON.stringify({ id: blingId }) : responseText.slice(0, 500))
       // Persistir numero usado no Bling para reenvios e rastreabilidade; opcionalmente registrar em observations
       await query(
@@ -486,8 +488,10 @@ export async function sendOrderToBling(
     return { success: false, error: `[Bling] ${errMsg}.${details}` }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
-    await updateOrderSync(orderId, 'error', message)
-    await insertLog(orderId, 'error', message, null)
+    if (!syncedInThisRun) {
+      await updateOrderSync(orderId, 'error', message)
+      await insertLog(orderId, 'error', message, null)
+    }
     return { success: false, error: `[Sistema] ${message}` }
   }
 }
