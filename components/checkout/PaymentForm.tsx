@@ -248,34 +248,53 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
           }
         }
 
-        // Buscar taxas de parcelamento
-        const ratesResponse = await fetch(`/api/settings/installment-rates?environment=${activeEnvironment}`, {
-          credentials: 'include',
-        })
-        if (ratesResponse.ok) {
-          const ratesData = await ratesResponse.json()
-          const rates = ratesData.rates || []
-          
-          const calculatedRates = Array.from({ length: 12 }, (_, i) => {
-            const installments = i + 1
-            const rateData = rates.find((r: any) => r.installments === installments)
-            const rate = rateData ? parseFloat(rateData.rate_percentage) : 0
-            const totalWithInterest = total * (1 + rate / 100)
-            const installmentValue = totalWithInterest / installments
-            
-            return {
-              installments,
-              rate,
-              totalWithInterest,
-              installmentValue,
-              hasInterest: rate > 0,
-            }
+        // Buscar taxas de parcelamento (endpoint público para checkout sem login)
+        let calculatedRates: Array<{ installments: number; rate: number; totalWithInterest: number; installmentValue: number; hasInterest: boolean }> = []
+        try {
+          const ratesResponse = await fetch(`/api/checkout/installment-rates?environment=${activeEnvironment}`, {
+            credentials: 'include',
           })
-          
-          setInstallmentRates(calculatedRates)
+          if (ratesResponse.ok) {
+            const ratesData = await ratesResponse.json()
+            const rates = ratesData.rates || []
+            calculatedRates = Array.from({ length: 12 }, (_, i) => {
+              const installments = i + 1
+              const rateData = rates.find((r: any) => r.installments === installments)
+              const rate = rateData ? parseFloat(rateData.rate_percentage) : 0
+              const totalWithInterest = total * (1 + rate / 100)
+              const installmentValue = totalWithInterest / installments
+              return {
+                installments,
+                rate,
+                totalWithInterest,
+                installmentValue,
+                hasInterest: rate > 0,
+              }
+            })
+          }
+        } catch (ratesError) {
+          console.warn('Erro ao carregar taxas de parcelamento, usando fallback:', ratesError)
         }
+        // Fallback: ao menos 1x à vista para permitir concluir pagamento em qualquer dispositivo
+        if (calculatedRates.length === 0) {
+          calculatedRates = [{
+            installments: 1,
+            rate: 0,
+            totalWithInterest: total,
+            installmentValue: total,
+            hasInterest: false,
+          }]
+        }
+        setInstallmentRates(calculatedRates)
       } catch (error) {
         console.error('Erro ao carregar configurações de pagamento:', error)
+        setInstallmentRates([{
+          installments: 1,
+          rate: 0,
+          totalWithInterest: total,
+          installmentValue: total,
+          hasInterest: false,
+        }])
       }
     }
 
