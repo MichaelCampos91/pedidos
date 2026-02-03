@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { query } from '@/lib/database'
-import { setSetting } from '@/lib/settings'
+import { getSetting, setSetting } from '@/lib/settings'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -26,9 +26,15 @@ export async function GET(request: NextRequest) {
       ? parseInt(productionDaysResult.rows[0].value) || 0
       : 0
 
+    const minInstallmentValueRaw = await getSetting('min_installment_value')
+    const minInstallmentValue = minInstallmentValueRaw != null && minInstallmentValueRaw !== ''
+      ? (() => { const n = parseFloat(minInstallmentValueRaw); return Number.isFinite(n) && n >= 0 ? n : 0 })()
+      : 0
+
     return NextResponse.json({
       paymentSettings: paymentSettingsResult.rows,
       productionDays,
+      minInstallmentValue,
     })
   } catch (error: any) {
     if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {
@@ -49,7 +55,7 @@ export async function POST(request: NextRequest) {
     await requireAuth(request, cookieToken)
 
     const body = await request.json()
-    const { pixDiscount, productionDays } = body
+    const { pixDiscount, productionDays, minInstallmentValue } = body
 
     // Atualizar desconto PIX
     if (pixDiscount !== undefined) {
@@ -86,6 +92,18 @@ export async function POST(request: NextRequest) {
     // Atualizar prazo de produção
     if (productionDays !== undefined) {
       await setSetting('production_days', productionDays.toString(), 'Dias úteis a adicionar ao prazo de entrega do frete')
+    }
+
+    if (minInstallmentValue !== undefined) {
+      const value = typeof minInstallmentValue === 'number'
+        ? minInstallmentValue
+        : parseFloat(String(minInstallmentValue))
+      const safe = Number.isFinite(value) && value >= 0 ? value : 0
+      await setSetting(
+        'min_installment_value',
+        safe.toFixed(2),
+        'Valor mínimo por parcela em R$; 0 desativa a regra de parcelas sem juros por valor'
+      )
     }
 
     return NextResponse.json({ success: true })

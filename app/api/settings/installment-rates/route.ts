@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
       ...row,
       rate_percentage: parseFloat(row.rate_percentage) || 0,
       installments: parseInt(row.installments) || 0,
+      interest_free: row.interest_free === true,
     }))
 
     return NextResponse.json({ rates })
@@ -67,23 +68,37 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Buscar taxas atuais para preservar interest_free quando o body não enviar
+    const existingResult = await query(
+      `SELECT installments, interest_free FROM installment_rates WHERE environment = $1`,
+      [environment]
+    )
+    const existingByInstallments = new Map<number, boolean>()
+    for (const row of existingResult.rows) {
+      existingByInstallments.set(parseInt(row.installments) || 0, row.interest_free === true)
+    }
+
     // Atualizar ou criar cada taxa
     for (const rate of rates) {
-      const { installments, rate_percentage } = rate
+      const { installments, rate_percentage, interest_free } = rate
 
       if (!installments || rate_percentage === undefined) {
         continue
       }
 
+      const interestFree =
+        interest_free !== undefined ? Boolean(interest_free) : (existingByInstallments.get(parseInt(installments) || 0) ?? false)
+
       await query(
-        `INSERT INTO installment_rates (installments, rate_percentage, source, environment)
-         VALUES ($1, $2, 'manual', $3)
+        `INSERT INTO installment_rates (installments, rate_percentage, interest_free, source, environment)
+         VALUES ($1, $2, $3, 'manual', $4)
          ON CONFLICT (installments, environment)
          DO UPDATE SET 
            rate_percentage = EXCLUDED.rate_percentage,
+           interest_free = EXCLUDED.interest_free,
            source = 'manual',
            updated_at = CURRENT_TIMESTAMP`,
-        [installments, rate_percentage, environment]
+        [installments, rate_percentage, interestFree, environment]
       )
     }
 

@@ -7,8 +7,33 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { InstallmentRatesTable } from "./InstallmentRatesTable"
-import { DollarSign, QrCode, CreditCard, Loader2, Save, Globe, Gift } from "lucide-react"
+import { DollarSign, QrCode, CreditCard, Loader2, Save, Gift, ListOrdered } from "lucide-react"
+
+/** Tarifas padrão para o modal "Aplicar Tarifas Padrão" (editáveis pelo admin antes de confirmar). */
+const DEFAULT_INSTALLMENT_RATES: Array<{ installments: number; rate_percentage: number }> = [
+  { installments: 1, rate_percentage: 4.37 },
+  { installments: 2, rate_percentage: 6.28 },
+  { installments: 3, rate_percentage: 7.68 },
+  { installments: 4, rate_percentage: 9.08 },
+  { installments: 5, rate_percentage: 10.48 },
+  { installments: 6, rate_percentage: 11.88 },
+  { installments: 7, rate_percentage: 13.57 },
+  { installments: 8, rate_percentage: 14.97 },
+  { installments: 9, rate_percentage: 16.37 },
+  { installments: 10, rate_percentage: 17.77 },
+  { installments: 11, rate_percentage: 19.17 },
+  { installments: 12, rate_percentage: 20.57 },
+]
 import { formatCurrency } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 import type { IntegrationEnvironment } from "@/lib/integrations-types"
@@ -32,6 +57,10 @@ export function PaymentSettingsSection({
     discount_value: '',
   })
   const [installmentRates, setInstallmentRates] = useState<any[]>([])
+  const [minInstallmentValue, setMinInstallmentValue] = useState('')
+  const [applyDefaultRatesModalOpen, setApplyDefaultRatesModalOpen] = useState(false)
+  const [modalRates, setModalRates] = useState<Array<{ installments: number; rate_percentage: number }>>([])
+  const [applyingRates, setApplyingRates] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -61,6 +90,14 @@ export function PaymentSettingsSection({
           discount_type: pixSetting.discount_type || 'percentage',
           discount_value: pixSetting.discount_value?.toString() || '',
         })
+      }
+
+      if (typeof data.minInstallmentValue === 'number') {
+        setMinInstallmentValue(data.minInstallmentValue === 0 ? '' : String(data.minInstallmentValue))
+      } else if (data.minInstallmentValue != null) {
+        setMinInstallmentValue(String(data.minInstallmentValue))
+      } else {
+        setMinInstallmentValue('')
       }
 
       // Carregar taxas de parcelamento
@@ -144,7 +181,7 @@ export function PaymentSettingsSection({
     setSaving(true)
     onSave(true)
     try {
-      // Salvar desconto PIX
+      const minVal = minInstallmentValue.trim() === '' ? 0 : parseFloat(minInstallmentValue)
       const pixResponse = await fetch('/api/settings/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,12 +191,13 @@ export function PaymentSettingsSection({
             discount_type: pixDiscount.discount_type,
             discount_value: pixDiscount.discount_value ? parseFloat(pixDiscount.discount_value) : null,
           },
+          minInstallmentValue: Number.isFinite(minVal) && minVal >= 0 ? minVal : 0,
         }),
         credentials: 'include',
       })
 
       if (!pixResponse.ok) {
-        throw new Error('Erro ao salvar desconto PIX')
+        throw new Error('Erro ao salvar configurações de pagamento')
       }
 
       toast.success('Configurações de pagamento salvas com sucesso!')
@@ -191,6 +229,46 @@ export function PaymentSettingsSection({
         final: exampleValue - discountValue,
       }
     }
+  }
+
+  const handleOpenApplyDefaultRates = () => {
+    setModalRates(DEFAULT_INSTALLMENT_RATES.map(r => ({ ...r })))
+    setApplyDefaultRatesModalOpen(true)
+  }
+
+  const handleConfirmApplyRates = async () => {
+    setApplyingRates(true)
+    try {
+      const ratesToSave = modalRates.map(r => ({
+        installments: r.installments,
+        rate_percentage: typeof r.rate_percentage === 'number' ? r.rate_percentage : parseFloat(String(r.rate_percentage)) || 0,
+      }))
+      const response = await fetch('/api/settings/installment-rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rates: ratesToSave, environment }),
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error || 'Erro ao aplicar tarifas')
+      }
+      toast.success('Tarifas aplicadas com sucesso.')
+      setApplyDefaultRatesModalOpen(false)
+      await loadSettings()
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao aplicar tarifas')
+    } finally {
+      setApplyingRates(false)
+    }
+  }
+
+  const setModalRateAt = (index: number, rate_percentage: number) => {
+    setModalRates(prev => {
+      const next = [...prev]
+      if (next[index]) next[index] = { ...next[index], rate_percentage }
+      return next
+    })
   }
 
   const pixPreview = calculatePixPreview()
@@ -290,7 +368,26 @@ export function PaymentSettingsSection({
         </Card>
 
         {/* Juros de Parcelamento */}
-        <Card className="md:col-span-2">
+        <Card className="md:col-span-2 relative">
+        <div className="absolute top-6 right-6 flex flex-col items-end gap-2 z-10">
+          <Select value={environment} onValueChange={(value) => onEnvironmentChange(value as IntegrationEnvironment)}>
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sandbox">Sandbox</SelectItem>
+              <SelectItem value="production">Produção</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleOpenApplyDefaultRates}
+          >
+            <ListOrdered className="h-4 w-4 mr-2" />
+            Aplicar Tarifas Padrão
+          </Button>
+        </div>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5 text-blue-600" />
@@ -301,25 +398,76 @@ export function PaymentSettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Seletor de Ambiente */}
           <div className="space-y-2">
-            <Label htmlFor="environment" className="flex items-center gap-2">
-              <Globe className="h-4 w-4" />
-              Ambiente
-            </Label>
-            <Select value={environment} onValueChange={(value) => onEnvironmentChange(value as IntegrationEnvironment)}>
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sandbox">Sandbox</SelectItem>
-                <SelectItem value="production">Produção</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Selecione o ambiente para configurar taxas de parcelamento
-            </p>
-          </div>
+              <Label htmlFor="min_installment_value">Parcela mínima (R$)</Label>
+              <Input
+                id="min_installment_value"
+                type="number"
+                min={0}
+                step={0.01}
+                placeholder="0 = desativado"
+                value={minInstallmentValue}
+                onChange={(e) => setMinInstallmentValue(e.target.value)}
+                className="max-w-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                Valor mínimo por parcela para permitir parcelas sem juros. Use 0 para desativar (todas seguem a tabela abaixo).
+              </p>
+            </div>
+
+          {/* Modal: Aplicar tarifas padrão */}
+          <Dialog open={applyDefaultRatesModalOpen} onOpenChange={setApplyDefaultRatesModalOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Aplicar tarifas padrão</DialogTitle>
+                <DialogDescription>
+                  Revise as taxas abaixo e altere se necessário. Ao confirmar, todas as opções de parcelamento do ambiente selecionado serão atualizadas.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="overflow-auto max-h-[60vh]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Parcelas</TableHead>
+                      <TableHead>Taxa (%)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {modalRates.map((row, index) => (
+                      <TableRow key={row.installments}>
+                        <TableCell>{row.installments}x</TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step={0.01}
+                            min={0}
+                            value={row.rate_percentage}
+                            onChange={(e) => setModalRateAt(index, parseFloat(e.target.value) || 0)}
+                            className="w-24"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setApplyDefaultRatesModalOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleConfirmApplyRates} disabled={applyingRates}>
+                  {applyingRates ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Aplicando...
+                    </>
+                  ) : (
+                    'Confirmar'
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <InstallmentRatesTable
             rates={installmentRates}

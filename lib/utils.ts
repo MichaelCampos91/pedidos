@@ -42,6 +42,28 @@ export function formatCNPJ(cnpj: string): string {
   return cnpj
 }
 
+/**
+ * Máscara progressiva para CPF (11 dígitos) ou CNPJ (14 dígitos).
+ * CPF: xxx.xxx.xxx-xx | CNPJ: xx.xxx.xxx/xxxx-xx
+ */
+export function maskCPFOrCNPJ(value: string): string {
+  const cleaned = value.replace(/\D/g, '').slice(0, 14)
+  const len = cleaned.length
+
+  if (len <= 11) {
+    if (len <= 3) return cleaned
+    if (len <= 6) return `${cleaned.slice(0, 3)}.${cleaned.slice(3)}`
+    if (len <= 9) return `${cleaned.slice(0, 3)}.${cleaned.slice(3, 6)}.${cleaned.slice(6)}`
+    return `${cleaned.slice(0, 3)}.${cleaned.slice(3, 6)}.${cleaned.slice(6, 9)}-${cleaned.slice(9)}`
+  }
+
+  if (len <= 2) return cleaned
+  if (len <= 5) return `${cleaned.slice(0, 2)}.${cleaned.slice(2)}`
+  if (len <= 8) return `${cleaned.slice(0, 2)}.${cleaned.slice(2, 5)}.${cleaned.slice(5)}`
+  if (len <= 12) return `${cleaned.slice(0, 2)}.${cleaned.slice(2, 5)}.${cleaned.slice(5, 8)}/${cleaned.slice(8)}`
+  return `${cleaned.slice(0, 2)}.${cleaned.slice(2, 5)}.${cleaned.slice(5, 8)}/${cleaned.slice(8, 12)}-${cleaned.slice(12)}`
+}
+
 export function formatCurrency(value: number): string {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',

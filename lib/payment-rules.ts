@@ -1,5 +1,19 @@
 import { query } from './database'
+import { getSetting } from './settings'
 import type { IntegrationEnvironment } from './integrations-types'
+
+const MIN_INSTALLMENT_VALUE_KEY = 'min_installment_value'
+
+/**
+ * Retorna o valor mínimo por parcela (R$) configurado pelo admin.
+ * Se for 0 ou não estiver definido, a regra de parcela mínima não se aplica.
+ */
+export async function getMinInstallmentValue(): Promise<number> {
+  const value = await getSetting(MIN_INSTALLMENT_VALUE_KEY)
+  if (!value) return 0
+  const num = parseFloat(value)
+  return Number.isFinite(num) && num >= 0 ? num : 0
+}
 
 export interface PaymentSetting {
   id: number
@@ -15,6 +29,7 @@ export interface InstallmentRate {
   id: number
   installments: number
   rate_percentage: number
+  interest_free?: boolean
   source: 'manual' | 'pagarme'
   environment: IntegrationEnvironment | null
   last_synced_at?: Date | null
@@ -102,6 +117,7 @@ export async function getInstallmentRates(
       ...row,
       rate_percentage: parseFloat(row.rate_percentage) || 0,
       installments: parseInt(row.installments) || 0,
+      interest_free: row.interest_free === true,
     }))
   } catch (error) {
     console.error('[Payment Rules] Erro ao buscar taxas de parcelamento:', error)
@@ -130,6 +146,7 @@ export async function getInstallmentRate(
         ...row,
         rate_percentage: parseFloat(row.rate_percentage) || 0,
         installments: parseInt(row.installments) || 0,
+        interest_free: row.interest_free === true,
       }
     }
     return null
@@ -140,7 +157,9 @@ export async function getInstallmentRate(
 }
 
 /**
- * Calcula valor total com juros de parcelamento
+ * Calcula valor total com juros de parcelamento.
+ * Opção é sem juros só se: marcada "Sem Juros" (interest_free) e
+ * (não há parcela mínima ou valor da parcela >= parcela mínima).
  */
 export async function calculateInstallmentTotal(
   originalValue: number,
@@ -164,9 +183,24 @@ export async function calculateInstallmentTotal(
   }
 
   const rateData = await getInstallmentRate(installments, environment)
+  const minInstallment = await getMinInstallmentValue()
+  const installmentValueIfNoInterest = originalValue / installments
+
+  const useZeroInterest =
+    rateData?.interest_free === true &&
+    (minInstallment === 0 || installmentValueIfNoInterest >= minInstallment)
+
+  if (useZeroInterest) {
+    return {
+      rate: 0,
+      totalWithInterest: originalValue,
+      installmentValue: installmentValueIfNoInterest,
+      interestAmount: 0,
+      hasInterest: false,
+    }
+  }
 
   if (!rateData) {
-    // Se não encontrou taxa, retorna sem juros
     return {
       rate: 0,
       totalWithInterest: originalValue,
@@ -176,7 +210,7 @@ export async function calculateInstallmentTotal(
     }
   }
 
-  const rate = rateData.rate_percentage // Já convertido para número em getInstallmentRate
+  const rate = rateData.rate_percentage
   const totalWithInterest = originalValue * (1 + rate / 100)
   const installmentValue = totalWithInterest / installments
   const interestAmount = totalWithInterest - originalValue
@@ -191,7 +225,9 @@ export async function calculateInstallmentTotal(
 }
 
 /**
- * Calcula todas as opções de parcelamento com juros
+ * Calcula todas as opções de parcelamento com juros.
+ * Opção é sem juros só se: marcada "Sem Juros" (interest_free) e
+ * (não há parcela mínima ou valor da parcela >= parcela mínima).
  */
 export async function calculateAllInstallments(
   originalValue: number,
@@ -206,11 +242,18 @@ export async function calculateAllInstallments(
   hasInterest: boolean
 }>> {
   const rates = await getInstallmentRates(environment)
+  const minInstallment = await getMinInstallmentValue()
   const results = []
 
   for (let i = 1; i <= maxInstallments; i++) {
-    const rateData = rates.find(r => r.installments === i)
-    const rate = rateData ? rateData.rate_percentage : 0 // Já convertido para número em getInstallmentRates
+    const rateRow = rates.find(r => r.installments === i)
+    const valuePerInstallment = originalValue / i
+    const useZeroInterest =
+      rateRow?.interest_free === true &&
+      (minInstallment === 0 || valuePerInstallment >= minInstallment)
+    const rate = useZeroInterest
+      ? 0
+      : (rateRow?.rate_percentage ?? 0)
     const totalWithInterest = originalValue * (1 + rate / 100)
     const installmentValue = totalWithInterest / i
     const interestAmount = totalWithInterest - originalValue
@@ -235,6 +278,24 @@ export async function hasPixDiscount(): Promise<boolean> {
   const pixSetting = await getPixDiscount()
   return pixSetting !== null
 }
+
+/**
+ * Tarifas padrão para o modal "Aplicar Tarifas Padrão" (referência; editáveis pelo admin antes de confirmar).
+ */
+export const DEFAULT_INSTALLMENT_RATES: Array<{ installments: number; rate_percentage: number }> = [
+  { installments: 1, rate_percentage: 4.37 },
+  { installments: 2, rate_percentage: 6.28 },
+  { installments: 3, rate_percentage: 7.68 },
+  { installments: 4, rate_percentage: 9.08 },
+  { installments: 5, rate_percentage: 10.48 },
+  { installments: 6, rate_percentage: 11.88 },
+  { installments: 7, rate_percentage: 13.57 },
+  { installments: 8, rate_percentage: 14.97 },
+  { installments: 9, rate_percentage: 16.37 },
+  { installments: 10, rate_percentage: 17.77 },
+  { installments: 11, rate_percentage: 19.17 },
+  { installments: 12, rate_percentage: 20.57 },
+]
 
 /**
  * Recalcula o total do pedido a partir dos itens e do frete (fonte confiável no backend).

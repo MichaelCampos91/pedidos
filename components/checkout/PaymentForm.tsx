@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, CreditCard, QrCode, Copy, Check, Clock, AlertCircle, CheckCircle2, XCircle, MessageCircle, Percent, Gift, MapPin } from "lucide-react"
-import { formatCurrency, formatCPF, formatCNPJ, maskCEP, unmaskCEP } from "@/lib/utils"
+import { Loader2, CreditCard, QrCode, Copy, Check, Clock, AlertCircle, CheckCircle2, XCircle, MessageCircle, Percent, Gift, MapPin, User, FileText, Calendar, Lock } from "lucide-react"
+import { formatCurrency, formatCPF, formatCNPJ, maskCPFOrCNPJ, maskCEP, unmaskCEP } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 import { cepApi } from "@/lib/api"
 
@@ -81,14 +81,8 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
   const [pixDiscount, setPixDiscount] = useState<{ discount: number; finalValue: number } | null>(null)
   const [installmentRates, setInstallmentRates] = useState<Array<{ installments: number; rate: number; totalWithInterest: number; installmentValue: number; hasInterest: boolean }>>([])
 
-  // Função para formatar CPF/CNPJ dinamicamente
-  const formatDocument = (value: string): string => {
-    const cleaned = value.replace(/\D/g, '')
-    if (cleaned.length <= 11) {
-      return formatCPF(cleaned)
-    }
-    return formatCNPJ(cleaned)
-  }
+  // Máscara progressiva CPF/CNPJ (usa maskCPFOrCNPJ de utils)
+  const formatDocument = (value: string): string => maskCPFOrCNPJ(value)
 
   // Função para buscar CEP
   const handleCepSearch = async () => {
@@ -126,15 +120,15 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
   // Validar formulário de cartão em tempo real
   useEffect(() => {
     const cardNumber = cardData.card_number.replace(/\s/g, '')
-    const isValidCardNumber = cardNumber.length >= 13 && cardNumber.length <= 19
+    const isValidCardNumber = cardNumber.length === 16
     const isValidHolderName = cardData.card_holder_name.trim().length >= 3
     const isValidExpiration = /^\d{2}\/\d{2}$/.test(cardData.card_expiration_date)
     const isValidCvv = /^\d{3,4}$/.test(cardData.card_cvv)
 
-    // Validar número do cartão
+    // Validar número do cartão (exatamente 16 dígitos)
     let cardNumberError = ''
     if (cardData.card_number && !isValidCardNumber) {
-      cardNumberError = cardNumber.length < 13 ? 'Número do cartão deve ter pelo menos 13 dígitos' : 'Número do cartão inválido'
+      cardNumberError = cardNumber.length < 16 ? 'Número do cartão deve ter 16 dígitos' : 'Número do cartão deve ter 16 dígitos'
     }
 
     // Validar nome
@@ -257,10 +251,18 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
           if (ratesResponse.ok) {
             const ratesData = await ratesResponse.json()
             const rates = ratesData.rates || []
+            const minInstallmentValue = typeof ratesData.min_installment_value === 'number'
+              ? ratesData.min_installment_value
+              : parseFloat(ratesData.min_installment_value) || 0
             calculatedRates = Array.from({ length: 12 }, (_, i) => {
               const installments = i + 1
+              const valuePerInstallment = total / installments
               const rateData = rates.find((r: any) => r.installments === installments)
-              const rate = rateData ? parseFloat(rateData.rate_percentage) : 0
+              const baseRate = rateData ? parseFloat(rateData.rate_percentage) : 0
+              const useZeroInterest =
+                rateData?.interest_free === true &&
+                (minInstallmentValue === 0 || valuePerInstallment >= minInstallmentValue)
+              const rate = useZeroInterest ? 0 : baseRate
               const totalWithInterest = total * (1 + rate / 100)
               const installmentValue = totalWithInterest / installments
               return {
@@ -1101,56 +1103,152 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
     )
   }
 
+  const cardNumberDigits = cardData.card_number.replace(/\s/g, '')
+  const isCardNumberComplete = cardNumberDigits.length === 16
+  const isHolderNameComplete = cardData.card_holder_name.trim().length >= 3
+  const docDigits = cardHolderDocument.replace(/\D/g, '')
+  const isDocumentComplete = docDigits.length === 11 || docDigits.length === 14
+  const expirationMatch = /^\d{2}\/\d{2}$/.test(cardData.card_expiration_date)
+  let isExpirationComplete = false
+  if (cardData.card_expiration_date && expirationMatch) {
+    const [month, year] = cardData.card_expiration_date.split('/')
+    const monthNum = parseInt(month, 10)
+    const yearNum = parseInt('20' + year, 10)
+    const expirationDate = new Date(yearNum, monthNum - 1)
+    const now = new Date()
+    if (monthNum >= 1 && monthNum <= 12 && expirationDate >= now) isExpirationComplete = true
+  }
+  const isCvvComplete = /^\d{3,4}$/.test(cardData.card_cvv)
+
   return (
     <Card>
       <CardContent className="pt-6">
         <div className="space-y-4">
-          <div className="text-center">
-            <p className="font-medium mb-2">Pagamento via Cartão</p>
-            <p className="text-sm text-muted-foreground">
-              Total: {formatCurrency(total)}
-            </p>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <CreditCard className="h-5 w-5 text-muted-foreground" />
+            <p className="font-medium">Pagamento via Cartão</p>
           </div>
 
 
-          <div className="space-y-2">
-            <Label htmlFor="card_number">Número do Cartão</Label>
-            <Input
-              id="card_number"
-              placeholder="0000 0000 0000 0000"
-              value={cardData.card_number}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="card_number">Número do Cartão</Label>
+                {isCardNumberComplete && (
+                  <div className="field-ok-once flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500/20" aria-hidden>
+                    <Check className="h-3 w-3 text-green-600" />
+                  </div>
+                )}
+              </div>
+              <Input
+                id="card_number"
+                placeholder="0000 0000 0000 0000"
+                value={cardData.card_number}
               onChange={(e) => {
-                let value = e.target.value.replace(/\D/g, '')
-                // Adicionar espaços a cada 4 dígitos
+                let value = e.target.value.replace(/\D/g, '').slice(0, 16)
                 value = value.replace(/(\d{4})(?=\d)/g, '$1 ')
                 setCardData({ ...cardData, card_number: value })
               }}
               maxLength={19}
-              className={fieldErrors.card_number ? 'border-destructive' : ''}
-            />
-            {fieldErrors.card_number && (
-              <p className="text-sm text-destructive">{fieldErrors.card_number}</p>
-            )}
+                className={fieldErrors.card_number ? 'border-destructive' : ''}
+              />
+              {fieldErrors.card_number && (
+                <p className="text-sm text-destructive">{fieldErrors.card_number}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <User className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="card_holder_name">Nome no Cartão</Label>
+                {isHolderNameComplete && (
+                  <div className="field-ok-once flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500/20" aria-hidden>
+                    <Check className="h-3 w-3 text-green-600" />
+                  </div>
+                )}
+              </div>
+              <Input
+                id="card_holder_name"
+                placeholder="NOME COMPLETO"
+                value={cardData.card_holder_name}
+                onChange={(e) =>
+                  setCardData({ ...cardData, card_holder_name: e.target.value.toUpperCase() })
+                }
+                className={fieldErrors.card_holder_name ? 'border-destructive' : ''}
+              />
+              {fieldErrors.card_holder_name && (
+                <p className="text-sm text-destructive">{fieldErrors.card_holder_name}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="card_expiration_date">Validade</Label>
+                {isExpirationComplete && (
+                  <div className="field-ok-once flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500/20" aria-hidden>
+                    <Check className="h-3 w-3 text-green-600" />
+                  </div>
+                )}
+              </div>
+              <Input
+                id="card_expiration_date"
+                placeholder="MM/AA"
+                value={cardData.card_expiration_date}
+                onChange={(e) => {
+                  let value = e.target.value.replace(/\D/g, '')
+                  if (value.length >= 2) {
+                    value = value.substring(0, 2) + '/' + value.substring(2, 4)
+                  }
+                  setCardData({ ...cardData, card_expiration_date: value })
+                }}
+                maxLength={5}
+                className={fieldErrors.card_expiration_date ? 'border-destructive' : ''}
+              />
+              {fieldErrors.card_expiration_date && (
+                <p className="text-sm text-destructive">{fieldErrors.card_expiration_date}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Lock className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="card_cvv">CVV</Label>
+                {isCvvComplete && (
+                  <div className="field-ok-once flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500/20" aria-hidden>
+                    <Check className="h-3 w-3 text-green-600" />
+                  </div>
+                )}
+              </div>
+              <Input
+                id="card_cvv"
+                placeholder="123"
+                type="password"
+                value={cardData.card_cvv}
+                onChange={(e) =>
+                  setCardData({ ...cardData, card_cvv: e.target.value.replace(/\D/g, '') })
+                }
+                maxLength={4}
+                className={fieldErrors.card_cvv ? 'border-destructive' : ''}
+              />
+              {fieldErrors.card_cvv && (
+                <p className="text-sm text-destructive">{fieldErrors.card_cvv}</p>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="card_holder_name">Nome no Cartão</Label>
-            <Input
-              id="card_holder_name"
-              placeholder="NOME COMPLETO"
-              value={cardData.card_holder_name}
-              onChange={(e) =>
-                setCardData({ ...cardData, card_holder_name: e.target.value.toUpperCase() })
-              }
-              className={fieldErrors.card_holder_name ? 'border-destructive' : ''}
-            />
-            {fieldErrors.card_holder_name && (
-              <p className="text-sm text-destructive">{fieldErrors.card_holder_name}</p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="card_holder_document">Documento do titular do cartão</Label>
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <Label htmlFor="card_holder_document">Documento do titular do cartão</Label>
+              {isDocumentComplete && (
+                <div className="field-ok-once flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500/20" aria-hidden>
+                  <Check className="h-3 w-3 text-green-600" />
+                </div>
+              )}
+            </div>
             <Input
               id="card_holder_document"
               placeholder="CPF ou CNPJ"
@@ -1158,7 +1256,6 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
               onChange={(e) => {
                 const formatted = formatDocument(e.target.value)
                 setCardHolderDocument(formatted)
-                // Limpar erro ao digitar
                 if (fieldErrors.card_holder_document) {
                   setFieldErrors((prev) => ({ ...prev, card_holder_document: '' }))
                 }
@@ -1170,19 +1267,16 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
               <p className="text-sm text-destructive">{fieldErrors.card_holder_document}</p>
             )}
             <p className="text-xs text-muted-foreground">
-              CPF ou CNPJ do titular do cartão (pode ser diferente do cliente)
+              CPF ou CNPJ do titular do cartão
             </p>
           </div>
 
           {/* Seção de Endereço de Cobrança */}
           <div className="space-y-4 pt-4 border-t">
             <div className="flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold">Endereço de Cobrança</h3>
+              <MapPin className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium leading-none">Endereço de Cobrança</span>
             </div>
-            <p className="text-sm text-muted-foreground">
-              O endereço de cobrança ajuda na aprovação do pagamento
-            </p>
 
             <div className="flex items-center space-x-2">
               <input
@@ -1330,46 +1424,6 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="card_expiration_date">Validade</Label>
-              <Input
-                id="card_expiration_date"
-                placeholder="MM/AA"
-                value={cardData.card_expiration_date}
-                onChange={(e) => {
-                  let value = e.target.value.replace(/\D/g, '')
-                  if (value.length >= 2) {
-                    value = value.substring(0, 2) + '/' + value.substring(2, 4)
-                  }
-                  setCardData({ ...cardData, card_expiration_date: value })
-                }}
-                maxLength={5}
-                className={fieldErrors.card_expiration_date ? 'border-destructive' : ''}
-              />
-              {fieldErrors.card_expiration_date && (
-                <p className="text-sm text-destructive">{fieldErrors.card_expiration_date}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="card_cvv">CVV</Label>
-              <Input
-                id="card_cvv"
-                placeholder="123"
-                type="password"
-                value={cardData.card_cvv}
-                onChange={(e) =>
-                  setCardData({ ...cardData, card_cvv: e.target.value.replace(/\D/g, '') })
-                }
-                maxLength={4}
-                className={fieldErrors.card_cvv ? 'border-destructive' : ''}
-              />
-              {fieldErrors.card_cvv && (
-                <p className="text-sm text-destructive">{fieldErrors.card_cvv}</p>
-              )}
-            </div>
           </div>
 
           <div className="space-y-2">

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { CheckoutSteps } from "@/components/checkout/CheckoutSteps"
 import { PaymentForm } from "@/components/checkout/PaymentForm"
 import { Collapsible, CollapsibleContent, CollapsibleHeader } from "@/components/ui/collapsible"
-import { Loader2, AlertCircle, FileText, CreditCard, CheckCircle2, XCircle, Lock, Truck, MessageCircle, Gift } from "lucide-react"
+import { Loader2, AlertCircle, FileText, CreditCard, CheckCircle2, XCircle, Lock, Truck, MessageCircle, Gift, DollarSign, ArrowRight } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { calculateDeliveryDate, formatDeliveryDate } from "@/lib/shipping-utils"
@@ -17,7 +17,7 @@ import { formatDeliveryTime } from "@/lib/melhor-envio-utils"
 // Steps do checkout
 const STEPS = [
   { id: 1, name: "Revisão", description: "Revise seu pedido", icon: FileText },
-  { id: 2, name: "Pagamento", description: "Escolha o pagamento", icon: CreditCard },
+  { id: 2, name: "Pagamento", description: "Escolha o pagamento", icon: DollarSign },
   { id: 3, name: "Concluído", description: "Pedido finalizado", icon: CheckCircle2 },
 ]
 
@@ -59,6 +59,7 @@ export default function CheckoutPage() {
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | 'failed' | null>(null)
   const [itemsExpanded, setItemsExpanded] = useState(false)
   const [addressExpanded, setAddressExpanded] = useState(false)
+  const [shippingExpanded, setShippingExpanded] = useState(false)
 
   useEffect(() => {
     loadCheckoutData()
@@ -338,68 +339,74 @@ export default function CheckoutPage() {
               </Card>
             )}
 
-            {/* Seção Frete */}
+            {/* Collapsible Frete */}
             {order.shipping_method && (
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <Truck className="h-5 w-5 text-primary" />
-                        <p className="font-semibold text-lg">{order.shipping_company_name || order.shipping_method}</p>
-                        <Badge variant="outline">{order.shipping_method}</Badge>
-                        {totalShipping === 0 && (
-                          <Badge
-                            variant="outline"
-                            className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800"
-                          >
-                            <Gift className="h-3 w-3 mr-1" />
-                            Frete Grátis
-                          </Badge>
+                <Collapsible open={shippingExpanded} onOpenChange={setShippingExpanded}>
+                  <CollapsibleHeader isOpen={shippingExpanded} className="border-0">
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold text-lg">Frete</h3>
+                          {totalShipping === 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800"
+                            >
+                              <Gift className="h-3 w-3 mr-1" />
+                              Grátis
+                            </Badge>
+                          ) : (
+                            <span className="font-medium">{formatCurrency(totalShipping)}</span>
+                          )}
+                        </div>
+                        {!shippingExpanded && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Prazo: {order.shipping_delivery_time ? formatDeliveryTime(order.shipping_delivery_time) : 'A calcular'}
+                          </p>
                         )}
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        Prazo: {order.shipping_delivery_time ? formatDeliveryTime(order.shipping_delivery_time) : 'A calcular'}
-                      </p>
+                    </div>
+                  </CollapsibleHeader>
+                  <CollapsibleContent className="px-4 pb-4">
+                    <div className="pt-2 space-y-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Truck className="h-5 w-5 text-primary" />
+                        <p className="font-medium">{order.shipping_company_name || order.shipping_method}</p>
+                        <Badge variant="outline">{order.shipping_method}</Badge>
+                      </div>
                       {deliveryDate && (
-                        <p className="text-sm font-medium text-primary mt-1">
-                          Data prevista: {formatDeliveryDate(deliveryDate)}
+                        <p className="text-sm text-muted-foreground">
+                          Data de entrega estimada: {formatDeliveryDate(deliveryDate)}
+                        </p>
+                      )}
+                      {order.shipping_delivery_time && (
+                        <p className="text-sm text-muted-foreground">
+                          Prazo: {formatDeliveryTime(order.shipping_delivery_time)}
+                        </p>
+                      )}
+                      {shippingData.originalPrice !== undefined && totalShipping === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          <span className="line-through">{formatCurrency(shippingData.originalPrice)}</span>
+                          {' '}— <span className="font-bold text-green-600">{formatCurrency(0)} Você tem frete grátis!</span>
                         </p>
                       )}
                     </div>
-                    <div className="text-right">
-                      {shippingData.originalPrice !== undefined && totalShipping === 0 ? (
-                        <div>
-                          <p className="text-sm text-muted-foreground line-through">
-                            {formatCurrency(shippingData.originalPrice)}
-                          </p>
-                          <p className="text-2xl font-bold text-green-600">
-                            {formatCurrency(totalShipping)}
-                          </p>
-                          <p className="text-sm text-green-600 font-medium mt-1">
-                            Você tem frete grátis!
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="text-2xl font-bold">
-                            {formatCurrency(totalShipping)}
-                          </p>
-                          {totalShipping === 0 && (
-                            <p className="text-sm text-green-600 font-medium mt-1">
-                              Você tem frete grátis!
-                            </p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
+                  </CollapsibleContent>
+                </Collapsible>
               </Card>
             )}
 
             {/* Botões */}
             <div className="flex flex-col sm:flex-row gap-3 mt-6">
+              <Button
+                onClick={handleGoToPayment}
+                size="lg"
+                className="flex-1 min-h-14 py-4 text-lg font-semibold sm:min-h-16 sm:py-5 sm:text-xl"
+              >
+                Ir para pagamento
+                <ArrowRight className="ml-2 h-5 w-5 sm:h-6 sm:w-6" />
+              </Button>
               <Button
                 variant="outline"
                 onClick={handleRequestChange}
@@ -407,12 +414,6 @@ export default function CheckoutPage() {
               >
                 <MessageCircle className="h-4 w-4 mr-2" />
                 Solicitar Alteração
-              </Button>
-              <Button
-                onClick={handleGoToPayment}
-                className="flex-1"
-              >
-                Ir para pagamento
               </Button>
             </div>
           </div>

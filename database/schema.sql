@@ -246,6 +246,7 @@ CREATE TABLE IF NOT EXISTS installment_rates (
     id BIGSERIAL PRIMARY KEY,
     installments INTEGER NOT NULL,
     rate_percentage DECIMAL(5, 2) NOT NULL,
+    interest_free BOOLEAN NOT NULL DEFAULT false,
     source VARCHAR(20) DEFAULT 'manual', -- 'manual', 'pagarme'
     environment VARCHAR(20), -- 'sandbox', 'production'
     last_synced_at TIMESTAMP,

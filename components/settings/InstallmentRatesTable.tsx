@@ -14,6 +14,7 @@ interface InstallmentRate {
   id: number
   installments: number
   rate_percentage: number
+  interest_free?: boolean
   source: 'manual' | 'pagarme'
   environment: IntegrationEnvironment | null
 }
@@ -34,6 +35,7 @@ export function InstallmentRatesTable({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState<string>('')
   const [loading, setLoading] = useState(false)
+  const [savingInterestFree, setSavingInterestFree] = useState(false)
   const [importing, setImporting] = useState(false)
 
   // Função helper para garantir que rate_percentage seja sempre um número
@@ -82,6 +84,21 @@ export function InstallmentRatesTable({
     setEditValue('')
   }
 
+  const handleToggleInterestFree = async (rate: InstallmentRate) => {
+    setSavingInterestFree(true)
+    try {
+      const updatedRates = rates.map((r) =>
+        r.id === rate.id ? { ...r, interest_free: !(r.interest_free === true) } : r
+      )
+      await onSave(updatedRates)
+    } catch (error) {
+      console.error('Erro ao atualizar Sem Juros:', error)
+      toast.error('Erro ao atualizar opção Sem Juros')
+    } finally {
+      setSavingInterestFree(false)
+    }
+  }
+
   const handleImport = async () => {
     if (!onImport) return
     setImporting(true)
@@ -118,7 +135,7 @@ export function InstallmentRatesTable({
         </div>
       )}
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="border rounded-lg max-h-[350px] overflow-y-auto overflow-x-hidden">
         <Table>
           <TableHeader>
             <TableRow>
@@ -126,6 +143,7 @@ export function InstallmentRatesTable({
               <TableHead>Taxa (%)</TableHead>
               <TableHead>Valor Total</TableHead>
               <TableHead>Valor da Parcela</TableHead>
+              <TableHead>Sem Juros</TableHead>
               <TableHead>Fonte</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
@@ -166,6 +184,16 @@ export function InstallmentRatesTable({
                   </TableCell>
                   <TableCell>{formatCurrency(totalWithInterest)}</TableCell>
                   <TableCell>{formatCurrency(installmentValue)}</TableCell>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      checked={rate.interest_free === true}
+                      onChange={() => handleToggleInterestFree(rate)}
+                      disabled={savingInterestFree}
+                      className="rounded"
+                      title="Marcar para permitir esta opção sem juros (respeitando parcela mínima)"
+                    />
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">
                       {rate.source === 'manual' ? 'Manual' : 'Pagar.me'}

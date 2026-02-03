@@ -23,19 +23,17 @@ export function CheckoutSteps({ currentStep, steps }: CheckoutStepsProps) {
 
   return (
     <div className="w-full">
-      <div className="flex items-start">
+      {/* Linha 1: ícones e traços */}
+      <div className="flex items-center">
         {steps.map((step, index) => {
-          // Usar índice do array + 1 para comparação mais confiável
           const stepNumber = index + 1
           const isActive = currentStep === stepNumber
           const isCompleted = currentStep > stepNumber
-          
-          // Fallback para ícone padrão se inválido
-          const Icon = (step.icon && typeof step.icon === 'function') ? step.icon : FileText
+          const Icon = step.icon ?? FileText
 
           return (
             <React.Fragment key={step.id || index}>
-              <div className="flex flex-col items-center flex-1 min-w-0">
+              <div className="flex flex-col items-center flex-1 min-w-0 shrink-0">
                 <div
                   className={cn(
                     "flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors shrink-0",
@@ -52,30 +50,49 @@ export function CheckoutSteps({ currentStep, steps }: CheckoutStepsProps) {
                     <Icon className="h-5 w-5" />
                   )}
                 </div>
-                <div className="mt-2 text-center w-full px-1">
-                  <p
-                    className={cn(
-                      "text-sm font-medium break-words",
-                      isActive ? "text-foreground" : "text-muted-foreground"
-                    )}
-                  >
-                    {step.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1 break-words">
-                    {step.description}
-                  </p>
-                </div>
               </div>
               {index < steps.length - 1 && (
                 <div
                   className={cn(
-                    "h-0.5 mt-5 transition-colors shrink-0",
+                    "h-0.5 transition-colors shrink-0",
                     isCompleted ? "bg-primary" : "bg-muted"
                   )}
-                  style={{ 
-                    flex: '1 1 0%',
-                    minWidth: '1rem'
+                  style={{
+                    flex: "1 1 0%",
+                    minWidth: "1rem",
                   }}
+                />
+              )}
+            </React.Fragment>
+          )
+        })}
+      </div>
+
+      {/* Linha 2: títulos e descrições (mesma estrutura da linha 1 para alinhar com os ícones) */}
+      <div className="flex items-start mt-2">
+        {steps.map((step, index) => {
+          const stepNumber = index + 1
+          const isActive = currentStep === stepNumber
+
+          return (
+            <React.Fragment key={step.id ?? index}>
+              <div className="flex-1 min-w-0 text-center px-1">
+                <p
+                  className={cn(
+                    "text-sm font-medium break-words",
+                    isActive ? "text-foreground" : "text-muted-foreground"
+                  )}
+                >
+                  {step.name}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 break-words">
+                  {step.description}
+                </p>
+              </div>
+              {index < steps.length - 1 && (
+                <div
+                  style={{ flex: "1 1 0%", minWidth: "1rem" }}
+                  aria-hidden="true"
                 />
               )}
             </React.Fragment>

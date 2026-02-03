@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query } from '@/lib/database'
+import { getSetting } from '@/lib/settings'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * GET público: retorna taxas de parcelamento para o checkout.
- * Usado pelo PaymentForm sem autenticação (cliente paga via link).
+ * GET público (não exige autenticação): retorna taxas de parcelamento e parcela mínima para o checkout.
+ * Usado pelo PaymentForm no link de pagamento; o cliente acessa sem login.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -25,9 +26,15 @@ export async function GET(request: NextRequest) {
       ...row,
       rate_percentage: parseFloat(row.rate_percentage) || 0,
       installments: parseInt(row.installments) || 0,
+      interest_free: row.interest_free === true,
     }))
 
-    return NextResponse.json({ rates })
+    const minValueRaw = await getSetting('min_installment_value')
+    const min_installment_value = minValueRaw != null && minValueRaw !== ''
+      ? (() => { const n = parseFloat(minValueRaw); return Number.isFinite(n) && n >= 0 ? n : 0 })()
+      : 0
+
+    return NextResponse.json({ rates, min_installment_value })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar taxas de parcelamento'
     console.error('[Checkout Installment Rates] Erro:', error)
