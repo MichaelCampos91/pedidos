@@ -44,6 +44,10 @@ interface IntegrationCardProps {
   isValidating?: string | null
   isSaving?: boolean
   icon?: React.ReactNode
+  /** Quando true, renderiza apenas o conteúdo (sem Card), para uso dentro de seções (ex.: aba Bling). */
+  asSection?: boolean
+  /** Quando definido, exibe apenas o TokenRow do ambiente indicado (ex.: Bling só usa produção). */
+  singleEnvironment?: 'production' | 'sandbox'
 }
 
 export function IntegrationCard({
@@ -59,7 +63,9 @@ export function IntegrationCard({
   onTokensUpdated,
   isValidating,
   isSaving: externalSaving,
-  icon
+  icon,
+  asSection = false,
+  singleEnvironment
 }: IntegrationCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formEnvironment, setFormEnvironment] = useState<IntegrationEnvironment>('production')
@@ -365,85 +371,127 @@ export function IntegrationCard({
   const availableEnvironments = getAvailableEnvironments()
   const currentActiveEnv = activeEnvironment || getDefaultEnvironment()
 
+  const headerContent = (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      {!asSection && (
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {icon || <Link2 className="h-5 w-5 text-primary shrink-0" />}
+          <div className="flex-1 min-w-0">
+            <CardTitle className="text-lg mb-2">{providerLabel}</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              {isBling
+                ? 'Conecte com Bling para enviar pedidos aprovados. Configure Client ID e Client Secret (Informações do app no Bling) e clique em Conectar com Bling.'
+                : hasAnyToken
+                  ? hasBothTokens
+                    ? 'Ambos os ambientes configurados'
+                    : sandboxToken
+                      ? 'Apenas sandbox configurado'
+                      : 'Apenas produção configurado'
+                  : 'Nenhum token configurado'}
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="flex items-center gap-3 shrink-0">
+        {isBling && (
+          <Button
+            onClick={handleConnectBling}
+            disabled={connectingBling || saving}
+            size="sm"
+            className="shrink-0"
+          >
+            {connectingBling ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Redirecionando...
+              </>
+            ) : (
+              <>
+                <Link2 className="h-4 w-4 mr-2" />
+                Conectar com Bling
+              </>
+            )}
+          </Button>
+        )}
+        {hasAnyToken && !loadingActiveEnv && (
+          <Select
+            value={currentActiveEnv}
+            onValueChange={(value) => handleEnvironmentChange(value as IntegrationEnvironment)}
+            disabled={availableEnvironments.length === 0}
+          >
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {availableEnvironments.map((env) => (
+                <SelectItem key={env} value={env}>
+                  {env === 'sandbox' ? 'Sandbox' : 'Produção'}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {hasAnyToken && (
+          <div className="flex items-center gap-1.5">
+            {sandboxToken?.last_validation_status === 'valid' && (
+              <div className="h-2 w-2 rounded-full bg-green-500" title="Sandbox válido" />
+            )}
+            {productionToken?.last_validation_status === 'valid' && (
+              <div className="h-2 w-2 rounded-full bg-green-500" title="Produção válido" />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  const tokenGrid = singleEnvironment ? (
+    <div className="gap-4">
+      <TokenRow
+        token={singleEnvironment === 'production' ? productionToken : sandboxToken}
+        environment={singleEnvironment}
+      />
+    </div>
+  ) : (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <TokenRow token={sandboxToken} environment="sandbox" />
+      <TokenRow token={productionToken} environment="production" />
+    </div>
+  )
+
+  if (asSection) {
+    return (
+      <>
+        <div className="space-y-4">
+          {headerContent}
+          {tokenGrid}
+        </div>
+        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <TokenForm
+              provider={provider}
+              token={editingToken}
+              onSave={handleSave}
+              onCancel={() => {
+                setIsModalOpen(false)
+                setEditingToken(null)
+              }}
+              isSaving={saving}
+            />
+          </DialogContent>
+        </Dialog>
+      </>
+    )
+  }
+
   return (
     <>
       <Card>
         <CardHeader>
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3 flex-1">
-              {icon || <Link2 className="h-5 w-5 text-primary" />}
-              <div className="flex-1">
-                <CardTitle className="text-lg mb-2">{providerLabel}</CardTitle>
-                <CardDescription className="mt-1">
-                  {isBling
-                    ? 'Conecte com Bling para enviar pedidos aprovados. Configure Client ID e Client Secret (Informações do app no Bling) e clique em Conectar com Bling.'
-                    : hasAnyToken
-                      ? hasBothTokens
-                        ? 'Ambos os ambientes configurados'
-                        : sandboxToken
-                          ? 'Apenas sandbox configurado'
-                          : 'Apenas produção configurado'
-                      : 'Nenhum token configurado'}
-                </CardDescription>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {isBling && (
-                <Button
-                  onClick={handleConnectBling}
-                  disabled={connectingBling || saving}
-                  size="sm"
-                  className="shrink-0"
-                >
-                  {connectingBling ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Redirecionando...
-                    </>
-                  ) : (
-                    <>
-                      <Link2 className="h-4 w-4 mr-2" />
-                      Conectar com Bling
-                    </>
-                  )}
-                </Button>
-              )}
-              {hasAnyToken && !loadingActiveEnv && (
-                <Select
-                  value={currentActiveEnv}
-                  onValueChange={(value) => handleEnvironmentChange(value as IntegrationEnvironment)}
-                  disabled={availableEnvironments.length === 0}
-                >
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableEnvironments.map((env) => (
-                      <SelectItem key={env} value={env}>
-                        {env === 'sandbox' ? 'Sandbox' : 'Produção'}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              {hasAnyToken && (
-                <div className="flex items-center gap-1.5">
-                  {sandboxToken?.last_validation_status === 'valid' && (
-                    <div className="h-2 w-2 rounded-full bg-green-500" title="Sandbox válido" />
-                  )}
-                  {productionToken?.last_validation_status === 'valid' && (
-                    <div className="h-2 w-2 rounded-full bg-green-500" title="Produção válido" />
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          {headerContent}
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <TokenRow token={sandboxToken} environment="sandbox" />
-            <TokenRow token={productionToken} environment="production" />
-          </div>
+          {tokenGrid}
         </CardContent>
       </Card>
 

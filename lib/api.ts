@@ -157,6 +157,45 @@ export const blingApi = {
       method: 'POST',
       body: { sinceDate },
     }),
+  fetchContactsForImport: () =>
+    request<{ success: boolean; count: number; contacts: Array<{
+      id: number
+      nome: string
+      numeroDocumento: string
+      email?: string | null
+      celular?: string | null
+      telefone?: string | null
+      endereco?: {
+        endereco?: string
+        numero?: string
+        complemento?: string
+        bairro?: string
+        municipio?: string
+        uf?: string
+        cep?: string
+      } | null
+    }> }>('/bling/contacts/import', { method: 'GET' }),
+  confirmContactsImport: (contacts: Array<{
+    id: number
+    nome: string
+    numeroDocumento: string
+    email?: string | null
+    celular?: string | null
+    telefone?: string | null
+    endereco?: {
+      endereco?: string
+      numero?: string
+      complemento?: string
+      bairro?: string
+      municipio?: string
+      uf?: string
+      cep?: string
+    } | null
+  }>) =>
+    request<{ success: boolean; importedCount: number; updatedCount: number; skippedCount: number; errors?: string[] }>('/bling/contacts/import', {
+      method: 'POST',
+      body: { contacts },
+    }),
 }
 
 // Metrics

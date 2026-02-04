@@ -91,6 +91,8 @@ export interface OrderForBling {
   client_email?: string | null
   client_whatsapp?: string | null
   client_phone?: string | null
+  /** ID do contato no Bling (se o cliente foi importado do Bling). */
+  client_bling_contact_id?: number | null
   address?: {
     street: string
     number?: string | null
@@ -252,6 +254,201 @@ function getContactDocumentDigits(contact: Record<string, unknown>): string {
     (contact.numero_documento as string) ??
     ''
   return String(doc).replace(/\D/g, '')
+}
+
+/**
+ * Extrai e-mail do contato Bling. A API pode retornar em nível raiz, em tiposContato ou em pessoaFisica.
+ */
+function getContactEmail(contact: Record<string, unknown>): string | null {
+  const fromTop = contact.email
+  if (fromTop != null && typeof fromTop === 'string') {
+    const s = fromTop.trim()
+    if (s && s.includes('@')) return s
+  }
+
+  const tiposContato = contact.tiposContato ?? contact.tipos_contato
+  if (Array.isArray(tiposContato)) {
+    for (const item of tiposContato) {
+      if (item && typeof item === 'object') {
+        const t = item as Record<string, unknown>
+        const tipo = String(t.tipo ?? t.descricao ?? '').toLowerCase()
+        if (tipo === 'email' || tipo === 'e-mail') {
+          const valor = t.valor ?? t.contato ?? t.descricao
+          if (valor != null && typeof valor === 'string') {
+            const s = valor.trim()
+            if (s && s.includes('@')) return s
+          }
+        }
+      }
+    }
+  }
+
+  const pf = contact.pessoaFisica ?? contact.pessoa_fisica
+  if (pf && typeof pf === 'object') {
+    const email = (pf as Record<string, unknown>).email
+    if (email != null && typeof email === 'string') {
+      const s = email.trim()
+      if (s && s.includes('@')) return s
+    }
+  }
+
+  return null
+}
+
+/**
+ * Tipo para contato do Bling usado na importação.
+ */
+export interface BlingContactForImport {
+  id: number
+  nome: string
+  numeroDocumento: string
+  email?: string | null
+  celular?: string | null
+  telefone?: string | null
+  endereco?: {
+    endereco?: string
+    numero?: string
+    complemento?: string
+    bairro?: string
+    municipio?: string
+    uf?: string
+    cep?: string
+  } | null
+}
+
+/**
+ * Busca todos os contatos do Bling paginando até o fim.
+ * Respeita rate limit com delay de 350ms entre requisições.
+ * Retorna array normalizado de contatos para importação.
+ * 
+ * @param accessToken Token de acesso do Bling
+ * @param maxPages Limite máximo de páginas a buscar (padrão: 1000, ~100k contatos)
+ * @param maxContacts Limite máximo de contatos a retornar (padrão: 10000)
+ * @returns Array de contatos normalizados
+ */
+export async function fetchAllBlingContacts(
+  accessToken: string,
+  maxPages: number = 1000,
+  maxContacts: number = 10000
+): Promise<BlingContactForImport[]> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token) {
+    throw new Error('[Sistema] Token Bling não configurado.')
+  }
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+  }
+
+  const limit = 100
+  const delayBetweenRequests = 350 // ms - garante < 3 req/s (limite da API)
+  const allContacts: BlingContactForImport[] = []
+
+  logBlingRequest('fetchAllBlingContacts', 'INICIO', 'Buscar todos os contatos', null, { maxPages, maxContacts })
+
+  for (let page = 1; page <= maxPages; page++) {
+    // Parar se atingiu limite de contatos
+    if (allContacts.length >= maxContacts) {
+      console.warn(`[Bling] Limite de ${maxContacts} contatos atingido. Importação parcial.`)
+      logBlingRequest('fetchAllBlingContacts', 'LIMITE', 'Limite de contatos atingido', null, { total: allContacts.length })
+      break
+    }
+
+    try {
+      // Delay antes de cada requisição (exceto a primeira)
+      if (page > 1) {
+        await new Promise(resolve => setTimeout(resolve, delayBetweenRequests))
+      }
+
+      const listUrl = `${BLING_API_BASE}/contatos?pagina=${page}&limite=${limit}`
+      const listResponse = await fetchWithRetry(listUrl, { method: 'GET', headers })
+      
+      if (!listResponse.ok) {
+        // Parar se erro não recuperável (4xx que não seja 429)
+        if (listResponse.status >= 400 && listResponse.status < 500 && listResponse.status !== 429) {
+          logBlingRequest('fetchAllBlingContacts', 'ERRO', listUrl, listResponse.status, { erro: 'Erro não recuperável' })
+          break
+        }
+        // Para 429 ou 5xx, fetchWithRetry já tentou retry, então parar aqui
+        logBlingRequest('fetchAllBlingContacts', 'ERRO', listUrl, listResponse.status, { erro: 'Erro após retries' })
+        break
+      }
+
+      const listData = await listResponse.json().catch(() => null)
+      const contacts = parseBlingContactsList(listData)
+      
+      // Parar quando lista vazia (fim dos resultados)
+      if (contacts.length === 0) {
+        logBlingRequest('fetchAllBlingContacts', 'FIM', listUrl, listResponse.status, { fimResultados: true, paginas: page - 1 })
+        break
+      }
+
+      // Normalizar e adicionar contatos
+      for (const c of contacts) {
+        if (allContacts.length >= maxContacts) break
+        
+        if (typeof c === 'object' && c !== null) {
+          const contact = c as Record<string, unknown>
+          
+          // Extrair campos básicos
+          const id = contact.id != null ? Number(contact.id) : null
+          if (id == null || isNaN(id)) continue
+
+          const nome = String(contact.nome || contact.name || 'Sem nome').trim()
+          const numeroDocumento = getContactDocumentDigits(contact)
+          
+          // Extrair contatos (e-mail de nível raiz, tiposContato ou pessoaFisica)
+          const email = getContactEmail(contact)
+          const celular = contact.celular ? String(contact.celular).trim() || null : null
+          const telefone = contact.telefone ? String(contact.telefone).trim() || null : null
+
+          // Extrair endereço se existir
+          let endereco: BlingContactForImport['endereco'] = null
+          if (contact.endereco && typeof contact.endereco === 'object') {
+            const addr = contact.endereco as Record<string, unknown>
+            endereco = {
+              endereco: addr.endereco ? String(addr.endereco).trim() : undefined,
+              numero: addr.numero ? String(addr.numero).trim() : undefined,
+              complemento: addr.complemento ? String(addr.complemento).trim() : undefined,
+              bairro: addr.bairro ? String(addr.bairro).trim() : undefined,
+              municipio: addr.municipio ? String(addr.municipio).trim() : undefined,
+              uf: addr.uf ? String(addr.uf).trim() : undefined,
+              cep: addr.cep ? String(addr.cep).replace(/\D/g, '') : undefined,
+            }
+          }
+
+          allContacts.push({
+            id,
+            nome,
+            numeroDocumento,
+            email,
+            celular,
+            telefone,
+            endereco,
+          })
+        }
+      }
+
+      // Log periódico a cada 10 páginas
+      if (page % 10 === 0) {
+        logBlingRequest('fetchAllBlingContacts', 'PROGRESSO', listUrl, listResponse.status, {
+          progresso: `${page} páginas, ${allContacts.length} contatos coletados`
+        })
+      }
+    } catch (err) {
+      console.warn(`[Bling] Erro ao buscar contatos (página ${page}):`, err)
+      logBlingRequest('fetchAllBlingContacts', 'EXCEPTION', `${BLING_API_BASE}/contatos?pagina=${page}...`, null, { erro: String(err) })
+      if (page === 1) break // Se falhar na primeira página, não continuar
+    }
+  }
+
+  logBlingRequest('fetchAllBlingContacts', 'CONCLUIDO', 'Busca finalizada', null, {
+    totalContatos: allContacts.length,
+    paginasVerificadas: Math.min(maxPages, allContacts.length > 0 ? Math.ceil(allContacts.length / limit) : 0)
+  })
+
+  return allContacts
 }
 
 /**
@@ -969,35 +1166,75 @@ export async function sendOrderToBling(
     return { success: false, error: 'Pedido sem endereço de entrega. Informe o endereço antes de enviar ao Bling.' }
   }
 
-  // Criar ou buscar contato no Bling antes de criar a venda (API v3 exige contato.id)
-  let contactResult: ContactResult
-  try {
-    contactResult = await createOrGetContactId(order, accessToken)
-    logBlingRequest('sendOrderToBling', 'CONTATO', 'Contato obtido', null, {
-      id: contactResult.id,
-      strategy: contactResult.strategy,
-      created: contactResult.created
+  // Se o cliente já tem bling_contact_id (foi importado do Bling), usar diretamente
+  let blingContactId: number | null = null
+  if (order.client_bling_contact_id != null) {
+    blingContactId = order.client_bling_contact_id
+    logBlingRequest('sendOrderToBling', 'CONTATO', 'Usando bling_contact_id do cliente', null, {
+      id: blingContactId,
+      source: 'imported'
     })
-  } catch (contactErr: unknown) {
-    const contactErrorMsg = contactErr instanceof Error ? contactErr.message : String(contactErr)
-    logBlingRequest('sendOrderToBling', 'ERRO', 'Falha ao obter contato', null, { erro: contactErrorMsg })
-    await updateOrderSync(orderId, 'error', contactErrorMsg)
-    await insertLog(orderId, 'error', contactErrorMsg, null)
-    return { success: false, error: `[Bling] Não foi possível cadastrar o cliente no Bling. ${contactErrorMsg}` }
-  }
+  } else {
+    // Criar ou buscar contato no Bling antes de criar a venda (API v3 exige contato.id)
+    let contactResult: ContactResult
+    try {
+      contactResult = await createOrGetContactId(order, accessToken)
+      logBlingRequest('sendOrderToBling', 'CONTATO', 'Contato obtido', null, {
+        id: contactResult.id,
+        strategy: contactResult.strategy,
+        created: contactResult.created
+      })
+    } catch (contactErr: unknown) {
+      const contactErrorMsg = contactErr instanceof Error ? contactErr.message : String(contactErr)
+      logBlingRequest('sendOrderToBling', 'ERRO', 'Falha ao obter contato', null, { erro: contactErrorMsg })
+      await updateOrderSync(orderId, 'error', contactErrorMsg)
+      await insertLog(orderId, 'error', contactErrorMsg, null)
+      return { success: false, error: `[Bling] Não foi possível cadastrar o cliente no Bling. ${contactErrorMsg}` }
+    }
 
-  // Validar que temos o ID do contato antes de criar a venda
-  // A API v3 não aceita dados inline quando o contato já existe no sistema
-  if (contactResult.id === null) {
-    const errorMsg = 'Não foi possível obter ID do contato no Bling. O contato pode já existir mas não foi encontrado após todas as tentativas de busca. ' +
-      'Verifique se o app Bling tem o escopo "Gerenciar Contatos" (ID: 318257565) habilitado e reautorize a integração se necessário. ' +
-      'Se o problema persistir, verifique se o CPF/CNPJ do cliente está correto e se o contato existe na conta Bling correta.'
-    await updateOrderSync(orderId, 'error', errorMsg)
-    await insertLog(orderId, 'error', errorMsg, null)
-    return { success: false, error: `[Bling] ${errorMsg}` }
-  }
+    // Validar que temos o ID do contato antes de criar a venda
+    // A API v3 não aceita dados inline quando o contato já existe no sistema
+    if (contactResult.id === null) {
+      const errorMsg = 'Não foi possível obter ID do contato no Bling. O contato pode já existir mas não foi encontrado após todas as tentativas de busca. ' +
+        'Verifique se o app Bling tem o escopo "Gerenciar Contatos" (ID: 318257565) habilitado e reautorize a integração se necessário. ' +
+        'Se o problema persistir, verifique se o CPF/CNPJ do cliente está correto e se o contato existe na conta Bling correta.'
+      await updateOrderSync(orderId, 'error', errorMsg)
+      await insertLog(orderId, 'error', errorMsg, null)
+      return { success: false, error: `[Bling] ${errorMsg}` }
+    }
 
-  const blingContactId = contactResult.id
+    blingContactId = contactResult.id
+
+    // Opcionalmente, atualizar o cliente com o bling_contact_id para próximos pedidos
+    // (apenas se foi criado/encontrado agora e não tinha antes)
+    if (contactResult.found && blingContactId != null) {
+      try {
+        const cleanDoc = order.client_cpf.replace(/\D/g, '')
+        const docLength = cleanDoc.length
+        
+        // Determinar se é CPF (11 dígitos) ou CNPJ (14 dígitos)
+        if (docLength === 11) {
+          // CPF: atualizar usando coluna cpf
+          await query(
+            'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE cpf = $2 AND bling_contact_id IS NULL',
+            [blingContactId, cleanDoc]
+          )
+        } else if (docLength === 14) {
+          // CNPJ: atualizar usando coluna cnpj
+          await query(
+            'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE cnpj = $2 AND bling_contact_id IS NULL',
+            [blingContactId, cleanDoc]
+          )
+        } else {
+          // Documento inválido: não atualizar
+          console.warn(`[Bling] Não foi possível atualizar bling_contact_id: documento com tamanho inválido (${docLength} dígitos)`)
+        }
+      } catch (err) {
+        // Não falhar o envio se a atualização do cliente falhar
+        console.warn('[Bling] Erro ao atualizar bling_contact_id do cliente:', err)
+      }
+    }
+  }
 
   // Número único da venda no Bling: reutilizar o já salvo ou gerar novo (evita conflito com numeros já existentes na conta)
   const numeroBling = order.bling_sale_numero?.trim() || generateBlingSaleNumero()
@@ -1087,7 +1324,7 @@ export async function sendOrderToBling(
 async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | null> {
   const baseSelect = `SELECT o.id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
             c.name as client_name, c.cpf as client_cpf, c.email as client_email,
-            c.whatsapp as client_whatsapp, c.phone as client_phone
+            c.whatsapp as client_whatsapp, c.phone as client_phone, c.bling_contact_id as client_bling_contact_id
      FROM orders o
      JOIN clients c ON o.client_id = c.id
      WHERE o.id = $1`
@@ -1101,7 +1338,7 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
       `SELECT o.id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
               o.observations, o.bling_sale_numero,
               c.name as client_name, c.cpf as client_cpf, c.email as client_email,
-              c.whatsapp as client_whatsapp, c.phone as client_phone
+              c.whatsapp as client_whatsapp, c.phone as client_phone, c.bling_contact_id as client_bling_contact_id
        FROM orders o
        JOIN clients c ON o.client_id = c.id
        WHERE o.id = $1`,
@@ -1158,6 +1395,7 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
     client_email: (row.client_email as string | null) ?? null,
     client_whatsapp: (row.client_whatsapp as string | null) ?? null,
     client_phone: (row.client_phone as string | null) ?? null,
+    client_bling_contact_id: row.client_bling_contact_id != null ? Number(row.client_bling_contact_id) : null,
     address,
     items: itemsResult.rows.map((i: Record<string, unknown>) => ({
       title: (i.title as string) ?? '',

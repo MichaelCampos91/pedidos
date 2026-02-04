@@ -3,8 +3,10 @@
 import { useState, useEffect } from "react"
 import { IntegrationCard } from "@/components/integrations/IntegrationCard"
 import { BlingSyncCard } from "@/components/integrations/BlingSyncCard"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, Truck, CreditCard, Package } from "lucide-react"
-import type { IntegrationProvider, IntegrationEnvironment, TokenType, IntegrationToken } from "@/lib/integrations-types"
+import type { IntegrationProvider, IntegrationEnvironment, IntegrationToken } from "@/lib/integrations-types"
 
 const PROVIDERS: { value: IntegrationProvider; label: string; icon?: React.ReactNode }[] = [
   { value: 'melhor_envio', label: 'Melhor Envio', icon: <Truck className="h-5 w-5" /> },
@@ -12,7 +14,10 @@ const PROVIDERS: { value: IntegrationProvider; label: string; icon?: React.React
   { value: 'bling', label: 'Bling', icon: <Package className="h-5 w-5" /> },
 ]
 
+type IntegrationTab = 'pagarme' | 'melhor_envio' | 'bling'
+
 export default function IntegrationsPage() {
+  const [activeTab, setActiveTab] = useState<IntegrationTab>('pagarme')
   const [tokens, setTokens] = useState<IntegrationToken[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -207,36 +212,91 @@ export default function IntegrationsPage() {
         </div>
       )}
 
-      <div className="space-y-4">
-        {PROVIDERS.map((provider) => {
-          const providerTokens = getTokensForProvider(provider.value)
-          const sandboxToken = providerTokens.find(t => t.environment === 'sandbox')
-          const productionToken = providerTokens.find(t => t.environment === 'production')
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as IntegrationTab)} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="pagarme" className="flex items-center gap-2">
+            <CreditCard className="h-4 w-4" />
+            Pagar.me
+          </TabsTrigger>
+          <TabsTrigger value="melhor_envio" className="flex items-center gap-2">
+            <Truck className="h-4 w-4" />
+            Melhor Envio
+          </TabsTrigger>
+          <TabsTrigger value="bling" className="flex items-center gap-2">
+            <Package className="h-4 w-4" />
+            Bling
+          </TabsTrigger>
+        </TabsList>
 
-          return (
-            <IntegrationCard
-              key={provider.value}
-              provider={provider.value}
-              providerLabel={provider.label}
-              sandboxToken={sandboxToken}
-              productionToken={productionToken}
-              onEdit={handleEditToken}
-              onDelete={handleDeleteToken}
-              onValidate={handleValidateToken}
-              onAdd={handleAddToken}
-              onSave={handleSaveToken}
-              onTokensUpdated={handleTokensUpdated}
-              isValidating={validating}
-              isSaving={saving}
-              icon={provider.icon}
-            />
-          )
-        })}
+        <TabsContent value="pagarme" className="space-y-4 mt-6">
+          <IntegrationCard
+            provider="pagarme"
+            providerLabel="Pagar.me"
+            sandboxToken={getTokensForProvider('pagarme').find(t => t.environment === 'sandbox')}
+            productionToken={getTokensForProvider('pagarme').find(t => t.environment === 'production')}
+            onEdit={handleEditToken}
+            onDelete={handleDeleteToken}
+            onValidate={handleValidateToken}
+            onAdd={handleAddToken}
+            onSave={handleSaveToken}
+            onTokensUpdated={handleTokensUpdated}
+            isValidating={validating}
+            isSaving={saving}
+            icon={<CreditCard className="h-5 w-5" />}
+          />
+        </TabsContent>
 
-        {getTokensForProvider('bling').length > 0 && (
-          <BlingSyncCard />
-        )}
-      </div>
+        <TabsContent value="melhor_envio" className="space-y-4 mt-6">
+          <IntegrationCard
+            provider="melhor_envio"
+            providerLabel="Melhor Envio"
+            sandboxToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'sandbox')}
+            productionToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'production')}
+            onEdit={handleEditToken}
+            onDelete={handleDeleteToken}
+            onValidate={handleValidateToken}
+            onAdd={handleAddToken}
+            onSave={handleSaveToken}
+            onTokensUpdated={handleTokensUpdated}
+            isValidating={validating}
+            isSaving={saving}
+            icon={<Truck className="h-5 w-5" />}
+          />
+        </TabsContent>
+
+        <TabsContent value="bling" className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Package className="h-5 w-5" />
+                Bling
+              </CardTitle>
+              <CardDescription>
+                Conecte com o Bling para enviar pedidos aprovados e sincronizar categorias, produtos, clientes e pedidos.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              <IntegrationCard
+                provider="bling"
+                providerLabel="Bling"
+                productionToken={getTokensForProvider('bling').find(t => t.environment === 'production')}
+                onEdit={handleEditToken}
+                onDelete={handleDeleteToken}
+                onValidate={handleValidateToken}
+                onAdd={handleAddToken}
+                onSave={handleSaveToken}
+                onTokensUpdated={handleTokensUpdated}
+                isValidating={validating}
+                isSaving={saving}
+                icon={<Package className="h-5 w-5" />}
+                asSection
+                singleEnvironment="production"
+              />
+              <BlingSyncCard asSection />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
