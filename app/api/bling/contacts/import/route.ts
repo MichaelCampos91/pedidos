@@ -8,6 +8,65 @@ import { maskPhone, capitalizeName } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
+type MappedAddress = {
+  cep: string
+  street: string
+  number: string | null
+  complement: string | null
+  neighborhood: string | null
+  city: string
+  state: string
+}
+
+/**
+ * Mapeia endereço do Bling para o formato da tabela client_addresses.
+ * Retorna null se não houver endereço utilizável (CEP com 8 dígitos obrigatório).
+ */
+function mapBlingAddressToDb(
+  endereco: BlingContactForImport['endereco']
+): MappedAddress | null {
+  if (!endereco || typeof endereco !== 'object') return null
+  const cepRaw = endereco.cep != null ? String(endereco.cep).replace(/\D/g, '') : ''
+  if (cepRaw.length !== 8) return null
+
+  const street = (endereco.endereco != null ? String(endereco.endereco).trim() : '') || ''
+  const number = (endereco.numero != null && String(endereco.numero).trim() !== '') ? String(endereco.numero).trim() : null
+  const complement = (endereco.complemento != null && String(endereco.complemento).trim() !== '') ? String(endereco.complemento).trim() : null
+  const neighborhood = (endereco.bairro != null && String(endereco.bairro).trim() !== '') ? String(endereco.bairro).trim() : null
+  const city = (endereco.municipio != null ? String(endereco.municipio).trim() : '') || ''
+  const state = (endereco.uf != null ? String(endereco.uf).trim().toUpperCase().substring(0, 2) : '') || ''
+
+  return {
+    cep: cepRaw,
+    street,
+    number,
+    complement,
+    neighborhood,
+    city,
+    state,
+  }
+}
+
+/**
+ * Insere um endereço em client_addresses para o cliente (is_default = true).
+ */
+async function insertClientAddress(clientId: number, addr: MappedAddress): Promise<void> {
+  await query(
+    `INSERT INTO client_addresses (client_id, cep, street, number, complement, neighborhood, city, state, is_default)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
+    [
+      clientId,
+      addr.cep,
+      addr.street,
+      addr.number,
+      addr.complement,
+      addr.neighborhood,
+      addr.city,
+      addr.state,
+    ]
+  )
+}
+
 /**
  * GET /api/bling/contacts/import
  * Busca todos os contatos do Bling e retorna para o frontend exibir no modal.
@@ -100,6 +159,8 @@ export async function POST(request: NextRequest) {
                            '00000000000'
         const whatsapp = maskPhone(whatsappRaw)
 
+        const mappedAddress = mapBlingAddressToDb(contact.endereco)
+
         // Buscar cliente existente por documento (cpf ou cnpj conforme tamanho)
         const existingByCpf = isCpf
           ? await query('SELECT id, bling_contact_id FROM clients WHERE cpf = $1', [cleanDoc])
@@ -144,7 +205,12 @@ export async function POST(request: NextRequest) {
               continue
             }
           }
+          const addrCountCpf = await query('SELECT COUNT(*) AS c FROM client_addresses WHERE client_id = $1', [existingClient.id])
+          const hasNoAddressesCpf = Number(addrCountCpf.rows[0]?.c ?? 0) === 0
           await updateClient(existingClient.id)
+          if (hasNoAddressesCpf && mappedAddress) {
+            await insertClientAddress(existingClient.id, mappedAddress)
+          }
           updatedCount++
         } else if (existingByCnpj.rows.length > 0) {
           const existingClient = existingByCnpj.rows[0] as { id: number; bling_contact_id: number | null }
@@ -155,7 +221,12 @@ export async function POST(request: NextRequest) {
               continue
             }
           }
+          const addrCountCnpj = await query('SELECT COUNT(*) AS c FROM client_addresses WHERE client_id = $1', [existingClient.id])
+          const hasNoAddressesCnpj = Number(addrCountCnpj.rows[0]?.c ?? 0) === 0
           await updateClient(existingClient.id)
+          if (hasNoAddressesCnpj && mappedAddress) {
+            await insertClientAddress(existingClient.id, mappedAddress)
+          }
           updatedCount++
         } else if (existingByBlingId.rows.length > 0) {
           const existingClient = existingByBlingId.rows[0] as { id: number; cpf: string | null; cnpj: string | null }
@@ -182,12 +253,18 @@ export async function POST(request: NextRequest) {
               continue
             }
           }
+          const addrCountBling = await query('SELECT COUNT(*) AS c FROM client_addresses WHERE client_id = $1', [existingClient.id])
+          const hasNoAddressesBling = Number(addrCountBling.rows[0]?.c ?? 0) === 0
           await updateClient(existingClient.id)
+          if (hasNoAddressesBling && mappedAddress) {
+            await insertClientAddress(existingClient.id, mappedAddress)
+          }
           updatedCount++
         } else {
-          await query(
+          const insertResult = await query(
             `INSERT INTO clients (cpf, cnpj, name, email, phone, whatsapp, bling_contact_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             RETURNING id`,
             [
               cpfValue,
               cnpjValue,
@@ -198,6 +275,10 @@ export async function POST(request: NextRequest) {
               contact.id,
             ]
           )
+          const clientId = (insertResult.rows[0] as { id: number }).id
+          if (mappedAddress) {
+            await insertClientAddress(clientId, mappedAddress)
+          }
           importedCount++
         }
       } catch (err: unknown) {

@@ -26,6 +26,7 @@ export default function ClientFormPage() {
     email: '',
     phone: '',
     whatsapp: '',
+    bling_contact_id: '',
     addresses: [] as any[]
   })
 
@@ -46,6 +47,7 @@ export default function ClientFormPage() {
         email: client.email || '',
         phone: client.phone ? maskPhone(client.phone) : '',
         whatsapp: client.whatsapp ? maskPhone(client.whatsapp) : '',
+        bling_contact_id: client.bling_contact_id != null ? String(client.bling_contact_id) : '',
         addresses: client.addresses || []
       })
     } catch (error) {
@@ -60,7 +62,9 @@ export default function ClientFormPage() {
     setLoading(true)
 
     try {
-      // Preparar dados para envio: trim no nome; CPF/CNPJ/CEP sem máscara; phone/whatsapp com máscara
+      // Preparar dados para envio: trim no nome; CPF/CNPJ/CEP sem máscara; phone/whatsapp com máscara; bling_contact_id normalizado
+      const blingIdTrimmed = formData.bling_contact_id?.trim() ?? ''
+      const blingContactIdValue = blingIdTrimmed === '' ? null : (Number(blingIdTrimmed) || null)
       const dataToSend = {
         ...formData,
         name: formData.name.trim(),
@@ -68,6 +72,7 @@ export default function ClientFormPage() {
         cnpj: formData.cnpj ? formData.cnpj.replace(/\D/g, '') : '',
         phone: formData.phone ? formData.phone.trim() : '',
         whatsapp: formData.whatsapp ? formData.whatsapp.trim() : '',
+        bling_contact_id: blingContactIdValue,
         addresses: formData.addresses.map(addr => ({
           ...addr,
           cep: addr.cep ? unmaskCEP(addr.cep) : ''
@@ -213,6 +218,20 @@ export default function ClientFormPage() {
                   required
                 />
               </div>
+              {!isNew && (
+                <div className="space-y-2">
+                  <Label htmlFor="bling_contact_id">ID Contato Bling</Label>
+                  <Input
+                    id="bling_contact_id"
+                    type="text"
+                    inputMode="numeric"
+                    value={formData.bling_contact_id}
+                    onChange={(e) => setFormData({ ...formData, bling_contact_id: e.target.value.replace(/\D/g, '') })}
+                    placeholder="Ex.: 123456"
+                  />
+                  <p className="text-xs text-muted-foreground">ID do contato no Bling (opcional)</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
