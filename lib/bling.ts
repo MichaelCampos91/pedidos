@@ -148,6 +148,132 @@ function decodeUnicodeEscapes(str: string): string {
 }
 
 /**
+ * Extrai a lista de contatos do body da resposta GET /contatos (suporta data ou array na raiz).
+ */
+function parseBlingContactsList(responseData: unknown): unknown[] {
+  if (Array.isArray(responseData)) return responseData
+  if (responseData && typeof responseData === 'object' && 'data' in responseData) {
+    const data = (responseData as { data: unknown }).data
+    return Array.isArray(data) ? data : []
+  }
+  return []
+}
+
+/**
+ * Retorna o número do documento do contato (só dígitos) ou string vazia.
+ * A API pode retornar numeroDocumento ou numero_documento.
+ */
+function getContactDocumentDigits(contact: Record<string, unknown>): string {
+  const doc =
+    (contact.numeroDocumento as string) ??
+    (contact.numero_documento as string) ??
+    ''
+  return String(doc).replace(/\D/g, '')
+}
+
+/**
+ * Busca um contato no Bling por CPF/CNPJ (documento limpo, só números).
+ * Retorna o id do primeiro contato encontrado ou null se não encontrar / em caso de erro.
+ * Usado para evitar criar duplicata e para recuperar id quando o POST falha por "já cadastrado".
+ *
+ * Primeiro tenta GET com ?numeroDocumento=; se a API v3 não suportar esse filtro (resposta
+ * não-ok ou lista vazia), usa fallback com busca paginada (até 5 páginas de 100 itens).
+ */
+async function findBlingContactByDocument(
+  cleanCpf: string,
+  accessToken: string
+): Promise<number | null> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token || !cleanCpf) return null
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+  }
+
+  try {
+    const searchUrl = `${BLING_API_BASE}/contatos?numeroDocumento=${encodeURIComponent(cleanCpf)}`
+    const response = await fetch(searchUrl, { method: 'GET', headers })
+
+    if (response.ok) {
+      const searchData = await response.json().catch(() => null)
+      const contacts = parseBlingContactsList(searchData)
+      for (const c of contacts) {
+        if (typeof c === 'object' && c !== null) {
+          const contact = c as Record<string, unknown>
+          if (getContactDocumentDigits(contact) === cleanCpf && contact.id != null) {
+            return Number(contact.id)
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Bling] Erro ao buscar contato por documento:', err)
+  }
+
+  // Fallback: API pode não suportar filtro numeroDocumento na query; buscar por paginação
+  const maxPages = 5
+  const limit = 100
+  for (let page = 1; page <= maxPages; page++) {
+    try {
+      const listUrl = `${BLING_API_BASE}/contatos?pagina=${page}&limite=${limit}`
+      const listResponse = await fetch(listUrl, { method: 'GET', headers })
+      if (!listResponse.ok) break
+
+      const listData = await listResponse.json().catch(() => null)
+      const contacts = parseBlingContactsList(listData)
+      if (contacts.length === 0) break
+
+      for (const c of contacts) {
+        if (typeof c === 'object' && c !== null) {
+          const contact = c as Record<string, unknown>
+          if (getContactDocumentDigits(contact) === cleanCpf && contact.id != null) {
+            return Number(contact.id)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Bling] Erro ao buscar contato (fallback paginado):', err)
+      break
+    }
+  }
+
+  return null
+}
+
+/**
+ * Retorna a mensagem de erro extraída do body da resposta Bling (message ou error.message).
+ */
+function getBlingErrorMessage(responseData: unknown): string {
+  if (responseData && typeof responseData === 'object' && 'error' in responseData) {
+    const err = (responseData as { error?: { message?: string } }).error
+    if (err?.message) return decodeUnicodeEscapes(err.message)
+  }
+  if (responseData && typeof responseData === 'object' && 'message' in responseData) {
+    return decodeUnicodeEscapes((responseData as { message: string }).message)
+  }
+  return ''
+}
+
+/**
+ * Verifica se a resposta indica que o contato já está cadastrado no Bling.
+ * Inclui a mensagem "não foi possível salvar o contato" pois o Bling pode devolver
+ * apenas isso quando o CPF já está cadastrado (sem a frase "já cadastrado").
+ */
+function isAlreadyRegisteredError(responseStatus: number, responseData: unknown): boolean {
+  if (responseStatus === 409) return true
+  if (responseData && typeof responseData === 'object' && 'error' in responseData) return true
+  const msg = getBlingErrorMessage(responseData).toLowerCase()
+  return (
+    responseStatus >= 400 &&
+    responseStatus < 500 &&
+    (msg.includes('já cadastrado') ||
+      msg.includes('já está cadastrado') ||
+      msg.includes('não foi possível salvar o contato'))
+  )
+}
+
+/**
  * Cria ou busca um contato no Bling usando os dados do pedido.
  * Retorna o ID do contato criado/encontrado no Bling.
  * 
@@ -168,6 +294,12 @@ async function createOrFindContactInBling(
   const cleanCpf = (order.client_cpf || '').replace(/\D/g, '')
   if (!cleanCpf) {
     throw new Error('[Sistema] CPF/CNPJ do cliente é obrigatório para criar contato no Bling.')
+  }
+
+  // Buscar antes de criar: se o contato já existe no Bling, usar o id existente
+  const existingId = await findBlingContactByDocument(cleanCpf, accessToken)
+  if (existingId != null) {
+    return existingId
   }
 
   const tipo = cleanCpf.length === 11 ? 'F' : 'J'
@@ -218,7 +350,6 @@ async function createOrFindContactInBling(
     }
 
     if (response.ok) {
-      // Extrair ID do contato criado (estrutura comum: data.id ou data.data.id)
       const contactId = extractBlingIdFromResponse(responseData)
       if (contactId != null) {
         return Number(contactId)
@@ -226,63 +357,18 @@ async function createOrFindContactInBling(
       throw new Error('Resposta do Bling não contém ID do contato criado.')
     }
 
-    // Se o contato já existe (409 Conflict ou mensagem específica), tentar buscar por CPF
-    if (response.status === 409 || (responseData && typeof responseData === 'object' && 'error' in responseData)) {
-      const errorData = responseData as { error?: { message?: string } }
-      const errorMsg = errorData?.error?.message ? decodeUnicodeEscapes(errorData.error.message) : ''
-      
-      // Tentar buscar contato existente por CPF/CNPJ
-      // A API Bling pode usar diferentes formatos de query: ?numeroDocumento=... ou filtros no body
-      try {
-        // Tentar busca por query parameter (formato comum em APIs REST)
-        const searchUrl = `${BLING_API_BASE}/contatos?numeroDocumento=${encodeURIComponent(cleanCpf)}`
-        const searchResponse = await fetch(searchUrl, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-        })
-
-        if (searchResponse.ok) {
-          const searchData = await searchResponse.json()
-          // A API pode retornar array ou objeto com data
-          let contacts: unknown[] = []
-          if (Array.isArray(searchData)) {
-            contacts = searchData
-          } else if (searchData && typeof searchData === 'object' && 'data' in searchData) {
-            const data = (searchData as { data: unknown }).data
-            contacts = Array.isArray(data) ? data : []
-          }
-
-          if (contacts.length > 0 && typeof contacts[0] === 'object') {
-            const firstContact = contacts[0] as Record<string, unknown>
-            if (firstContact.id != null) {
-              console.log(`[Bling] Contato encontrado por CPF/CNPJ: ${firstContact.id}`)
-              return Number(firstContact.id)
-            }
-          }
-        }
-      } catch (searchErr) {
-        // Se a busca falhar, continuar com erro original
-        console.warn('[Bling] Erro ao buscar contato existente:', searchErr)
+    // Se o contato já existe (409, body com error, ou mensagem "já cadastrado"), buscar por CPF
+    if (isAlreadyRegisteredError(response.status, responseData)) {
+      const foundId = await findBlingContactByDocument(cleanCpf, accessToken)
+      if (foundId != null) {
+        return foundId
       }
-
-      // Se não encontrou por busca, lançar erro informando que o contato pode já existir
-      throw new Error(`Contato já existe ou erro ao criar: ${errorMsg || response.statusText}. Verifique se o CPF/CNPJ já está cadastrado no Bling.`)
+      const errorMsg = getBlingErrorMessage(responseData) || response.statusText
+      throw new Error(`Contato já existe ou erro ao criar: ${errorMsg}. Verifique se o CPF/CNPJ já está cadastrado no Bling.`)
     }
 
     // Outros erros
-    let errMsg = `Erro HTTP ${response.status}.`
-    if (responseData && typeof responseData === 'object' && 'error' in responseData) {
-      const err = (responseData as { error?: { message?: string } }).error
-      errMsg = err?.message ? decodeUnicodeEscapes(err.message) : errMsg
-    }
-    if (responseData && typeof responseData === 'object' && 'message' in responseData) {
-      const msg = (responseData as { message: string }).message
-      errMsg = decodeUnicodeEscapes(msg)
-    }
-
+    const errMsg = getBlingErrorMessage(responseData) || `Erro HTTP ${response.status}.`
     const snippet = decodeUnicodeEscapes(responseText.trim().slice(0, 300))
     throw new Error(`Não foi possível criar contato no Bling: ${errMsg}${snippet ? `. Detalhes: ${snippet}` : ''}`)
   } catch (err: unknown) {
@@ -788,6 +874,14 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
   for (const row of clientsResult.rows as Record<string, unknown>[]) {
     const cleanCpf = String(row.cpf || '').replace(/\D/g, '')
     if (!cleanCpf) continue
+
+    // Buscar antes de criar: se já existe no Bling, considerar sucesso e pular
+    const existingId = await findBlingContactByDocument(cleanCpf, accessToken)
+    if (existingId != null) {
+      syncedCount++
+      continue
+    }
+
     const tipo = cleanCpf.length === 11 ? 'F' : 'J'
     const contactPayload: Record<string, unknown> = {
       nome: row.name || 'Cliente',
@@ -824,6 +918,21 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
     })
     const responseText = await response.text()
     if (!response.ok) {
+      const responseData = (() => {
+        try {
+          return responseText ? JSON.parse(responseText) : null
+        } catch {
+          return null
+        }
+      })()
+      // Se o erro for "já cadastrado", tentar buscar e tratar como sucesso
+      if (isAlreadyRegisteredError(response.status, responseData)) {
+        const foundId = await findBlingContactByDocument(cleanCpf, accessToken)
+        if (foundId != null) {
+          syncedCount++
+          continue
+        }
+      }
       return { success: false, syncedCount, error: buildBlingError(responseText, response) }
     }
     syncedCount++
