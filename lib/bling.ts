@@ -753,8 +753,8 @@ async function findBlingContactAggressively(
 
   console.log(`[Bling] Busca agressiva iniciada para CPF: ${cleanCpf}, Nome: ${clientName}`)
 
-  // Estratégia 1: Busca expandida por documento (até 20 páginas)
-  const foundById = await findBlingContactByDocument(cleanCpf, accessToken, 20)
+  // Estratégia 1: Busca por documento
+  const foundById = await findBlingContactByDocument(cleanCpf, accessToken)
   if (foundById != null) {
     console.log(`[Bling] Contato encontrado na busca expandida: ID ${foundById}`)
     return foundById
@@ -765,7 +765,7 @@ async function findBlingContactAggressively(
     // CPF: tentar com zeros à esquerda (ex: 12345678901 -> 01234567890)
     const paddedCpf = cleanCpf.padStart(11, '0')
     if (paddedCpf !== cleanCpf) {
-      const foundPadded = await findBlingContactByDocument(paddedCpf, accessToken, 10)
+      const foundPadded = await findBlingContactByDocument(paddedCpf, accessToken)
       if (foundPadded != null) {
         console.log(`[Bling] Contato encontrado com CPF com zeros: ID ${foundPadded}`)
         return foundPadded
