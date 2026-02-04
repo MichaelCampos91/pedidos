@@ -147,48 +147,49 @@ export default function ClientsPage() {
           </div>
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>
-                    <button
-                      onClick={() => handleSort("name")}
-                      className="flex items-center hover:text-primary transition-colors"
-                    >
-                      Nome
-                      {getSortIcon("name")}
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => handleSort("cpf")}
-                      className="flex items-center hover:text-primary transition-colors"
-                    >
-                      CPF
-                      {getSortIcon("cpf")}
-                    </button>
-                  </TableHead>
-                  <TableHead>WhatsApp</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>ID Bling</TableHead>
-                  <TableHead>Endereços</TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => handleSort("created_at")}
-                      className="flex items-center hover:text-primary transition-colors"
-                    >
-                      Criado em
-                      {getSortIcon("created_at")}
-                    </button>
-                  </TableHead>
-                  <TableHead>Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {clients.map((client) => (
-                  <TableRow key={client.id}>
-                    <TableCell className="font-medium">{client.name}</TableCell>
-                    <TableCell>{formatCPF(client.cpf)}</TableCell>
+            <div className="max-h-[400px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b bg-white">
+                    <TableHead className="sticky top-0 z-10 bg-white">
+                      <button
+                        onClick={() => handleSort("name")}
+                        className="flex items-center hover:text-primary transition-colors"
+                      >
+                        Nome
+                        {getSortIcon("name")}
+                      </button>
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-10 bg-white">
+                      <button
+                        onClick={() => handleSort("cpf")}
+                        className="flex items-center hover:text-primary transition-colors"
+                      >
+                        CPF
+                        {getSortIcon("cpf")}
+                      </button>
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-10 bg-white">WhatsApp</TableHead>
+                    <TableHead className="sticky top-0 z-10 bg-white">Email</TableHead>
+                    <TableHead className="sticky top-0 z-10 bg-white">ID Bling</TableHead>
+                    <TableHead className="sticky top-0 z-10 bg-white">Endereços</TableHead>
+                    <TableHead className="sticky top-0 z-10 bg-white">
+                      <button
+                        onClick={() => handleSort("created_at")}
+                        className="flex items-center hover:text-primary transition-colors"
+                      >
+                        Criado em
+                        {getSortIcon("created_at")}
+                      </button>
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-10 bg-white">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {clients.map((client) => (
+                    <TableRow key={client.id}>
+                      <TableCell className="font-medium">{client.name}</TableCell>
+                      <TableCell>{formatCPF(client.cpf) || "—"}</TableCell>
                     <TableCell>
                       <a
                         href={`https://wa.me/${client.whatsapp.replace(/\D/g, "")}`}
@@ -228,6 +229,7 @@ export default function ClientsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
 
             {/* Paginação */}
             {pagination.last_page > 1 && (
