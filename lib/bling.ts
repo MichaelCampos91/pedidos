@@ -233,9 +233,16 @@ async function findBlingContactByDocument(
   }
 
   // Fallback: API pode não suportar filtro numeroDocumento na query; buscar por paginação
+  // Adiciona delay entre requisições para respeitar limite de 3 requisições/segundo do Bling
   const limit = 100
+  const delayBetweenRequests = 350 // ms - garante < 3 req/s (limite da API)
   for (let page = 1; page <= maxPages; page++) {
     try {
+      // Delay antes de cada requisição (exceto a primeira)
+      if (page > 1) {
+        await new Promise(resolve => setTimeout(resolve, delayBetweenRequests))
+      }
+
       const listUrl = `${BLING_API_BASE}/contatos?pagina=${page}&limite=${limit}`
       const listResponse = await fetch(listUrl, { method: 'GET', headers })
       if (!listResponse.ok) {
@@ -325,6 +332,7 @@ async function findBlingContactAggressively(
   const limit = 100
   const startTime = Date.now()
   const maxTime = 30000 // 30 segundos
+  const delayBetweenRequests = 350 // ms - garante < 3 req/s (limite da API)
 
   for (let page = 1; page <= maxPages; page++) {
     if (Date.now() - startTime > maxTime) {
@@ -333,6 +341,11 @@ async function findBlingContactAggressively(
     }
 
     try {
+      // Delay antes de cada requisição (exceto a primeira)
+      if (page > 1) {
+        await new Promise(resolve => setTimeout(resolve, delayBetweenRequests))
+      }
+
       const listUrl = `${BLING_API_BASE}/contatos?pagina=${page}&limite=${limit}`
       const listResponse = await fetch(listUrl, { method: 'GET', headers })
       if (!listResponse.ok) break
