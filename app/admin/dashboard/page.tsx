@@ -54,7 +54,11 @@ export default function DashboardPage() {
   const [metrics, setMetrics] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [startDate, setStartDate] = useState<Date | undefined>(() => new Date())
+  const [startDate, setStartDate] = useState<Date | undefined>(() => {
+    const date = new Date()
+    date.setDate(date.getDate() - 6) // 7 dias atrás (hoje + 6 dias anteriores)
+    return date
+  })
   const [endDate, setEndDate] = useState<Date | undefined>(() => new Date())
 
   const loadMetrics = async () => {

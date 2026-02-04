@@ -59,7 +59,11 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [startDate, setStartDate] = useState<Date | undefined>(() => new Date())
+  const [startDate, setStartDate] = useState<Date | undefined>(() => {
+    const date = new Date()
+    date.setDate(date.getDate() - 6) // 7 dias atrás (hoje + 6 dias anteriores)
+    return date
+  })
   const [endDate, setEndDate] = useState<Date | undefined>(() => new Date())
   const [pagination, setPagination] = useState({
     current_page: 1,

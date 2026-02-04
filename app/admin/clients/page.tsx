@@ -6,7 +6,7 @@ import { format } from "date-fns"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, MessageCircle, Plus, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2 } from "lucide-react"
+import { Search, MessageCircle, Plus, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { clientsApi } from "@/lib/api"
 import { formatPhone, formatCPF, formatDateTime } from "@/lib/utils"
 
@@ -15,6 +15,8 @@ export default function ClientsPage() {
   const [clients, setClients] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
+  const [sortBy, setSortBy] = useState<string>("created_at")
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
   const [pagination, setPagination] = useState({
     current_page: 1,
     per_page: 20,
@@ -30,6 +32,8 @@ export default function ClientsPage() {
       const params: any = {
         page: pagination.current_page,
         per_page: pagination.per_page,
+        sort: sortBy,
+        order: sortOrder,
       }
 
       if (search) {
@@ -55,7 +59,7 @@ export default function ClientsPage() {
 
   useEffect(() => {
     loadClients()
-  }, [pagination.current_page])
+  }, [pagination.current_page, sortBy, sortOrder])
 
   const handleSearch = () => {
     setPagination((prev) => ({ ...prev, current_page: 1 }))
@@ -64,6 +68,27 @@ export default function ClientsPage() {
 
   const handlePageChange = (page: number) => {
     setPagination((prev) => ({ ...prev, current_page: page }))
+  }
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+    } else {
+      setSortBy(column)
+      setSortOrder("asc")
+    }
+    setPagination((prev) => ({ ...prev, current_page: 1 }))
+  }
+
+  const getSortIcon = (column: string) => {
+    if (sortBy !== column) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 text-muted-foreground" />
+    }
+    return sortOrder === "asc" ? (
+      <ArrowUp className="h-4 w-4 ml-1 text-primary" />
+    ) : (
+      <ArrowDown className="h-4 w-4 ml-1 text-primary" />
+    )
   }
 
   const getPageNumbers = () => {
@@ -125,12 +150,37 @@ export default function ClientsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>CPF</TableHead>
+                  <TableHead>
+                    <button
+                      onClick={() => handleSort("name")}
+                      className="flex items-center hover:text-primary transition-colors"
+                    >
+                      Nome
+                      {getSortIcon("name")}
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button
+                      onClick={() => handleSort("cpf")}
+                      className="flex items-center hover:text-primary transition-colors"
+                    >
+                      CPF
+                      {getSortIcon("cpf")}
+                    </button>
+                  </TableHead>
                   <TableHead>WhatsApp</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead>ID Bling</TableHead>
                   <TableHead>Endereços</TableHead>
-                  <TableHead>Criado em</TableHead>
+                  <TableHead>
+                    <button
+                      onClick={() => handleSort("created_at")}
+                      className="flex items-center hover:text-primary transition-colors"
+                    >
+                      Criado em
+                      {getSortIcon("created_at")}
+                    </button>
+                  </TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -151,6 +201,15 @@ export default function ClientsPage() {
                       </a>
                     </TableCell>
                     <TableCell>{client.email || "—"}</TableCell>
+                    <TableCell>
+                      {client.bling_contact_id ? (
+                        <span className="text-sm text-muted-foreground font-mono">
+                          {client.bling_contact_id}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell>{client.addresses?.length || 0} endereço(s)</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatDateTime(client.created_at)}
