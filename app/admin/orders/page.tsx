@@ -555,7 +555,15 @@ export default function OrdersPage() {
                             Erro
                           </Badge>
                         )}
-                        {(order.bling_sync_status === "pending" || order.bling_sync_status == null) && (
+                        {blingSyncingOrderId === order.id ? (
+                          <Badge
+                            variant="outline"
+                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-blue-50 text-blue-800 border-blue-200"
+                          >
+                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                            Enviando...
+                          </Badge>
+                        ) : (order.bling_sync_status === "pending" || order.bling_sync_status == null) && (
                           <Badge
                             variant="outline"
                             className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-muted text-muted-foreground border-muted"
