@@ -272,61 +272,111 @@ export async function getTokenWithFallback(
     }
     
     // Verificar expiração e renovar se necessário (OAuth2)
-    if (autoRefresh && provider === 'melhor_envio' && token.expires_at) {
-      try {
-        const { isTokenExpired, refreshOAuth2Token } = await import('./melhor-envio-oauth')
-        
-        if (isTokenExpired(token.expires_at)) {
-          const refreshToken = token.additional_data?.refresh_token
-          const clientId = token.additional_data?.client_id
-          const clientSecret = token.additional_data?.client_secret
+    if (autoRefresh && token.expires_at) {
+      // Renovação automática para Melhor Envio
+      if (provider === 'melhor_envio') {
+        try {
+          const { isTokenExpired, refreshOAuth2Token } = await import('./melhor-envio-oauth')
           
-          // Tentar renovar com refresh_token primeiro, se disponível
-          if (refreshToken) {
-            try {
-              console.log(`[Integrations] Token expirado, renovando automaticamente com refresh_token para ${provider} (${environment})`)
-              const newTokens = await refreshOAuth2Token(refreshToken, environment)
-              await updateOAuth2Token(
-                provider,
-                environment,
-                newTokens.access_token,
-                newTokens.refresh_token,
-                newTokens.expires_in,
-                token.additional_data
-              )
-              console.log(`[Integrations] Token renovado com sucesso para ${provider} (${environment})`)
-              return newTokens.access_token
-            } catch (error: any) {
-              console.error(`[Integrations] Erro ao renovar com refresh_token: ${error.message}`)
-              // Se falhar, tentar com client_credentials se disponível
+          if (isTokenExpired(token.expires_at)) {
+            const refreshToken = token.additional_data?.refresh_token
+            const clientId = token.additional_data?.client_id
+            const clientSecret = token.additional_data?.client_secret
+            
+            // Tentar renovar com refresh_token primeiro, se disponível
+            if (refreshToken) {
+              try {
+                console.log(`[Integrations] Token expirado, renovando automaticamente com refresh_token para ${provider} (${environment})`)
+                const newTokens = await refreshOAuth2Token(refreshToken, environment)
+                await updateOAuth2Token(
+                  provider,
+                  environment,
+                  newTokens.access_token,
+                  newTokens.refresh_token,
+                  newTokens.expires_in,
+                  token.additional_data
+                )
+                console.log(`[Integrations] Token renovado com sucesso para ${provider} (${environment})`)
+                return newTokens.access_token
+              } catch (error: any) {
+                console.error(`[Integrations] Erro ao renovar com refresh_token: ${error.message}`)
+                // Se falhar, tentar com client_credentials se disponível
+              }
+            }
+            
+            // Se não tiver refresh_token ou falhou, tentar com client_credentials
+            if (clientId && clientSecret) {
+              try {
+                const { getOAuth2Token } = await import('./melhor-envio-oauth')
+                console.log(`[Integrations] Renovando token com client_credentials para ${provider} (${environment})`)
+                const newTokens = await getOAuth2Token({ client_id: clientId, client_secret: clientSecret }, environment)
+                await updateOAuth2Token(
+                  provider,
+                  environment,
+                  newTokens.access_token,
+                  newTokens.refresh_token,
+                  newTokens.expires_in,
+                  token.additional_data
+                )
+                console.log(`[Integrations] Token renovado com sucesso usando client_credentials para ${provider} (${environment})`)
+                return newTokens.access_token
+              } catch (error: any) {
+                console.error(`[Integrations] Erro ao renovar com client_credentials: ${error.message}`)
+                // Continuar com token antigo, pode ainda funcionar
+              }
             }
           }
-          
-          // Se não tiver refresh_token ou falhou, tentar com client_credentials
-          if (clientId && clientSecret) {
-            try {
-              const { getOAuth2Token } = await import('./melhor-envio-oauth')
-              console.log(`[Integrations] Renovando token com client_credentials para ${provider} (${environment})`)
-              const newTokens = await getOAuth2Token({ client_id: clientId, client_secret: clientSecret }, environment)
-              await updateOAuth2Token(
-                provider,
-                environment,
-                newTokens.access_token,
-                newTokens.refresh_token,
-                newTokens.expires_in,
-                token.additional_data
-              )
-              console.log(`[Integrations] Token renovado com sucesso usando client_credentials para ${provider} (${environment})`)
-              return newTokens.access_token
-            } catch (error: any) {
-              console.error(`[Integrations] Erro ao renovar com client_credentials: ${error.message}`)
-              // Continuar com token antigo, pode ainda funcionar
-            }
-          }
+        } catch (importError) {
+          // Se não conseguir importar, continuar sem renovação automática
+          console.warn('[Integrations] Não foi possível carregar módulo OAuth2 para renovação automática')
         }
-      } catch (importError) {
-        // Se não conseguir importar, continuar sem renovação automática
-        console.warn('[Integrations] Não foi possível carregar módulo OAuth2 para renovação automática')
+      }
+      
+      // Renovação automática para Bling
+      if (provider === 'bling') {
+        try {
+          const { isTokenExpired, refreshBlingOAuth2Token } = await import('./bling-oauth')
+          
+          if (isTokenExpired(token.expires_at)) {
+            const refreshToken = token.additional_data?.refresh_token
+            const clientId = token.additional_data?.client_id
+            const clientSecret = token.additional_data?.client_secret
+            
+            // Bling requer refresh_token E client_id/client_secret para renovar
+            if (refreshToken && clientId && clientSecret) {
+              try {
+                console.log(`[Integrations] Token Bling expirado, renovando automaticamente com refresh_token para ${provider} (${environment})`)
+                const newTokens = await refreshBlingOAuth2Token(refreshToken, clientId, clientSecret)
+                
+                // Preservar client_id e client_secret no additional_data
+                const updatedAdditionalData = {
+                  ...token.additional_data,
+                  client_id: clientId,
+                  client_secret: clientSecret,
+                }
+                
+                await updateOAuth2Token(
+                  provider,
+                  environment,
+                  newTokens.access_token,
+                  newTokens.refresh_token,
+                  newTokens.expires_in,
+                  updatedAdditionalData
+                )
+                console.log(`[Integrations] Token Bling renovado com sucesso para ${provider} (${environment})`)
+                return newTokens.access_token
+              } catch (error: any) {
+                console.error(`[Integrations] Erro ao renovar token Bling: ${error.message}`)
+                // Continuar com token antigo, pode ainda funcionar por alguns minutos
+              }
+            } else {
+              console.warn(`[Integrations] Token Bling expirado mas não há refresh_token ou credenciais disponíveis para renovação automática`)
+            }
+          }
+        } catch (importError) {
+          // Se não conseguir importar, continuar sem renovação automática
+          console.warn('[Integrations] Não foi possível carregar módulo OAuth2 do Bling para renovação automática', importError)
+        }
       }
     }
     

@@ -10,7 +10,7 @@
  */
 
 import { query } from '@/lib/database'
-import { getToken } from '@/lib/integrations'
+import { getToken, getTokenWithFallback } from '@/lib/integrations'
 
 const BLING_API_BASE = 'https://api.bling.com.br/Api/v3'
 
@@ -176,12 +176,13 @@ function getContactDocumentDigits(contact: Record<string, unknown>): string {
  * Retorna o id do primeiro contato encontrado ou null se não encontrar / em caso de erro.
  * Usado para evitar criar duplicata e para recuperar id quando o POST falha por "já cadastrado".
  *
- * Primeiro tenta GET com ?numeroDocumento=; se a API v3 não suportar esse filtro (resposta
- * não-ok ou lista vazia), usa fallback com busca paginada (até 5 páginas de 100 itens).
+ * Primeiro tenta GET com ?numeroDocumento= com retry; se a API v3 não suportar esse filtro (resposta
+ * não-ok ou lista vazia), usa fallback com busca paginada (até 20 páginas de 100 itens).
  */
 async function findBlingContactByDocument(
   cleanCpf: string,
-  accessToken: string
+  accessToken: string,
+  maxPages: number = 20
 ): Promise<number | null> {
   const token = accessToken.trim().replace(/^Bearer\s+/i, '')
   if (!token || !cleanCpf) return null
@@ -191,34 +192,58 @@ async function findBlingContactByDocument(
     Accept: 'application/json',
   }
 
-  try {
-    const searchUrl = `${BLING_API_BASE}/contatos?numeroDocumento=${encodeURIComponent(cleanCpf)}`
-    const response = await fetch(searchUrl, { method: 'GET', headers })
+  // Tentativa com retry para busca por numeroDocumento
+  const maxRetries = 3
+  for (let retry = 0; retry < maxRetries; retry++) {
+    try {
+      const searchUrl = `${BLING_API_BASE}/contatos?numeroDocumento=${encodeURIComponent(cleanCpf)}`
+      const response = await fetch(searchUrl, { method: 'GET', headers })
 
-    if (response.ok) {
-      const searchData = await response.json().catch(() => null)
-      const contacts = parseBlingContactsList(searchData)
-      for (const c of contacts) {
-        if (typeof c === 'object' && c !== null) {
-          const contact = c as Record<string, unknown>
-          if (getContactDocumentDigits(contact) === cleanCpf && contact.id != null) {
-            return Number(contact.id)
+      if (response.ok) {
+        const searchData = await response.json().catch(() => null)
+        const contacts = parseBlingContactsList(searchData)
+        for (const c of contacts) {
+          if (typeof c === 'object' && c !== null) {
+            const contact = c as Record<string, unknown>
+            if (getContactDocumentDigits(contact) === cleanCpf && contact.id != null) {
+              return Number(contact.id)
+            }
           }
         }
+        // Se chegou aqui e não encontrou, o filtro pode não estar funcionando, tentar fallback
+        break
+      } else if (response.status >= 500 && retry < maxRetries - 1) {
+        // Erro do servidor, tentar novamente após delay exponencial
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retry) * 1000))
+        continue
+      } else {
+        // Outro erro ou última tentativa, usar fallback
+        break
+      }
+    } catch (err) {
+      if (retry < maxRetries - 1) {
+        console.warn(`[Bling] Erro ao buscar contato por documento (tentativa ${retry + 1}/${maxRetries}):`, err)
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retry) * 1000))
+        continue
+      } else {
+        console.warn('[Bling] Erro ao buscar contato por documento após retries:', err)
+        break
       }
     }
-  } catch (err) {
-    console.warn('[Bling] Erro ao buscar contato por documento:', err)
   }
 
   // Fallback: API pode não suportar filtro numeroDocumento na query; buscar por paginação
-  const maxPages = 5
   const limit = 100
   for (let page = 1; page <= maxPages; page++) {
     try {
       const listUrl = `${BLING_API_BASE}/contatos?pagina=${page}&limite=${limit}`
       const listResponse = await fetch(listUrl, { method: 'GET', headers })
-      if (!listResponse.ok) break
+      if (!listResponse.ok) {
+        if (page === 1) {
+          console.warn(`[Bling] Erro ao buscar contatos paginados: HTTP ${listResponse.status}`)
+        }
+        break
+      }
 
       const listData = await listResponse.json().catch(() => null)
       const contacts = parseBlingContactsList(listData)
@@ -233,8 +258,8 @@ async function findBlingContactByDocument(
         }
       }
     } catch (err) {
-      console.warn('[Bling] Erro ao buscar contato (fallback paginado):', err)
-      break
+      console.warn(`[Bling] Erro ao buscar contato (fallback paginado, página ${page}):`, err)
+      if (page === 1) break // Se falhar na primeira página, não continuar
     }
   }
 
@@ -256,26 +281,133 @@ function getBlingErrorMessage(responseData: unknown): string {
 }
 
 /**
+ * Busca agressiva de contato no Bling quando sabemos que ele existe mas não foi encontrado.
+ * Tenta múltiplas estratégias: busca por documento com retry, busca paginada expandida,
+ * e variações do documento (com/sem zeros à esquerda).
+ */
+async function findBlingContactAggressively(
+  cleanCpf: string,
+  clientName: string,
+  accessToken: string
+): Promise<number | null> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token || !cleanCpf) return null
+
+  console.log(`[Bling] Busca agressiva iniciada para CPF: ${cleanCpf}, Nome: ${clientName}`)
+
+  // Estratégia 1: Busca expandida por documento (até 20 páginas)
+  const foundById = await findBlingContactByDocument(cleanCpf, accessToken, 20)
+  if (foundById != null) {
+    console.log(`[Bling] Contato encontrado na busca expandida: ID ${foundById}`)
+    return foundById
+  }
+
+  // Estratégia 2: Tentar variações do documento (com zeros à esquerda para CPF)
+  if (cleanCpf.length === 11) {
+    // CPF: tentar com zeros à esquerda (ex: 12345678901 -> 01234567890)
+    const paddedCpf = cleanCpf.padStart(11, '0')
+    if (paddedCpf !== cleanCpf) {
+      const foundPadded = await findBlingContactByDocument(paddedCpf, accessToken, 10)
+      if (foundPadded != null) {
+        console.log(`[Bling] Contato encontrado com CPF com zeros: ID ${foundPadded}`)
+        return foundPadded
+      }
+    }
+  }
+
+  // Estratégia 3: Busca paginada expandida com timeout maior (até 30s total)
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+  }
+
+  const maxPages = 20
+  const limit = 100
+  const startTime = Date.now()
+  const maxTime = 30000 // 30 segundos
+
+  for (let page = 1; page <= maxPages; page++) {
+    if (Date.now() - startTime > maxTime) {
+      console.warn(`[Bling] Timeout na busca agressiva após ${page - 1} páginas`)
+      break
+    }
+
+    try {
+      const listUrl = `${BLING_API_BASE}/contatos?pagina=${page}&limite=${limit}`
+      const listResponse = await fetch(listUrl, { method: 'GET', headers })
+      if (!listResponse.ok) break
+
+      const listData = await listResponse.json().catch(() => null)
+      const contacts = parseBlingContactsList(listData)
+      if (contacts.length === 0) break
+
+      for (const c of contacts) {
+        if (typeof c === 'object' && c !== null) {
+          const contact = c as Record<string, unknown>
+          const contactDoc = getContactDocumentDigits(contact)
+          // Se o documento bate, retornar o ID (documento é único)
+          if (contactDoc === cleanCpf && contact.id != null) {
+            console.log(`[Bling] Contato encontrado na busca agressiva (página ${page}): ID ${contact.id}`)
+            return Number(contact.id)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[Bling] Erro na busca agressiva (página ${page}):`, err)
+      if (page === 1) break
+    }
+  }
+
+  console.warn(`[Bling] Contato não encontrado após busca agressiva para CPF: ${cleanCpf}`)
+  return null
+}
+
+/**
  * Verifica se a resposta indica que o contato já está cadastrado no Bling.
  * Inclui a mensagem "não foi possível salvar o contato" pois o Bling pode devolver
  * apenas isso quando o CPF já está cadastrado (sem a frase "já cadastrado").
  */
 function isAlreadyRegisteredError(responseStatus: number, responseData: unknown): boolean {
   if (responseStatus === 409) return true
-  if (responseData && typeof responseData === 'object' && 'error' in responseData) return true
+  if (responseStatus === 422) {
+    // 422 Unprocessable Entity pode indicar validação de duplicata
+    const msg = getBlingErrorMessage(responseData).toLowerCase()
+    if (msg.includes('cadastrado') || msg.includes('existe') || msg.includes('duplicat')) {
+      return true
+    }
+  }
+  if (responseData && typeof responseData === 'object' && 'error' in responseData) {
+    const msg = getBlingErrorMessage(responseData).toLowerCase()
+    if (msg.includes('cadastrado') || msg.includes('existe') || msg.includes('duplicat')) {
+      return true
+    }
+  }
   const msg = getBlingErrorMessage(responseData).toLowerCase()
   return (
     responseStatus >= 400 &&
     responseStatus < 500 &&
     (msg.includes('já cadastrado') ||
       msg.includes('já está cadastrado') ||
-      msg.includes('não foi possível salvar o contato'))
+      msg.includes('cpf já cadastrado') ||
+      msg.includes('cnpj já cadastrado') ||
+      msg.includes('documento já existe') ||
+      msg.includes('não foi possível salvar o contato') ||
+      msg.includes('contato já existe'))
   )
 }
 
 /**
+ * Resultado da busca/criação de contato no Bling.
+ */
+interface ContactResult {
+  id: number | null
+  found: boolean
+  created: boolean
+}
+
+/**
  * Cria ou busca um contato no Bling usando os dados do pedido.
- * Retorna o ID do contato criado/encontrado no Bling.
+ * Retorna o ID do contato criado/encontrado no Bling, ou null se o contato existe mas não foi encontrado.
  * 
  * IMPORTANTE: Requer escopo de Contatos no app Bling (OAuth).
  * Se o token não tiver permissão para criar contatos, esta função falhará.
@@ -285,7 +417,7 @@ function isAlreadyRegisteredError(responseStatus: number, responseData: unknown)
 async function createOrFindContactInBling(
   order: OrderForBling,
   accessToken: string
-): Promise<number> {
+): Promise<ContactResult> {
   const token = accessToken.trim().replace(/^Bearer\s+/i, '')
   if (!token) {
     throw new Error('[Sistema] Token Bling não configurado.')
@@ -299,7 +431,7 @@ async function createOrFindContactInBling(
   // Buscar antes de criar: se o contato já existe no Bling, usar o id existente
   const existingId = await findBlingContactByDocument(cleanCpf, accessToken)
   if (existingId != null) {
-    return existingId
+    return { id: existingId, found: true, created: false }
   }
 
   const tipo = cleanCpf.length === 11 ? 'F' : 'J'
@@ -352,19 +484,23 @@ async function createOrFindContactInBling(
     if (response.ok) {
       const contactId = extractBlingIdFromResponse(responseData)
       if (contactId != null) {
-        return Number(contactId)
+        return { id: Number(contactId), found: true, created: true }
       }
       throw new Error('Resposta do Bling não contém ID do contato criado.')
     }
 
-    // Se o contato já existe (409, body com error, ou mensagem "já cadastrado"), buscar por CPF
+    // Se o contato já existe (409, body com error, ou mensagem "já cadastrado"), buscar agressivamente
     if (isAlreadyRegisteredError(response.status, responseData)) {
-      const foundId = await findBlingContactByDocument(cleanCpf, accessToken)
+      console.log('[Bling] Erro indica que contato já existe, iniciando busca agressiva...')
+      const foundId = await findBlingContactAggressively(cleanCpf, order.client_name || '', accessToken)
       if (foundId != null) {
-        return foundId
+        return { id: foundId, found: true, created: false }
       }
+      // Contato existe mas não foi encontrado - retornar null para usar dados inline
+      console.warn('[Bling] Contato existe no Bling mas não foi encontrado. O pedido será criado com dados inline do contato.')
       const errorMsg = getBlingErrorMessage(responseData) || response.statusText
-      throw new Error(`Contato já existe ou erro ao criar: ${errorMsg}. Verifique se o CPF/CNPJ já está cadastrado no Bling.`)
+      // Não lançar erro - retornar null para permitir criação com dados inline
+      return { id: null, found: false, created: false }
     }
 
     // Outros erros
@@ -495,14 +631,20 @@ export async function sendOrderToBling(
   }
 
   // Criar ou buscar contato no Bling antes de criar a venda (API v3 exige contato.id)
-  let blingContactId: number
+  let contactResult: ContactResult
   try {
-    blingContactId = await createOrFindContactInBling(order, accessToken)
+    contactResult = await createOrFindContactInBling(order, accessToken)
   } catch (contactErr: unknown) {
     const contactErrorMsg = contactErr instanceof Error ? contactErr.message : String(contactErr)
     await updateOrderSync(orderId, 'error', contactErrorMsg)
     await insertLog(orderId, 'error', contactErrorMsg, null)
     return { success: false, error: `[Bling] Não foi possível cadastrar o cliente no Bling. ${contactErrorMsg}` }
+  }
+
+  // Se o contato existe mas não foi encontrado, usar dados inline (mapOrderToBlingSale já suporta isso)
+  const blingContactId = contactResult.id
+  if (!contactResult.found && contactResult.id === null) {
+    console.log('[Bling] Criando pedido com dados inline do contato (contato existe no Bling mas não foi encontrado)')
   }
 
   // Número único da venda no Bling: reutilizar o já salvo ou gerar novo (evita conflito com numeros já existentes na conta)
@@ -678,8 +820,8 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
  * Se o pedido já estiver sincronizado (bling_sync_status === 'synced'), não reenvia e retorna sucesso.
  */
 export async function syncOrderToBling(orderId: number): Promise<SendOrderToBlingResult> {
-  const token = await getToken('bling', 'production')
-  if (!token) {
+  const tokenValue = await getTokenWithFallback('bling', 'production')
+  if (!tokenValue) {
     return { success: false, error: '[Sistema] Integração Bling não configurada.' }
   }
 
@@ -725,7 +867,7 @@ export async function syncOrderToBling(orderId: number): Promise<SendOrderToBlin
 
   return sendOrderToBling(
     orderId,
-    token.token_value,
+    tokenValue,
     fetchOrderForBlingDb,
     updateOrderSync,
     insertLog
@@ -942,10 +1084,12 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
 }
 
 export async function syncOrdersToBling(sinceDate: string, accessToken: string): Promise<BlingSyncResult> {
-  const tokenObj = await getToken('bling', 'production')
-  if (!tokenObj) {
+  // Verificar token uma vez antes de processar todos os pedidos
+  const tokenValue = await getTokenWithFallback('bling', 'production')
+  if (!tokenValue) {
     return { success: false, syncedCount: 0, error: '[Sistema] Integração Bling não configurada.' }
   }
+  
   const ordersResult = await query(
     `SELECT id FROM orders WHERE created_at >= $1::date AND (bling_sync_status IS NULL OR bling_sync_status != 'synced') ORDER BY id`,
     [sinceDate]

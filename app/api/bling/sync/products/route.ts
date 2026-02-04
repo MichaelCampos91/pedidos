@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
-import { getToken } from '@/lib/integrations'
+import { getTokenWithFallback } from '@/lib/integrations'
 import { syncProductsToBling } from '@/lib/bling'
 
 export const dynamic = 'force-dynamic'
@@ -21,15 +21,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const token = await getToken('bling', 'production')
-    if (!token) {
+    const tokenValue = await getTokenWithFallback('bling', 'production')
+    if (!tokenValue) {
       return NextResponse.json(
         { error: '[Sistema] Integração Bling não configurada.' },
         { status: 400 }
       )
     }
 
-    const result = await syncProductsToBling(sinceDate, token.token_value)
+    const result = await syncProductsToBling(sinceDate, tokenValue)
     if (result.success) {
       return NextResponse.json({ success: true, syncedCount: result.syncedCount })
     }

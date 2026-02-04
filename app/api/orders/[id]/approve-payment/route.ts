@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { syncOrderToBling } from '@/lib/bling'
+import { saveLog } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,7 @@ export async function POST(
   try {
     const cookieStore = await cookies()
     const cookieToken = cookieStore.get('auth_token')?.value
-    await requireAuth(request, cookieToken)
+    const user = await requireAuth(request, cookieToken)
 
     const orderId = parseInt(params.id)
     if (isNaN(orderId)) {
@@ -26,6 +27,7 @@ export async function POST(
     }
 
     const order = orderResult.rows[0]
+    const oldStatus = order.status
     const timestamp = new Date().toISOString()
     const observationLine = `\n#Pagamento aprovado manualmente em: ${timestamp}.`
 
@@ -47,12 +49,37 @@ export async function POST(
       )
     }
 
+    // Atualizar status do pedido para "aguardando_producao"
     await query(
-      `UPDATE orders SET paid_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
-        observations = COALESCE(observations, '') || $1
-       WHERE id = $2`,
-      [observationLine, orderId]
+      `UPDATE orders 
+       SET status = $1, paid_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+           observations = COALESCE(observations, '') || $2
+       WHERE id = $3`,
+      ['aguardando_producao', observationLine, orderId]
     )
+
+    // Registrar mudança no histórico se o status mudou
+    if (oldStatus !== 'aguardando_producao') {
+      await query(
+        `INSERT INTO order_history (order_id, field_changed, old_value, new_value, changed_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [orderId, 'status', oldStatus, 'aguardando_producao', user.id]
+      )
+
+      // Log de mudança de status
+      await saveLog(
+        'info',
+        `Status do pedido #${orderId} alterado de "${oldStatus}" para "aguardando_producao" após aprovação manual de pagamento`,
+        {
+          order_id: orderId,
+          old_status: oldStatus,
+          new_status: 'aguardando_producao',
+          changed_by: user.id,
+          reason: 'manual_payment_approval',
+        },
+        'order'
+      )
+    }
 
     try {
       await syncOrderToBling(orderId)

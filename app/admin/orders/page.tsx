@@ -42,6 +42,7 @@ import { OrderModal } from "@/components/orders/OrderModal"
 import { Badge } from "@/components/ui/badge"
 import { OrderStatusModal } from "@/components/orders/OrderStatusModal"
 import { OrderDetailsModal } from "@/components/orders/OrderDetailsModal"
+import { CancelOrderModal } from "@/components/orders/CancelOrderModal"
 import { STATUS_LABELS, ORDER_STATUS_CONFIG } from "@/components/orders/order-status-config"
 import {
   Dialog,
@@ -108,6 +109,10 @@ export default function OrdersPage() {
   const [actionsOpenOrderId, setActionsOpenOrderId] = useState<number | null>(null)
   const [blingSyncingOrderId, setBlingSyncingOrderId] = useState<number | null>(null)
   const [blingErrorModal, setBlingErrorModal] = useState<{ open: boolean; message: string }>({ open: false, message: '' })
+  const [cancelModal, setCancelModal] = useState<{
+    open: boolean
+    orderId: number | null
+  }>({ open: false, orderId: null })
 
   const loadOrders = async () => {
     setLoading(true)
@@ -669,6 +674,17 @@ export default function OrdersPage() {
                               Enviar ao Bling
                             </Button>
                           )}
+                          {order.status !== "enviado" && order.status !== "cancelados" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => { setActionsOpenOrderId(null); setCancelModal({ open: true, orderId: order.id }) }}
+                            >
+                              <XCircle className="h-4 w-4" />
+                              Cancelar Pedido
+                            </Button>
+                          )}
                         </div>
                       </PopoverContent>
                     </Popover>
@@ -842,6 +858,16 @@ export default function OrdersPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Cancelamento de Pedido */}
+      <CancelOrderModal
+        open={cancelModal.open}
+        onOpenChange={(open) =>
+          setCancelModal((prev) => ({ ...prev, open }))
+        }
+        orderId={cancelModal.orderId}
+        onSuccess={handleRefreshOrders}
+      />
     </div>
   )
 }
