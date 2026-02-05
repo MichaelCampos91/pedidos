@@ -175,6 +175,24 @@ export const blingApi = {
         cep?: string
       } | null
     }> }>('/bling/contacts/import', { method: 'GET' }),
+  testContactsImport: () =>
+    request<{ success: boolean; count: number; contacts: Array<{
+      id: number
+      nome: string
+      numeroDocumento: string
+      email?: string | null
+      celular?: string | null
+      telefone?: string | null
+      endereco?: {
+        endereco?: string
+        numero?: string
+        complemento?: string
+        bairro?: string
+        municipio?: string
+        uf?: string
+        cep?: string
+      } | null
+    }> }>('/bling/contacts/import?limit=5', { method: 'GET' }),
   confirmContactsImport: (contacts: Array<{
     id: number
     nome: string
@@ -191,11 +209,28 @@ export const blingApi = {
       uf?: string
       cep?: string
     } | null
-  }>) =>
+  }>, filters?: {
+    email: boolean
+    documento: boolean
+    endereco: boolean
+  }) =>
     request<{ success: boolean; importedCount: number; updatedCount: number; skippedCount: number; errors?: string[] }>('/bling/contacts/import', {
       method: 'POST',
-      body: { contacts },
+      body: { contacts, filters: filters || { email: false, documento: false, endereco: false } },
     }),
+  getContactsImportStatus: () =>
+    request<{
+      status: 'idle' | 'running' | 'completed' | 'failed'
+      progressPercent: number
+      totalContacts: number
+      processedContacts: number
+      importedCount: number
+      updatedCount: number
+      skippedCount: number
+      startedAt?: string
+      finishedAt?: string | null
+      errorMessage?: string | null
+    }>('/bling/contacts/import/status'),
 }
 
 // Metrics

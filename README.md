@@ -1,273 +1,300 @@
 # Gerenciador de Pedidos
 
-Sistema completo de gerenciamento de pedidos desenvolvido com Next.js 14 (App Router), React, Tailwind CSS e PostgreSQL.
+Sistema completo de gestão de pedidos online com integrações para processamento de pagamentos, cálculo de frete e sincronização com sistemas ERP.
 
-## Tecnologias
+## Visão Geral
+
+Este sistema permite que empresas gerenciem pedidos de forma centralizada, desde a criação até o envio, incluindo:
+
+- **Gestão de Pedidos**: Criação, acompanhamento e atualização de status de pedidos
+- **Cadastro de Clientes**: Armazenamento de informações de clientes com múltiplos endereços
+- **Catálogo de Produtos**: Gerenciamento de produtos e categorias
+- **Processamento de Pagamentos**: Integração com Pagar.me para pagamentos via PIX e cartão de crédito
+- **Cálculo de Frete**: Integração com Melhor Envio para cálculo automático de frete
+- **Sincronização ERP**: Integração com Bling para sincronização de pedidos, produtos e clientes
+
+## Stack Tecnológica
 
 ### Frontend
-- **Framework**: Next.js 14.2.0 (App Router)
-- **Biblioteca**: React 18.2.0
-- **Linguagem**: TypeScript 5.2.2
-- **Estilização**: Tailwind CSS 3.4.17
-- **Componentes UI**: shadcn/ui (baseado em Radix UI)
-- **Ícones**: Lucide React
-- **Notificações**: Sonner (toasts)
-- **Formatação**: date-fns, class-variance-authority
+- **Next.js 14**: Framework React com App Router para rotas e páginas
+- **React 18**: Biblioteca para construção de interfaces
+- **TypeScript**: Linguagem de programação com tipagem estática
+- **Tailwind CSS**: Framework CSS para estilização
+- **Radix UI**: Componentes de interface acessíveis e customizáveis
+- **Lucide React**: Biblioteca de ícones
 
 ### Backend
-- **Runtime**: Node.js (via Next.js)
-- **API**: Next.js Route Handlers (App Router)
-- **Autenticação**: JWT (jsonwebtoken 9.0.2)
-- **Banco de Dados**: PostgreSQL (via pg 8.11.0)
-- **Criptografia**: bcryptjs 2.4.3
+- **Next.js API Routes**: Rotas de API integradas ao Next.js
+- **Node.js**: Ambiente de execução JavaScript
+- **PostgreSQL**: Banco de dados relacional
+- **bcryptjs**: Biblioteca para hash de senhas
+- **jsonwebtoken**: Biblioteca para geração e validação de tokens JWT
 
-### Integrações
-- **Pagar.me**: Pagamentos PIX e cartão de crédito
-- **Melhor Envio**: Cálculo de fretes em tempo real
-
-## Padrões Visuais
-
-### Design System
-O sistema utiliza **shadcn/ui** como base de componentes, garantindo:
-- Componentes acessíveis via Radix UI
-- Suporte a tema claro/escuro
-- Cores primárias: HSL(331, 100%, 50%) - rosa/magenta
-- Variantes configuráveis via class-variance-authority
-
-### Componentes Disponíveis
-- **Button**: Variantes (default, destructive, outline, secondary, ghost, link, whatsapp)
-- **Card**: Container para conteúdo agrupado
-- **Dialog**: Modais e diálogos
-- **Input**: Campos de formulário
-- **Select**: Seletores dropdown
-- **Table**: Tabelas de dados
-- **Tabs**: Navegação por abas
-- **Badge**: Etiquetas e status
-- **Popover**: Tooltips e menus
-- **Calendar**: Seleção de datas
-
-### Notificações
-Sistema de toasts via Sonner com ícones e cores por tipo:
-- **Sucesso**: Verde com CheckCircle
-- **Erro**: Vermelho com XCircle
-- **Aviso**: Amarelo com AlertTriangle
-- **Info**: Azul com Info
+### Autenticação
+- **JWT (JSON Web Tokens)**: Tokens de autenticação armazenados em cookies HTTP-only
+- **Cookies**: Armazenamento seguro de tokens no navegador
 
 ## Estrutura do Projeto
 
 ```
 pedidos/
-├── app/
-│   ├── api/              # Route Handlers (API)
-│   │   ├── auth/         # Autenticação
-│   │   ├── payment/      # Pagamentos (Pagar.me)
-│   │   ├── checkout/     # Checkout público
-│   │   ├── integrations/ # Gerenciamento de integrações
-│   │   └── shipping/      # Cálculo de fretes
-│   ├── admin/            # Páginas administrativas
-│   │   ├── dashboard/    # Dashboard com métricas
-│   │   ├── orders/       # Gestão de pedidos
-│   │   ├── clients/      # Gestão de clientes
-│   │   ├── products/    # Gestão de produtos
-│   │   ├── integrations/ # Configuração de integrações
-│   │   └── shipping/     # Configuração de fretes
-│   ├── checkout/         # Checkout público
-│   ├── login/            # Página de login
-│   └── layout.tsx        # Layout raiz
-├── components/
-│   ├── ui/               # Componentes base (shadcn/ui)
-│   ├── checkout/         # Componentes de checkout
-│   ├── orders/           # Componentes de pedidos
-│   ├── integrations/     # Componentes de integrações
-│   └── shipping/         # Componentes de frete
-├── lib/
-│   ├── pagarme.ts        # Integração Pagar.me
-│   ├── melhor-envio.ts   # Integração Melhor Envio
-│   ├── integrations.ts   # Gerenciamento de tokens
-│   ├── database.ts       # Conexão PostgreSQL
-│   ├── auth.ts           # Autenticação JWT
-│   └── utils.ts          # Utilitários gerais
-├── database/
-│   ├── schema.sql        # Schema do banco
-│   ├── seed.sql          # Dados iniciais
-│   └── migrations/       # Migrações
-└── package.json
+├── app/                    # Rotas e páginas (Next.js App Router)
+│   ├── admin/             # Área administrativa
+│   │   ├── dashboard/      # Dashboard com métricas
+│   │   ├── orders/        # Gestão de pedidos
+│   │   ├── clients/        # Gestão de clientes
+│   │   ├── products/      # Gestão de produtos
+│   │   ├── integrations/  # Configuração de integrações
+│   │   ├── settings/      # Configurações do sistema
+│   │   └── shipping/      # Configuração de frete
+│   ├── api/               # Rotas de API
+│   │   ├── auth/          # Autenticação
+│   │   ├── orders/        # Endpoints de pedidos
+│   │   ├── clients/        # Endpoints de clientes
+│   │   ├── products/      # Endpoints de produtos
+│   │   ├── payment/       # Processamento de pagamentos
+│   │   ├── shipping/      # Cálculo de frete
+│   │   ├── bling/         # Integração Bling
+│   │   └── integrations/  # Gestão de tokens de integração
+│   ├── checkout/          # Página de checkout
+│   └── login/             # Página de login
+├── components/            # Componentes React reutilizáveis
+│   ├── ui/                # Componentes de interface base
+│   ├── orders/            # Componentes relacionados a pedidos
+│   ├── checkout/          # Componentes de checkout
+│   ├── integrations/      # Componentes de integrações
+│   └── settings/          # Componentes de configurações
+├── lib/                   # Bibliotecas e utilitários
+│   ├── api.ts             # Cliente API para requisições do frontend
+│   ├── auth.ts            # Funções de autenticação
+│   ├── auth-context.tsx   # Contexto React para autenticação
+│   ├── database.ts        # Conexão com banco de dados
+│   ├── bling.ts           # Cliente da API Bling
+│   ├── melhor-envio.ts    # Cliente da API Melhor Envio
+│   ├── pagarme.ts         # Cliente da API Pagar.me
+│   ├── integrations.ts    # Gestão de tokens de integração
+│   └── utils.ts           # Funções utilitárias
+├── database/              # Arquivos relacionados ao banco de dados
+│   ├── schema.sql         # Schema completo do banco
+│   └── seed_*.sql         # Scripts de seed para dados iniciais
+└── public/                # Arquivos estáticos
 ```
 
-## Instalação
-
-### 1. Instalar dependências
-
-```bash
-npm install
-```
-
-### 2. Configurar variáveis de ambiente
-
-Criar arquivo `.env.local` na raiz do projeto:
-
-```env
-# Banco de Dados
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=pedidos_db
-DB_USER=seu_usuario
-DB_PASSWORD=sua_senha
-DB_SSL=false
-
-# Autenticação
-JWT_SECRET=seu-secret-key-aqui-mude-em-producao
-
-# Ambiente
-NODE_ENV=development
-```
-
-### 3. Inicializar banco de dados
-
-Execute o schema SQL no seu PostgreSQL:
-
-```bash
-psql -U seu_usuario -d pedidos_db -f database/schema.sql
-```
-
-Execute o seed para criar produtos iniciais:
-
-```bash
-psql -U seu_usuario -d pedidos_db -f database/seed.sql
-```
-
-### 4. Criar admin inicial
-
-Execute um script Node.js para criar o admin:
-
-```javascript
-const bcrypt = require('bcryptjs');
-const hash = await bcrypt.hash('admin123', 10);
-// Use este hash no INSERT abaixo
-```
-
-```sql
-INSERT INTO admins (email, password_hash, name)
-VALUES ('admin@pedidos.com', '$2a$10$SEU_HASH_AQUI', 'Administrador');
-```
-
-### 5. Iniciar servidor de desenvolvimento
-
-```bash
-npm run dev
-```
-
-O servidor estará disponível em `http://localhost:3000`
-
-## Credenciais Padrão
-
-Após criar o admin:
-
-- **Email**: admin@pedidos.com
-- **Senha**: admin123 (ou a que você configurou)
-
-## Funcionalidades Implementadas
-
-### Autenticação
-- Login/logout administrativo
-- Proteção de rotas com JWT
-- Sessão persistente via httpOnly cookies
-
-### Gestão de Clientes
-- CRUD completo de clientes
-- Múltiplos endereços por cliente
-- Validação de CPF único
-- Integração WhatsApp 1-clique
-- Busca de CEP automática
-
-### Gestão de Produtos
-- CRUD de produtos
-- Preços base configuráveis
-- Dimensões e peso para cálculo de frete
-
-### Gestão de Pedidos
-- Criação de pedidos step-by-step
-- Edição de itens (título, valor, observações)
-- Listagem com filtros avançados
-- Alteração de status
-- Geração de links de pagamento
+## Principais Funcionalidades
 
 ### Dashboard
-- Métricas em tempo real (total pedidos, faturamento, aguardando pagamento)
-- Distribuição por status
-- Filtros por período
+Página inicial do sistema que exibe métricas e estatísticas importantes:
+- Total de pedidos e faturamento
+- Pedidos aguardando pagamento
+- Ticket médio
+- Distribuição por status, forma de pagamento e estado
+- Top produtos mais vendidos
+- Filtros por período de data
 
-### Checkout Público
-- Fluxo step-by-step (Revisão → Pagamento → Concluído)
-- Suporte a múltiplos métodos de pagamento
-- Integração com Pagar.me
+### Gestão de Pedidos
+Permite criar, visualizar e gerenciar pedidos:
+- Criação de novos pedidos com seleção de cliente e produtos
+- Visualização detalhada de cada pedido
+- Atualização de status (aguardando pagamento, em produção, enviado, etc.)
+- Geração de links de pagamento
+- Aprovação manual de pagamentos
+- Cancelamento de pedidos
+- Sincronização automática com Bling quando o pedido é pago
 
-### Pagamentos
-- **PIX**: QR code com countdown, polling automático, cópia e cola
-- **Cartão de Crédito**: Tokenização segura, parcelamento
-- Webhook para atualização de status
-- Polling de status em tempo real
+### Gestão de Clientes
+Sistema completo de cadastro de clientes:
+- Cadastro de clientes pessoa física (CPF) ou jurídica (CNPJ)
+- Múltiplos endereços por cliente
+- Endereço padrão para entregas
+- Importação em massa de clientes do Bling
+- Histórico de pedidos por cliente
 
-### Fretes
-- Integração Melhor Envio
-- Cálculo de frete em tempo real
-- Cache inteligente de cotações
-- Suporte a múltiplos transportadoras
+### Catálogo de Produtos
+Gerenciamento de produtos e categorias:
+- Cadastro de produtos com nome, descrição, preço e dimensões
+- Organização por categorias
+- Sincronização de produtos e categorias com Bling
+- Controle de estoque (quando aplicável)
 
 ### Integrações
-- Gerenciamento centralizado de tokens
-- Suporte a múltiplos ambientes (sandbox/produção)
-- Validação automática de tokens
-- Renovação automática OAuth2 (Melhor Envio)
+Página centralizada para configuração de todas as integrações:
+- **Bling**: Configuração de OAuth2 e sincronização
+- **Melhor Envio**: Configuração de tokens OAuth2
+- **Pagar.me**: Configuração de API keys e public keys
+- Validação de tokens e credenciais
+- Seleção de ambiente (sandbox/produção) por integração
+- Histórico de validações
 
-## Integrações
+### Configurações
+Configurações avançadas do sistema:
+- **Regras de Frete**: Descontos, valores mínimos e condições especiais
+- **Taxas de Parcelamento**: Configuração de juros por quantidade de parcelas
+- **Modalidades de Envio**: Sincronização e ativação de modalidades do Melhor Envio
+- **Configurações de Pagamento**: Desconto PIX, configurações gerais
 
-### Pagar.me
-Integração completa para pagamentos PIX e cartão de crédito.
+### Checkout
+Página pública para finalização de pedidos:
+- Seleção de método de pagamento (PIX ou cartão)
+- Cálculo automático de frete
+- Aplicação de descontos e regras
+- Processamento seguro de pagamentos
+- Geração de QR Code PIX
+- Tokenização segura de cartão de crédito
 
-**Documentação**: [INTEGRACAO_PAGARME.md](./INTEGRACAO_PAGARME.md)
+## Banco de Dados
 
-**Recursos:**
-- Criação de transações PIX e cartão
-- Webhook para atualização de status
-- Polling de status em tempo real
-- Gerenciamento de tokens (secret_key, public_key)
-- Suporte a sandbox e produção
+O sistema utiliza PostgreSQL como banco de dados. As principais tabelas são:
 
-### Melhor Envio
-Integração para cálculo de fretes em tempo real.
+### Tabelas Principais
 
-**Documentação**: [INTEGRACAO_MELHOR_ENVIO.md](./INTEGRACAO_MELHOR_ENVIO.md)
+- **admins**: Usuários administrativos do sistema
+- **clients**: Cadastro de clientes
+- **client_addresses**: Endereços dos clientes
+- **products**: Catálogo de produtos
+- **product_categories**: Categorias de produtos
+- **orders**: Pedidos do sistema
+- **order_items**: Itens de cada pedido
+- **payments**: Registro de pagamentos
+- **integration_tokens**: Tokens de autenticação das integrações
+- **shipping_rules**: Regras customizadas de frete
+- **shipping_modalities**: Modalidades de envio disponíveis
+- **installment_rates**: Taxas de parcelamento
+- **bling_sync_logs**: Logs de sincronização com Bling
+- **system_logs**: Logs gerais do sistema
 
-**Recursos:**
-- Cálculo de frete em tempo real
-- Autenticação OAuth2 com renovação automática
-- Cache inteligente de cotações
-- Suporte a múltiplos transportadoras
+### Relacionamentos
 
-## Scripts Disponíveis
+- Um cliente pode ter múltiplos endereços
+- Um pedido pertence a um cliente e tem um endereço de entrega
+- Um pedido contém múltiplos itens (produtos)
+- Um pedido pode ter múltiplos pagamentos (tentativas)
+- Produtos pertencem a categorias
+- Clientes podem estar vinculados a contatos do Bling
 
-- `npm run dev` - Inicia servidor de desenvolvimento
-- `npm run build` - Build para produção
-- `npm run start` - Inicia servidor de produção
-- `npm run lint` - Executa linter
+## Autenticação
 
-## Arquitetura
+O sistema utiliza autenticação baseada em JWT (JSON Web Tokens):
 
-O projeto utiliza uma arquitetura monolítica Next.js, onde:
+1. **Login**: Usuário informa email e senha
+2. **Validação**: Sistema verifica credenciais no banco de dados
+3. **Geração de Token**: Se válido, gera token JWT
+4. **Armazenamento**: Token é armazenado em cookie HTTP-only
+5. **Proteção de Rotas**: Rotas administrativas verificam token antes de permitir acesso
+6. **Logout**: Remove cookie e invalida sessão
 
-- **Frontend e Backend** estão no mesmo projeto Next.js
-- **APIs** são implementadas como Route Handlers em `app/api/`
-- **Banco de dados** é acessado via `lib/database.ts` (SQL direto, sem ORM)
-- **Autenticação** é gerenciada via JWT em cookies httpOnly
-- **Componentes** reutilizáveis em `components/`
-- **Integrações** centralizadas em `lib/` com gerenciamento de tokens no banco
+### Segurança
 
-## Funcionalidades Pendentes
+- Senhas são armazenadas com hash bcrypt (nunca em texto plano)
+- Tokens JWT têm tempo de expiração
+- Cookies são HTTP-only (não acessíveis via JavaScript)
+- Rotas de API verificam autenticação antes de processar requisições
 
-- Integração Bling ERP
-- Regras de frete customizadas
-- Parcelamento avançado
-- Job de pedidos não pagos
-- Relatórios avançados
-- Exportação de dados
+## Divisão de Responsabilidades
+
+### Frontend (`/app` e `/components`)
+- Interface do usuário e experiência visual
+- Formulários e validações básicas
+- Chamadas para APIs do backend
+- Gerenciamento de estado da interface
+- Proteção de rotas no lado do cliente
+
+### Backend (`/app/api`)
+- Processamento de requisições
+- Validação de dados e regras de negócio
+- Comunicação com banco de dados
+- Integração com APIs externas (Bling, Melhor Envio, Pagar.me)
+- Autenticação e autorização
+- Processamento de webhooks
+
+### Bibliotecas (`/lib`)
+- Clientes de API externas
+- Funções utilitárias reutilizáveis
+- Lógica de negócio compartilhada
+- Helpers para formatação e cálculos
+
+### Banco de Dados (`/database`)
+- Schema completo do banco
+- Scripts de migração (quando aplicável)
+- Seeds para dados iniciais
+
+## Como Começar
+
+### Pré-requisitos
+
+- Node.js 18 ou superior
+- PostgreSQL 12 ou superior
+- Contas nas plataformas integradas (Bling, Melhor Envio, Pagar.me)
+
+### Instalação
+
+1. Clone o repositório
+2. Instale as dependências:
+   ```bash
+   npm install
+   ```
+
+3. Configure as variáveis de ambiente (crie um arquivo `.env.local`):
+   ```
+   DATABASE_URL=sua_url_de_conexao_postgresql
+   JWT_SECRET=seu_secret_jwt
+   ```
+
+4. Execute o schema do banco de dados:
+   ```bash
+   psql -d seu_banco < database/schema.sql
+   ```
+
+5. Execute os seeds (opcional):
+   ```bash
+   psql -d seu_banco < database/seed_admins.sql
+   ```
+
+6. Inicie o servidor de desenvolvimento:
+   ```bash
+   npm run dev
+   ```
+
+7. Acesse `http://localhost:3000` e faça login
+
+### Configuração de Integrações
+
+Após o primeiro login, configure as integrações na página **Integrações**:
+
+1. **Bling**: Configure Client ID e Client Secret, depois autorize o app
+2. **Melhor Envio**: Configure Client ID e autorize o app
+3. **Pagar.me**: Configure API Key e Public Key
+
+Consulte a documentação específica de cada integração para mais detalhes:
+- [Integração Bling](INTEGRACAO_BLING.md)
+- [Integração Melhor Envio](INTEGRACAO_MELHOR_ENVIO.md)
+- [Integração Pagar.me](INTEGRACAO_PAGARME.md)
+
+## Fluxo de Trabalho Típico
+
+1. **Cadastro de Produtos**: Crie produtos e categorias no sistema
+2. **Cadastro de Clientes**: Cadastre clientes ou importe do Bling
+3. **Criação de Pedido**: Crie um pedido selecionando cliente e produtos
+4. **Cálculo de Frete**: Sistema calcula frete automaticamente via Melhor Envio
+5. **Geração de Link de Pagamento**: Gere link para o cliente pagar
+6. **Processamento de Pagamento**: Cliente paga via PIX ou cartão
+7. **Atualização Automática**: Sistema atualiza status do pedido via webhook
+8. **Sincronização com Bling**: Pedido é automaticamente sincronizado quando pago
+9. **Acompanhamento**: Acompanhe o pedido até o envio
+
+## Logs e Auditoria
+
+O sistema mantém logs de todas as operações importantes:
+- Tentativas de login
+- Criação e alteração de pedidos
+- Processamento de pagamentos
+- Sincronizações com Bling
+- Erros e avisos do sistema
+
+Os logs podem ser visualizados na página **Logs** do painel administrativo.
+
+## Suporte e Documentação
+
+Para mais informações sobre integrações específicas, consulte:
+- [Integração Bling](INTEGRACAO_BLING.md)
+- [Integração Melhor Envio](INTEGRACAO_MELHOR_ENVIO.md)
+- [Integração Pagar.me](INTEGRACAO_PAGARME.md)

@@ -1,811 +1,541 @@
-# Integração com Pagar.me - Documentação Completa
+# Integração Pagar.me
 
-## Índice
+Documentação completa da integração com Pagar.me para processamento de pagamentos via PIX e cartão de crédito.
 
-1. [Panorama Geral da Stack Tecnológica](#panorama-geral-da-stack-tecnológica)
-2. [Visão Geral da Integração](#visão-geral-da-integração)
-3. [Estrutura de Arquivos](#estrutura-de-arquivos)
-4. [Autenticação e Gerenciamento de Tokens](#autenticação-e-gerenciamento-de-tokens)
-5. [Criação de Transações](#criação-de-transações)
-6. [Fluxo PIX](#fluxo-pix)
-7. [Fluxo Cartão de Crédito](#fluxo-cartão-de-crédito)
-8. [Webhooks](#webhooks)
-9. [Polling de Status](#polling-de-status)
-10. [Estrutura do Banco de Dados](#estrutura-do-banco-de-dados)
-11. [Tratamento de Erros](#tratamento-de-erros)
-12. [Interface do Usuário](#interface-do-usuário)
+## Visão Geral
 
----
+A integração com Pagar.me permite processar pagamentos de forma segura, oferecendo múltiplas formas de pagamento aos clientes. O sistema suporta:
 
-## Panorama Geral da Stack Tecnológica
+- **PIX**: Pagamento instantâneo com QR Code e desconto configurável
+- **Cartão de Crédito**: Pagamento parcelado com taxas de juros configuráveis
+- **Webhooks**: Atualização automática de status de pagamentos
+- **Tokenização**: Segurança na captura de dados de cartão
+- **Ambientes separados**: Sandbox para testes e produção para uso real
 
-### Frontend
-- **Framework**: Next.js 14.2.0 (App Router)
-- **Biblioteca UI**: React 18.2.0
-- **Linguagem**: TypeScript 5.2.2
-- **Estilização**: Tailwind CSS 3.4.17
-- **Componentes UI**: shadcn/ui (Radix UI)
-- **Ícones**: Lucide React
-- **Notificações**: Sonner (toasts)
+## Autenticação
 
-### Backend
-- **Runtime**: Node.js (via Next.js)
-- **API Routes**: Next.js Route Handlers (App Router)
-- **Banco de Dados**: PostgreSQL (via pg 8.11.0)
-- **Autenticação**: JWT (jsonwebtoken 9.0.2)
+### API Key (Bearer Token)
 
-### Integração Pagar.me
-- **API**: Pagar.me Core API v5
-- **Métodos**: PIX e Cartão de Crédito
-- **Autenticação**: HTTP Basic Auth (secret_key)
-- **Tokenização**: Public Key para frontend
+Diferente das outras integrações, o Pagar.me utiliza autenticação via API Key:
 
----
+1. **Configuração**: É necessário ter uma API Key (secret key) do Pagar.me
+2. **Armazenamento**: API Key é salva no banco de dados de forma segura
+3. **Uso**: API Key é enviada no header `Authorization: Bearer {api_key}` em todas as requisições
+4. **Public Key**: Chave pública separada para tokenização no frontend
 
-## Visão Geral da Integração
+### Chaves Necessárias
 
-A integração com o Pagar.me permite:
-- **Pagamentos PIX**: QR code com countdown, polling automático, cópia e cola
-- **Pagamentos Cartão**: Tokenização segura no frontend, parcelamento
-- **Webhook**: Atualização automática de status
-- **Polling**: Verificação de status em tempo real
-- **Múltiplos ambientes**: Sandbox e produção
-- **Gerenciamento centralizado**: Tokens armazenados no banco de dados
+- **API Key (Secret Key)**: Usada no backend para criar transações e consultar status
+- **Public Key**: Usada no frontend para tokenizar dados de cartão (não expõe dados sensíveis)
 
-### Ambientes Suportados
-- **Sandbox**: `https://api.pagar.me/core/v5`
-- **Produção**: `https://api.pagar.me/core/v5`
+**Importante**: A Public Key pode ser exposta no frontend, mas a API Key (secret) nunca deve ser exposta.
 
----
+## Versão da API
 
-## Estrutura de Arquivos
+O sistema utiliza a **Pagar.me Core API v5**:
 
-```
-pedidos/
-├── lib/
-│   ├── pagarme.ts                    # Lógica principal de integração
-│   ├── integrations.ts               # Gerenciamento de tokens no BD
-│   ├── integrations-types.ts         # Tipos TypeScript
-│   └── database.ts                   # Conexão PostgreSQL
-│
-├── app/api/
-│   ├── payment/
-│   │   ├── create/route.ts           # Endpoint de criação de transação
-│   │   ├── webhook/route.ts          # Webhook handler
-│   │   └── status/route.ts          # Polling de status
-│   └── pagarme/
-│       └── public-key/route.ts       # Endpoint para public key
-│
-├── components/checkout/
-│   └── PaymentForm.tsx               # Componente de pagamento
-│
-└── database/
-    └── schema.sql                     # Schema do banco (tabela payments, integration_tokens)
-```
+- **URL Base**: `https://api.pagar.me/core/v5`
+- **Documentação Oficial**: https://docs.pagar.me/
+- **Referência da API**: https://docs.pagar.me/reference
 
----
+### Ambientes
 
-## Autenticação e Gerenciamento de Tokens
+O Pagar.me utiliza a mesma URL para sandbox e produção, diferenciando apenas pelas credenciais:
 
-### Tokens Necessários
+- **Sandbox**: Usa API Key e Public Key de sandbox
+- **Produção**: Usa API Key e Public Key de produção
 
-A integração utiliza dois tipos de tokens:
+**CRÍTICO**: Sempre use as credenciais corretas para cada ambiente. Credenciais de sandbox não funcionam em produção e vice-versa.
 
-1. **Secret Key** (`secret_key`): Usado no backend para criar transações
-   - Armazenado em `integration_tokens.token_value`
-   - Usado em HTTP Basic Auth: `Basic ${Buffer.from(secret_key + ':').toString('base64')}`
+## Endpoints Utilizados
 
-2. **Public Key** (`public_key`): Usado no frontend para tokenização de cartão
-   - Armazenado em `integration_tokens.additional_data.public_key`
-   - Fallback para variáveis de ambiente: `PAGARME_PUBLIC_KEY` ou `PAGARME_PUBLIC_KEY_SANDBOX`
+### Tokenização de Cartão (Frontend)
 
-### Gerenciamento de Tokens
+**POST** `/tokens?appId={public_key}`
 
-Os tokens são gerenciados via tabela `integration_tokens`:
+Tokeniza dados do cartão de crédito no frontend antes de enviar para o backend. Isso garante que dados sensíveis nunca passem pelo servidor da aplicação.
 
-```sql
-CREATE TABLE integration_tokens (
-    id BIGSERIAL PRIMARY KEY,
-    provider VARCHAR(50) NOT NULL,
-    environment VARCHAR(20) NOT NULL,
-    token_value TEXT NOT NULL, -- Secret Key
-    token_type VARCHAR(20) DEFAULT 'bearer', -- Sempre 'bearer' (único tipo que funciona)
-    additional_data JSONB, -- { public_key: "..." }
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(provider, environment)
-);
-```
-
-**IMPORTANTE**: 
-- Tipo de token sempre será **"Bearer"** (definido automaticamente no backend)
-- Apenas "Bearer" funciona como tipo de token
-
-### Configuração de Tokens
-
-1. Acesse `/admin/integrations`
-2. Selecione Pagar.me
-3. Configure tokens para sandbox e/ou produção:
-   - **Secret Key**: Secret Key do Pagar.me (campo "Secret Key")
-   - **Public Key**: Public Key do Pagar.me (campo "Public Key" - opcional, para tokenização de cartão)
-4. Ambos os tokens são exibidos no card de integração (mascarados)
-
-### Seleção de Ambiente Ativo
-
-O sistema permite selecionar qual ambiente está ativo (Sandbox ou Produção) através de um select no topo do card de integração. O ambiente selecionado é usado automaticamente em todos os pagamentos.
-
-- Ambiente ativo é armazenado em `system_settings` com chave `integration_active_env_pagarme`
-- Se não configurado, usa produção se existir token, senão sandbox
-- Badge "Ativo" é exibido no token do ambiente selecionado
-- O ambiente selecionado é usado em:
-  - Criação de transações (`/api/payment/create`)
-  - Obtenção de Public Key (`/api/pagarme/public-key`)
-  - Polling de status (`/api/payment/status`)
-
-### Obtenção de Tokens
-
-```typescript
-// Backend: Obter secret_key
-const apiKey = await getApiKey(environment)
-
-// Frontend: Obter public_key (usa ambiente ativo automaticamente)
-const response = await fetch(`/api/pagarme/public-key`)
-const { publicKey } = await response.json()
-
-// Ou especificar ambiente explicitamente
-const response = await fetch(`/api/pagarme/public-key?environment=${environment}`)
-const { publicKey } = await response.json()
-```
-
-### Seleção de Ambiente Ativo
-
-**GET** `/api/integrations/active-environment?provider=pagarme`
-- Retorna ambiente ativo configurado
-- Fallback: produção se existir token, senão sandbox
-
-**POST** `/api/integrations/active-environment`
-```typescript
-{
-  provider: 'pagarme',
-  environment: 'sandbox' | 'production'
-}
-```
-- Salva ambiente ativo em `system_settings`
-- Valida se token existe para o ambiente selecionado
-
----
-
-## Criação de Transações
-
-### Endpoint
-
-`POST /api/payment/create`
-
-### Parâmetros
-
-```typescript
-{
-  order_id: number
-  payment_method: 'pix' | 'credit_card'
-  environment?: 'sandbox' | 'production'
-  customer: {
-    name: string
-    email: string
-    document: string // CPF (11 dígitos)
-    phone: {
-      country_code: string // '55' para Brasil
-      area_code: string    // DDD (2 dígitos)
-      number: string       // 8 ou 9 dígitos
-    }
-  }
-  billing?: {
-    name: string
-    address: {
-      street: string
-      number: string
-      complement?: string
-      neighborhood: string
-      city: string
-      state: string      // UF (2 letras)
-      zip_code: string   // CEP (8 dígitos)
-    }
-  }
-  credit_card?: {
-    card_token: string   // Token gerado no frontend
-    installments?: number // Número de parcelas (padrão: 1)
-  }
-}
-```
-
-### Validações
-
-- **Cliente**: Nome (mín. 3 caracteres), email válido, CPF (11 dígitos)
-- **Telefone**: Código do país 55, DDD 2 dígitos, número 8-9 dígitos
-- **Pedido**: Deve estar com status `aguardando_pagamento`
-- **Cartão**: `card_token` obrigatório para pagamento com cartão
-
-### Resposta
-
-```typescript
-{
-  success: true
-  transaction: {
-    id: string              // ID da transação Pagar.me
-    status: string          // 'pending' | 'paid' | 'failed'
-    payment_method: string
-    pix_qr_code?: string    // QR code PIX (se método for PIX)
-    pix_expiration_date?: string
-  }
-}
-```
-
----
-
-## Fluxo PIX
-
-### 1. Criação da Transação
-
-```typescript
-// Frontend: PaymentForm.tsx
-const response = await fetch('/api/payment/create', {
-  method: 'POST',
-  body: JSON.stringify({
-    order_id,
-    payment_method: 'pix',
-    customer: customerData,
-  }),
-})
-```
-
-### 2. Processamento Backend
-
-```typescript
-// lib/pagarme.ts - createPixTransaction()
-const transaction = await createPixTransaction({
-  amount: order.total * 100, // em centavos
-  payment_method: 'pix',
-  customer: customerData,
-  items: orderItems,
-  metadata: { order_id: order_id.toString() },
-}, environment)
-```
-
-### 3. Estrutura da Requisição Pagar.me
-
+**Payload**:
 ```json
 {
-  "items": [...],
+  "type": "card",
+  "card": {
+    "number": "4111111111111111",
+    "holder_name": "João Silva",
+    "exp_month": 12,
+    "exp_year": 2025,
+    "cvv": "123"
+  }
+}
+```
+
+**Resposta**:
+```json
+{
+  "id": "card_token_abc123",
+  "type": "card"
+}
+```
+
+**Uso**: O token retornado é enviado ao backend, que usa para criar a transação sem nunca ver os dados reais do cartão.
+
+### Criação de Transação PIX
+
+**POST** `/orders`
+
+Cria uma transação PIX e retorna QR Code para pagamento.
+
+**Payload Exemplo**:
+```json
+{
+  "items": [
+    {
+      "amount": 10000,
+      "description": "Pedido #123",
+      "quantity": 1,
+      "code": "prod-456"
+    }
+  ],
   "customer": {
-    "name": "...",
-    "email": "...",
-    "document": "...",
+    "name": "João Silva",
+    "email": "joao@example.com",
+    "document": "12345678900",
+    "type": "individual",
     "phones": {
       "mobile_phone": {
         "country_code": "55",
-        "area_code": "18",
-        "number": "997264861"
+        "area_code": "11",
+        "number": "999999999"
       }
     }
   },
-  "payments": [{
-    "payment_method": "pix",
-    "pix": {
-      "expires_in": 3600
+  "payments": [
+    {
+      "payment_method": "pix",
+      "pix": {
+        "expires_in": 3600
+      }
     }
-  }],
+  ],
   "metadata": {
     "order_id": "123"
   }
 }
 ```
 
-### 4. Resposta e Extração do QR Code
-
-O sistema busca o QR code em múltiplos campos da resposta:
-
-- `data.charges[0].last_transaction.qr_code`
-- `data.charges[0].last_transaction.qr_code_string`
-- `data.charges[0].last_transaction.pix_qr_code`
-- `data.last_transaction.qr_code`
-- `data.qr_code`
-
-### 5. Exibição no Frontend
-
-- **QR Code**: Exibido via `api.qrserver.com` ou placeholder em sandbox
-- **Countdown**: 10 minutos (600 segundos) com persistência em `localStorage`
-- **Código PIX**: Texto copiável com botão de cópia
-- **Polling**: Verificação automática a cada 5 segundos
-
-### 6. Persistência
-
-Dados salvos em `localStorage`:
-
-```typescript
-const storageKey = `pix_countdown_${orderId}_${transactionId}`
-localStorage.setItem(storageKey, JSON.stringify({
-  transactionId,
-  expiresAt: Date.now() + 600000, // 10 minutos
-  pix_qr_code,
-  pix_expiration_date,
-}))
-```
-
----
-
-## Fluxo Cartão de Crédito
-
-### 1. Tokenização no Frontend
-
-```typescript
-// PaymentForm.tsx
-const tokenUrl = `https://api.pagar.me/core/v5/tokens?appId=${publicKey}`
-const tokenResponse = await fetch(tokenUrl, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    type: 'card',
-    card: {
-      number: cardNumber,
-      holder_name: cardData.card_holder_name,
-      exp_month: expMonth,
-      exp_year: expYear,
-      cvv: cardData.card_cvv,
-    },
-  }),
-})
-const { id: cardToken } = await tokenResponse.json()
-```
-
-### 2. Criação da Transação
-
-```typescript
-const response = await fetch('/api/payment/create', {
-  method: 'POST',
-  body: JSON.stringify({
-    order_id,
-    payment_method: 'credit_card',
-    credit_card: {
-      card_token,
-      installments: 1,
-    },
-    customer: customerData,
-  }),
-})
-```
-
-### 3. Processamento Backend
-
-```typescript
-// lib/pagarme.ts - createCreditCardTransaction()
-const transaction = await createCreditCardTransaction({
-  amount: order.total * 100,
-  payment_method: 'credit_card',
-  credit_card: {
-    card_token,
-    installments: 1,
-  },
-  customer: customerData,
-  billing: billingData,
-  items: orderItems,
-  metadata: { order_id: order_id.toString() },
-}, environment)
-```
-
-### 4. Estrutura da Requisição Pagar.me
-
+**Resposta**:
 ```json
 {
-  "items": [...],
-  "customer": {...},
-  "payments": [{
-    "payment_method": "credit_card",
-    "credit_card": {
-      "installments": 1,
-      "statement_descriptor": "PEDIDO",
-      "card_token": "...",
-      "card": {
-        "billing_address": {...}
+  "id": "order_abc123",
+  "status": "pending",
+  "charges": [
+    {
+      "id": "ch_xyz789",
+      "status": "pending",
+      "payment_method": "pix",
+      "last_transaction": {
+        "id": "tran_123",
+        "status": "pending",
+        "qr_code": "00020126330014BR.GOV.BCB.PIX...",
+        "qr_code_url": "https://pagar.me/qr/..."
       }
     }
-  }],
-  "metadata": {...}
+  ]
 }
 ```
 
-### 5. Resposta
+### Criação de Transação Cartão de Crédito
 
-```typescript
+**POST** `/orders`
+
+Cria uma transação com cartão de crédito usando token gerado no frontend.
+
+**Payload Exemplo**:
+```json
 {
-  id: string
-  status: 'paid' | 'pending' | 'failed'
-  charges: [{
-    last_transaction: {
-      status: string
-      acquirer_response_code?: string
-      acquirer_response_message?: string
+  "items": [
+    {
+      "amount": 10000,
+      "description": "Pedido #123",
+      "quantity": 1,
+      "code": "prod-456"
     }
-  }]
-}
-```
-
----
-
-## Webhooks
-
-### Endpoint
-
-`POST /api/payment/webhook`
-
-### Configuração no Pagar.me
-
-1. Acesse o dashboard Pagar.me
-2. Configure webhook: `https://seudominio.com/api/payment/webhook`
-3. Eventos: `order.paid`, `order.payment_failed`, `order.pending`
-
-### Processamento
-
-```typescript
-// app/api/payment/webhook/route.ts
-export async function POST(request: NextRequest) {
-  const body = await request.json()
-  const event = body.type || body.event
-  const data = body.data || body
-  
-  // Buscar order_id no metadata
-  const orderId = data.metadata?.order_id || data.order?.metadata?.order_id
-  
-  // Atualizar status do pagamento
-  await query(
-    `UPDATE payments SET status = $1, paid_at = $2 WHERE pagarme_transaction_id = $3`,
-    [paymentStatus, paidAt, transactionId]
-  )
-  
-  // Se pago, atualizar pedido
-  if (paymentStatus === 'paid') {
-    await query(
-      `UPDATE orders SET status = 'aguardando_producao', paid_at = CURRENT_TIMESTAMP WHERE id = $1`,
-      [orderId]
-    )
+  ],
+  "customer": {
+    "name": "João Silva",
+    "email": "joao@example.com",
+    "document": "12345678900",
+    "type": "individual",
+    "phones": {
+      "mobile_phone": {
+        "country_code": "55",
+        "area_code": "11",
+        "number": "999999999"
+      }
+    }
+  },
+  "payments": [
+    {
+      "payment_method": "credit_card",
+      "credit_card": {
+        "token": "card_token_abc123",
+        "installments": 3,
+        "statement_descriptor": "LOJA EXEMPLO"
+      }
+    }
+  ],
+  "metadata": {
+    "order_id": "123"
   }
 }
 ```
 
-### Status Mapeados
-
-- `paid` / `captured` → `paid`
-- `refused` / `failed` → `failed`
-- `pending` → `pending`
-
----
-
-## Polling de Status
-
-### Endpoint
-
-`GET /api/payment/status?transaction_id={id}&environment={env}`
-
-### Implementação Frontend
-
-```typescript
-// PaymentForm.tsx
-const checkPaymentStatus = useCallback(async () => {
-  const response = await fetch(
-    `/api/payment/status?transaction_id=${pixTransactionId}&environment=${environment}`
-  )
-  const { status } = await response.json()
-  
-  if (status === 'paid') {
-    setPaymentStatus('paid')
-    onSuccess()
-  } else if (status === 'failed') {
-    setPaymentStatus('failed')
-  }
-}, [pixTransactionId, environment])
-
-// Polling a cada 5 segundos
-useEffect(() => {
-  const interval = setInterval(checkPaymentStatus, 5000)
-  return () => clearInterval(interval)
-}, [checkPaymentStatus])
-```
-
-### Detecção de Ambiente
-
-```typescript
-function detectEnvironment(request: NextRequest): 'sandbox' | 'production' {
-  if (process.env.NODE_ENV === 'development') return 'sandbox'
-  
-  const hostname = request.headers.get('host') || ''
-  if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
-    return 'sandbox'
-  }
-  
-  if (process.env.PAGARME_ENVIRONMENT === 'sandbox') return 'sandbox'
-  return 'production'
+**Resposta**:
+```json
+{
+  "id": "order_abc123",
+  "status": "paid",
+  "charges": [
+    {
+      "id": "ch_xyz789",
+      "status": "paid",
+      "payment_method": "credit_card",
+      "last_transaction": {
+        "id": "tran_123",
+        "status": "paid",
+        "amount": 10000
+      }
+    }
+  ]
 }
 ```
 
----
+### Consulta de Status
 
-## Estrutura do Banco de Dados
+**GET** `/orders/{order_id}`
 
-### Tabela: payments
+Consulta o status atual de uma transação.
 
-```sql
-CREATE TABLE payments (
-    id BIGSERIAL PRIMARY KEY,
-    order_id BIGINT NOT NULL REFERENCES orders(id),
-    pagarme_transaction_id VARCHAR(255) NOT NULL,
-    method VARCHAR(20) NOT NULL, -- 'pix' | 'credit_card'
-    installments INTEGER DEFAULT 1,
-    amount DECIMAL(10, 2) NOT NULL,
-    status VARCHAR(20) NOT NULL, -- 'pending' | 'paid' | 'failed'
-    paid_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+**Resposta**:
+```json
+{
+  "id": "order_abc123",
+  "status": "paid",
+  "charges": [...]
+}
 ```
 
-### Tabela: integration_tokens
+### Webhook
 
-```sql
-CREATE TABLE integration_tokens (
-    id BIGSERIAL PRIMARY KEY,
-    provider VARCHAR(50) NOT NULL, -- 'pagarme'
-    environment VARCHAR(20) NOT NULL, -- 'sandbox' | 'production'
-    token_value TEXT NOT NULL, -- secret_key
-    token_type VARCHAR(20) DEFAULT 'bearer', -- Sempre 'bearer' (único tipo que funciona)
-    additional_data JSONB, -- { public_key: "..." }
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(provider, environment)
-);
+**POST** `/api/payment/webhook`
+
+Endpoint que recebe notificações do Pagar.me sobre mudanças de status de pagamentos.
+
+**Payload do Webhook**:
+```json
+{
+  "id": "hook_123",
+  "type": "order.paid",
+  "data": {
+    "id": "order_abc123",
+    "status": "paid"
+  }
+}
 ```
 
----
+## Fluxos Principais
+
+### 1. Configuração de Credenciais
+
+**Passo a Passo**:
+
+1. Usuário acessa página de Integrações
+2. Seleciona integração Pagar.me
+3. Configura API Key (secret key) para ambiente desejado
+4. Configura Public Key para tokenização no frontend
+5. Sistema valida credenciais fazendo requisição de teste
+6. Credenciais são salvas no banco de dados
+
+**Arquivos Envolvidos**:
+- `app/api/integrations/tokens/route.ts`: Salva tokens no banco
+- `app/api/integrations/validate/pagarme/route.ts`: Valida credenciais
+- `app/api/pagarme/public-key/route.ts`: Retorna public key para frontend
+
+### 2. Processamento de Pagamento PIX
+
+Quando cliente escolhe pagar via PIX:
+
+1. **Seleção de Método**: Cliente seleciona PIX no checkout
+2. **Criação de Pedido**: Sistema cria pedido com status "aguardando_pagamento"
+3. **Criação de Transação**: Backend cria transação PIX no Pagar.me
+4. **Aplicação de Desconto**: Se configurado, aplica desconto PIX
+5. **Geração de QR Code**: Pagar.me retorna QR Code e URL
+6. **Exibição ao Cliente**: Sistema exibe QR Code e instruções
+7. **Aguardando Pagamento**: Cliente escaneia e paga
+8. **Webhook**: Pagar.me notifica quando pagamento é confirmado
+9. **Atualização Automática**: Sistema atualiza status do pedido para "pago"
+10. **Sincronização**: Se configurado, sincroniza pedido com Bling
+
+**Arquivos Envolvidos**:
+- `app/api/payment/create/route.ts`: Cria transação
+- `lib/pagarme.ts`: Função `createPixTransaction()`
+- `app/api/payment/webhook/route.ts`: Processa notificações
+- `components/checkout/PaymentForm.tsx`: Interface do checkout
+
+**Desconto PIX**:
+- Configurável nas configurações do sistema
+- Pode ser percentual ou valor fixo
+- Aplicado automaticamente no cálculo do valor
+
+### 3. Processamento de Pagamento Cartão de Crédito
+
+Quando cliente escolhe pagar com cartão:
+
+1. **Seleção de Método**: Cliente seleciona cartão de crédito
+2. **Preenchimento de Dados**: Cliente preenche dados do cartão
+3. **Tokenização no Frontend**: Dados são tokenizados usando Public Key
+4. **Seleção de Parcelas**: Cliente escolhe quantidade de parcelas
+5. **Cálculo de Juros**: Sistema calcula valor final com taxas de parcelamento
+6. **Criação de Transação**: Backend cria transação com token (não dados reais)
+7. **Processamento**: Pagar.me processa pagamento
+8. **Resposta Imediata**: Status é retornado imediatamente (aprovado ou recusado)
+9. **Atualização**: Sistema atualiza status do pedido
+10. **Sincronização**: Se aprovado, sincroniza com Bling
+
+**Arquivos Envolvidos**:
+- `components/checkout/PaymentForm.tsx`: Tokenização e formulário
+- `app/api/payment/create/route.ts`: Cria transação
+- `lib/pagarme.ts`: Função `createCreditCardTransaction()`
+- `lib/payment-rules.ts`: Cálculo de taxas de parcelamento
+
+**Tokenização**:
+- Dados do cartão nunca passam pelo servidor da aplicação
+- Token é gerado diretamente no navegador usando Public Key
+- Token é enviado ao backend para criar transação
+- Maior segurança e conformidade com PCI-DSS
+
+### 4. Parcelamento e Taxas de Juros
+
+O sistema permite configurar taxas de juros por quantidade de parcelas:
+
+1. **Configuração**: Administrador configura taxas nas Configurações
+2. **Importação**: Pode importar taxas diretamente do Pagar.me
+3. **Cálculo**: Ao selecionar parcelas, sistema calcula valor com juros
+4. **Exibição**: Cliente vê valor total e valor por parcela
+5. **Aplicação**: Taxa é aplicada na criação da transação
+
+**Arquivos Envolvidos**:
+- `app/api/settings/installment-rates/route.ts`: CRUD de taxas
+- `app/api/settings/installment-rates/import-pagarme/route.ts`: Importação
+- `lib/payment-rules.ts`: Cálculo de valores
+- Tabela `installment_rates`: Armazena taxas
+
+**Campos de Taxa**:
+- `installments`: Quantidade de parcelas (1 a 12)
+- `rate_percentage`: Taxa de juros em porcentagem
+- `interest_free`: Se pode ser oferecido sem juros
+- `environment`: Ambiente (sandbox ou production)
+
+### 5. Webhooks e Atualização Automática
+
+O Pagar.me envia notificações quando status de pagamento muda:
+
+1. **Configuração**: Webhook URL configurado no painel Pagar.me
+2. **Notificação**: Pagar.me envia POST para `/api/payment/webhook`
+3. **Validação**: Sistema valida assinatura do webhook (se configurado)
+4. **Processamento**: Identifica tipo de evento (paid, failed, etc.)
+5. **Busca de Pedido**: Busca pedido relacionado via `metadata.order_id`
+6. **Atualização**: Atualiza status do pedido e pagamento
+7. **Sincronização**: Se pago, pode disparar sincronização com Bling
+8. **Log**: Registra evento nos logs do sistema
+
+**Arquivos Envolvidos**:
+- `app/api/payment/webhook/route.ts`: Endpoint do webhook
+- `lib/bling.ts`: Sincronização com Bling após pagamento
+
+**Eventos Tratados**:
+- `order.paid`: Pagamento aprovado
+- `order.payment_failed`: Pagamento recusado
+- `order.canceled`: Pedido cancelado
+
+## Armazenamento de Credenciais
+
+As credenciais são armazenadas na tabela `integration_tokens`:
+
+- **provider**: `'pagarme'`
+- **environment**: `'sandbox'` ou `'production'` (separados)
+- **token_value**: API Key (secret key)
+- **token_type**: `'bearer'`
+- **additional_data**: JSON com:
+  - `public_key`: Public Key para tokenização
+- **is_active**: Se credenciais estão ativas
+
+**Fallback para Variáveis de Ambiente**:
+- `PAGARME_API_KEY`: API Key de produção
+- `PAGARME_API_KEY_SANDBOX`: API Key de sandbox
+- `PAGARME_PUBLIC_KEY`: Public Key de produção
+- `PAGARME_PUBLIC_KEY_SANDBOX`: Public Key de sandbox
+
+**Segurança**:
+- API Keys nunca são expostas no frontend
+- Apenas Public Key é enviada ao frontend para tokenização
+- Credenciais são armazenadas de forma segura no banco
+- Credenciais de sandbox e produção são completamente separadas
 
 ## Tratamento de Erros
 
-### Erros Comuns
+O sistema trata diversos tipos de erros:
 
-1. **Token não configurado**
-   - Erro: `Token do Pagar.me não configurado para ambiente {environment}`
-   - Solução: Configurar token em `/admin/integrations`
+### Credenciais Inválidas
 
-2. **Public Key não encontrada**
-   - Erro: `Public key do Pagar.me não configurada`
-   - Solução: Adicionar `public_key` em `additional_data` do token
+**Sintoma**: Erro 401 ao tentar criar transação
 
-3. **Transação falhou**
-   - Erro: `Transação PIX falhou: {mensagem}`
-   - Verificar: `gateway_response.errors` na resposta
+**Soluções**:
+1. Verifique se API Key está correta
+2. Verifique se está usando ambiente correto
+3. Tente validar credenciais na página de Integrações
+4. Verifique se credenciais não expiraram
 
-4. **QR Code não gerado**
-   - Erro: `QR Code não foi gerado pelo Pagar.me`
-   - Verificar: Token válido, PIX habilitado na conta
+### Cartão Recusado
 
-5. **Company não encontrada**
-   - Erro: `Conta Pagar.me não configurada corretamente`
-   - Solução: Verificar configuração da Company no Pagar.me
+**Sintoma**: Transação retornada como recusada
 
-### Logs de Desenvolvimento
+**Tratamento**:
+- Sistema captura motivo da recusa
+- Exibe mensagem amigável ao cliente
+- Registra erro nos logs
+- Permite tentar novamente com outro cartão
 
-Em `NODE_ENV=development`, logs detalhados são exibidos:
+### Dados Inválidos
 
-```typescript
-if (process.env.NODE_ENV === 'development') {
-  console.log('[Pagar.me PIX] Usando API key:', {
-    environment,
-    keyPreview: maskedKey,
-  })
-  console.log('[Pagar.me PIX] Request body completo:', requestBody)
-  console.error('[Pagar.me PIX] Erro na API:', { status, errorMessage })
-}
-```
+**Sintoma**: Erro 400 com mensagem de validação
 
----
+**Validações**:
+- CPF/CNPJ no formato correto
+- Telefone com código de país e área
+- Email válido
+- Dados do cartão válidos (tokenização valida antes)
 
-## Interface do Usuário
+### Webhook Inválido
 
-### Componente PaymentForm
+**Sintoma**: Webhook não processa corretamente
 
-Localização: `components/checkout/PaymentForm.tsx`
-
-**Funcionalidades:**
-
-1. **Seleção de Método**
-   - Radio buttons para PIX e Cartão
-   - Ícones visuais (QrCode, CreditCard)
-
-2. **PIX**
-   - Exibição de QR code (ou placeholder em sandbox)
-   - Countdown regressivo (10 minutos)
-   - Código PIX copiável
-   - Polling automático de status
-   - Feedback visual (pending, paid, failed, expired)
-   - Usa ambiente ativo configurado automaticamente
-
-3. **Cartão**
-   - Formulário de dados do cartão
-   - Validação em tempo real
-   - Tokenização automática
-   - Feedback de loading e erro
-   - Usa ambiente ativo configurado automaticamente
-
-### Estados Visuais
-
-- **Pending**: Ícone Clock, mensagem "Aguardando pagamento..."
-- **Paid**: Ícone CheckCircle2 verde, mensagem de sucesso
-- **Failed**: Ícone XCircle vermelho, mensagem de erro, botão "Fale Conosco"
-- **Expired**: Ícone AlertCircle, mensagem de expiração
-
-### Persistência
-
-- Dados do PIX salvos em `localStorage`
-- Recuperação automática ao recarregar página
-- Limpeza automática após expiração ou pagamento
-
-### Tela de Integrações
-
-**Localização**: `app/admin/integrations/page.tsx`
-
-**Funcionalidades:**
-
-1. **Select de Ambiente**
-   - Exibido no topo de cada card de integração
-   - Opções: Sandbox e Produção (apenas se tokens existirem)
-   - Desabilitado se nenhum token cadastrado
-   - Pré-seleciona ambiente disponível se apenas um existir
-
-2. **Badge "Ativo"**
-   - Exibido no token do ambiente selecionado
-   - Cor verde para destaque visual
-
-3. **Exibição de Chaves (Pagar.me)**
-   - **Secret Key**: Exibida como `****{ultimos 4 caracteres}`
-   - **Public Key**: Exibida como `****{ultimos 4 caracteres}` (se configurada)
-   - Ambas visíveis no card do token
-
-4. **Modal de Formulário**
-   - Formulário de criação/edição exibido em modal
-   - Não ocupa espaço na tela principal
-   - Fecha automaticamente após salvar
-
-5. **Botão Validar**
-   - Exibe texto "Validar" além do ícone
-   - Facilita identificação da ação
-
----
-
-## Fluxos Completos
-
-### Fluxo PIX Completo
-
-```
-Cliente seleciona PIX
-    ↓
-Frontend: POST /api/payment/create
-    ↓
-Backend: createPixTransaction()
-    ↓
-Pagar.me: Cria transação e retorna QR code
-    ↓
-Frontend: Exibe QR code e inicia countdown
-    ↓
-Frontend: Salva em localStorage
-    ↓
-Frontend: Polling a cada 5s
-    ↓
-Backend: GET /api/payment/status
-    ↓
-Pagar.me: Retorna status atualizado
-    ↓
-Frontend: Detecta pagamento → onSuccess()
-    ↓
-Webhook: Pagar.me notifica pagamento
-    ↓
-Backend: Atualiza pedido para 'aguardando_producao'
-```
-
-### Fluxo Cartão Completo
-
-```
-Cliente preenche dados do cartão
-    ↓
-Frontend: Tokeniza cartão via Pagar.me JS
-    ↓
-Frontend: POST /api/payment/create com card_token
-    ↓
-Backend: createCreditCardTransaction()
-    ↓
-Pagar.me: Processa pagamento
-    ↓
-Backend: Retorna status (paid/pending/failed)
-    ↓
-Frontend: Exibe resultado
-    ↓
-Webhook: Pagar.me notifica status final
-    ↓
-Backend: Atualiza pedido se necessário
-```
-
----
-
-## Configuração e Variáveis de Ambiente
-
-### Variáveis Opcionais
-
-```env
-# Ambiente Pagar.me (opcional, detectado automaticamente)
-PAGARME_ENVIRONMENT=sandbox
-
-# Public Keys (fallback se não estiver no banco)
-PAGARME_PUBLIC_KEY=sk_test_...
-PAGARME_PUBLIC_KEY_SANDBOX=sk_test_...
-
-# Webhook Secret (opcional)
-PAGARME_WEBHOOK_SECRET=seu_secret_aqui
-```
-
-### Detecção Automática de Ambiente
-
-- `NODE_ENV=development` → sandbox
-- Hostname contém `localhost` → sandbox
-- Hostname contém IP privado → sandbox
-- Caso contrário → production
-
----
+**Validações**:
+- Verifica se pedido existe
+- Valida formato do payload
+- Trata erros graciosamente (não quebra se webhook falhar)
 
 ## Segurança
 
-- Tokens **nunca** expostos no frontend (apenas public_key)
-- Secret keys armazenadas no banco de dados
-- Tokens mascarados em logs (apenas preview)
-- Validação de assinatura de webhook (se configurada)
-- Autenticação JWT obrigatória para endpoints administrativos
+### Tokenização de Cartão
 
----
+- Dados do cartão nunca passam pelo servidor da aplicação
+- Tokenização acontece diretamente no navegador
+- Conformidade com PCI-DSS (Payment Card Industry Data Security Standard)
+- Tokens são únicos e não podem ser reutilizados
 
-## Resumo da Arquitetura
+### Validação de Dados
 
-### Componentes Principais
+- Validação de CPF/CNPJ antes de enviar
+- Validação de email e telefone
+- Sanitização de dados antes de enviar à API
 
-1. **lib/pagarme.ts**: Lógica de integração com Pagar.me
-2. **lib/settings.ts**: Gerenciamento de ambiente ativo
-3. **app/api/payment/create/route.ts**: Endpoint de criação (usa ambiente ativo)
-4. **app/api/payment/webhook/route.ts**: Handler de webhook
-5. **app/api/payment/status/route.ts**: Polling de status (usa ambiente ativo)
-6. **app/api/pagarme/public-key/route.ts**: Endpoint de Public Key (usa ambiente ativo)
-7. **app/api/integrations/active-environment/route.ts**: Gerenciamento de ambiente ativo
-8. **components/checkout/PaymentForm.tsx**: Interface de pagamento (busca ambiente ativo)
-9. **components/integrations/IntegrationCard.tsx**: Card com select de ambiente e modal
+### Proteção contra Fraude
 
-### Fluxo de Dados
+- Sistema valida dados antes de processar
+- Verifica se pedido não foi já processado
+- Previne múltiplas tentativas simultâneas
+- Registra todas as tentativas de pagamento
 
-```
-Frontend → Busca ambiente ativo → API Route → lib/pagarme.ts → Pagar.me API
-                ↓
-         system_settings (ambiente ativo)
-                ↓
-         Banco de Dados (payments, integration_tokens)
-                ↓
-         Webhook → Atualização automática
-```
+## Boas Práticas
 
-### Detecção de Ambiente
+### Configuração
 
-1. **Prioridade 1**: Ambiente ativo configurado em `system_settings`
-2. **Prioridade 2**: Token de produção existe → usa produção
-3. **Prioridade 3**: Token de sandbox existe → usa sandbox
-4. **Prioridade 4**: Detecção automática (NODE_ENV, hostname)
+1. **Use ambiente correto**: Sandbox para testes, produção para uso real
+2. **Mantenha credenciais seguras**: Nunca exponha API Key no frontend
+3. **Configure webhook**: Configure URL de webhook no painel Pagar.me
+4. **Valide credenciais**: Teste credenciais antes de usar em produção
 
----
+### Processamento de Pagamentos
+
+1. **Sempre tokenize cartão**: Nunca envie dados de cartão ao backend
+2. **Valide dados antes**: Valide CPF, email, telefone antes de enviar
+3. **Trate erros**: Sempre trate erros de forma amigável
+4. **Confirme webhook**: Configure webhook para garantir atualização automática
+
+### Taxas de Parcelamento
+
+1. **Configure taxas reais**: Use taxas reais do Pagar.me ou configure manualmente
+2. **Importe do Pagar.me**: Use função de importação para facilitar
+3. **Teste cálculos**: Verifique se cálculos estão corretos
+4. **Informe cliente**: Sempre mostre valor total e por parcela
+
+### Webhooks
+
+1. **Configure corretamente**: URL deve ser acessível publicamente
+2. **Valide eventos**: Verifique se eventos estão sendo recebidos
+3. **Monitore logs**: Acompanhe processamento de webhooks
+4. **Trate falhas**: Implemente retry para webhooks que falharem
+
+## Troubleshooting
+
+### Pagamento não processa
+
+**Problema**: Erro ao tentar processar pagamento
+
+**Soluções**:
+1. Verifique se credenciais estão configuradas
+2. Verifique se está usando ambiente correto
+3. Consulte logs do sistema para erro específico
+4. Teste credenciais diretamente na API do Pagar.me
+5. Verifique se dados estão no formato correto
+
+### Webhook não funciona
+
+**Problema**: Status não atualiza automaticamente
+
+**Soluções**:
+1. Verifique se URL de webhook está configurada no painel Pagar.me
+2. Verifique se URL é acessível publicamente
+3. Consulte logs para ver se webhooks estão chegando
+4. Teste webhook manualmente usando ferramenta do Pagar.me
+5. Verifique se endpoint está processando corretamente
+
+### QR Code PIX não aparece
+
+**Problema**: QR Code não é exibido após criar transação PIX
+
+**Soluções**:
+1. Verifique se transação foi criada com sucesso
+2. Verifique resposta da API (deve conter `qr_code` ou `qr_code_url`)
+3. Verifique se frontend está processando resposta corretamente
+4. Teste criação de transação diretamente na API
+
+### Cartão sempre recusado
+
+**Problema**: Todos os cartões são recusados
+
+**Soluções**:
+1. Verifique se está usando ambiente correto (sandbox vs produção)
+2. Use cartões de teste no sandbox (consulte documentação Pagar.me)
+3. Verifique se tokenização está funcionando corretamente
+4. Consulte motivo da recusa nos logs
+5. Teste com cartão diferente
+
+### Taxas de parcelamento incorretas
+
+**Problema**: Valores calculados não batem
+
+**Soluções**:
+1. Verifique se taxas estão configuradas corretamente
+2. Verifique se está usando taxas do ambiente correto
+3. Teste cálculo manualmente
+4. Importe taxas do Pagar.me novamente
+5. Verifique se cálculo está usando taxas corretas
 
 ## Referências
 
-- [Documentação Pagar.me](https://docs.pagar.me/)
+- [Documentação Oficial Pagar.me](https://docs.pagar.me/)
 - [API Reference v5](https://docs.pagar.me/reference)
-- [Guia de Integração PIX](https://docs.pagar.me/docs/realizando-uma-transacao-pix)
-- [Guia de Integração Cartão](https://docs.pagar.me/docs/realizando-uma-transacao-de-cartao-de-credito)
+- [Guia de Integração](https://docs.pagar.me/guides)
+- [Cartões de Teste](https://docs.pagar.me/guides/testing)

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { getTokenWithFallback } from '@/lib/integrations'
-import { fetchAllBlingContacts, type BlingContactForImport } from '@/lib/bling'
+import { fetchAllBlingContacts, fetchBlingContactDetail, type BlingContactForImport } from '@/lib/bling'
 import { query } from '@/lib/database'
 import { maskPhone, capitalizeName } from '@/lib/utils'
 
@@ -85,8 +85,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Buscar todos os contatos do Bling
-    const contacts = await fetchAllBlingContacts(tokenValue)
+    // Ler limite opcional da query string
+    const { searchParams } = new URL(request.url)
+    const limitParam = searchParams.get('limit')
+    const maxContacts = limitParam ? parseInt(limitParam, 10) : undefined
+    
+    // Buscar contatos do Bling (com limite se especificado)
+    const contacts = await fetchAllBlingContacts(
+      tokenValue,
+      1000, // maxPages
+      maxContacts && !isNaN(maxContacts) && maxContacts > 0 ? maxContacts : undefined
+    )
 
     return NextResponse.json({
       success: true,
@@ -106,8 +115,47 @@ export async function GET(request: NextRequest) {
 }
 
 /**
+ * Valida se um contato atende aos filtros selecionados (lógica AND).
+ */
+function contactMatchesFilters(
+  contact: BlingContactForImport,
+  filters: { email: boolean; documento: boolean; endereco: boolean }
+): boolean {
+  // Se nenhum filtro está selecionado, aceitar todos
+  if (!filters.email && !filters.documento && !filters.endereco) {
+    return true
+  }
+
+  // Validar cada condição selecionada (todas devem ser verdadeiras - AND)
+  if (filters.email && !contact.email) {
+    return false
+  }
+
+  if (filters.documento) {
+    const cleanDoc = contact.numeroDocumento.replace(/\D/g, '')
+    if (cleanDoc.length !== 11 && cleanDoc.length !== 14) {
+      return false
+    }
+  }
+
+  if (filters.endereco) {
+    // Verificar se tem endereço válido (CEP com 8 dígitos)
+    if (!contact.endereco || !contact.endereco.cep) {
+      return false
+    }
+    const cepRaw = String(contact.endereco.cep).replace(/\D/g, '')
+    if (cepRaw.length !== 8) {
+      return false
+    }
+  }
+
+  return true
+}
+
+/**
  * POST /api/bling/contacts/import
  * Persiste os contatos importados do Bling na tabela clients.
+ * Busca detalhes completos de cada contato antes de processar e valida filtros.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -115,8 +163,17 @@ export async function POST(request: NextRequest) {
     const cookieToken = cookieStore.get('auth_token')?.value
     await requireAuth(request, cookieToken)
 
+    const tokenValue = await getTokenWithFallback('bling', 'production')
+    if (!tokenValue) {
+      return NextResponse.json(
+        { error: '[Sistema] Integração Bling não configurada.' },
+        { status: 400 }
+      )
+    }
+
     const body = await request.json().catch(() => ({}))
     const contacts: BlingContactForImport[] = body?.contacts || []
+    const filters = body?.filters || { email: false, documento: false, endereco: false }
 
     if (!Array.isArray(contacts) || contacts.length === 0) {
       return NextResponse.json(
@@ -125,21 +182,76 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Criar job de importação para rastrear progresso
+    const jobResult = await query(
+      `INSERT INTO bling_contact_import_jobs (status, total_contacts, processed_contacts, imported_count, updated_count, skipped_count)
+       VALUES ('running', $1, 0, 0, 0, 0)
+       RETURNING id`,
+      [contacts.length]
+    )
+    const jobId = (jobResult.rows[0] as { id: number }).id
+    
+    console.log(`[Bling] Iniciando importação de ${contacts.length} contato(s) (job ID: ${jobId})`)
+
     let importedCount = 0
     let updatedCount = 0
     let skippedCount = 0
     const errors: string[] = []
+    const delayBetweenRequests = 350 // ms - garante < 3 req/s (limite da API Bling)
+    const progressUpdateInterval = 5 // Atualizar progresso a cada 5 contatos
 
-    for (const contact of contacts) {
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i]
+      
+      // Delay entre requisições para respeitar rate limit (exceto na primeira)
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayBetweenRequests))
+      }
+
       try {
+        // Buscar detalhes completos do contato (incluindo email e endereço)
+        const contactDetail = await fetchBlingContactDetail(contact.id, tokenValue)
+        
+        if (!contactDetail) {
+          skippedCount++
+          const contactName = capitalizeName(contact.nome?.trim() || 'Sem nome')
+          errors.push(`Contato "${contactName}" (ID Bling: ${contact.id}) ignorado: não foi possível buscar detalhes completos`)
+          continue
+        }
+
+        // Validar filtros nos dados completos
+        if (!contactMatchesFilters(contactDetail, filters)) {
+          skippedCount++
+          const contactName = capitalizeName(contactDetail.nome?.trim() || 'Sem nome')
+          const reasons: string[] = []
+          if (filters.email && !contactDetail.email) reasons.push('sem email')
+          if (filters.documento) {
+            const cleanDoc = contactDetail.numeroDocumento.replace(/\D/g, '')
+            if (cleanDoc.length !== 11 && cleanDoc.length !== 14) reasons.push('documento inválido')
+          }
+          if (filters.endereco) {
+            if (!contactDetail.endereco || !contactDetail.endereco.cep) {
+              reasons.push('sem endereço')
+            } else {
+              const cepRaw = String(contactDetail.endereco.cep).replace(/\D/g, '')
+              if (cepRaw.length !== 8) reasons.push('CEP inválido')
+            }
+          }
+          errors.push(`Contato "${contactName}" (ID Bling: ${contactDetail.id}) ignorado: ${reasons.join(', ')}`)
+          continue
+        }
+
+        // Usar dados completos do contato para processar
+        const fullContact = contactDetail
+
         // Normalizar CPF/CNPJ (só dígitos)
-        const cleanDoc = contact.numeroDocumento.replace(/\D/g, '')
+        const cleanDoc = fullContact.numeroDocumento.replace(/\D/g, '')
         
         // Validar documento (CPF: 11 dígitos, CNPJ: 14 dígitos)
         if (cleanDoc.length !== 11 && cleanDoc.length !== 14) {
           skippedCount++
-          const contactName = capitalizeName(contact.nome?.trim() || 'Sem nome')
-          errors.push(`Contato "${contactName}" (ID Bling: ${contact.id}) ignorado: documento inválido (${cleanDoc.length} dígitos)`)
+          const contactName = capitalizeName(fullContact.nome?.trim() || 'Sem nome')
+          errors.push(`Contato "${contactName}" (ID Bling: ${fullContact.id}) ignorado: documento inválido (${cleanDoc.length} dígitos)`)
           continue
         }
 
@@ -149,17 +261,17 @@ export async function POST(request: NextRequest) {
         const cnpjValue = isCpf ? null : cleanDoc
 
         // Formatar nome e email antes de salvar
-        const formattedName = capitalizeName(contact.nome?.trim() || 'Cliente')
-        const formattedEmail = contact.email?.trim().toLowerCase() || null
-        const formattedPhone = contact.telefone ? maskPhone(contact.telefone) : null
+        const formattedName = capitalizeName(fullContact.nome?.trim() || 'Cliente')
+        const formattedEmail = fullContact.email?.trim().toLowerCase() || null
+        const formattedPhone = fullContact.telefone ? maskPhone(fullContact.telefone) : null
 
         // WhatsApp é obrigatório na tabela clients - usar celular, telefone ou placeholder
-        const whatsappRaw = contact.celular?.replace(/\D/g, '') || 
-                           contact.telefone?.replace(/\D/g, '') || 
+        const whatsappRaw = fullContact.celular?.replace(/\D/g, '') || 
+                           fullContact.telefone?.replace(/\D/g, '') || 
                            '00000000000'
         const whatsapp = maskPhone(whatsappRaw)
 
-        const mappedAddress = mapBlingAddressToDb(contact.endereco)
+        const mappedAddress = mapBlingAddressToDb(fullContact.endereco)
 
         // Buscar cliente existente por documento (cpf ou cnpj conforme tamanho)
         const existingByCpf = isCpf
@@ -170,7 +282,7 @@ export async function POST(request: NextRequest) {
           : { rows: [] as { id: number; bling_contact_id: number | null }[] }
         const existingByBlingId = await query(
           'SELECT id, cpf, cnpj FROM clients WHERE bling_contact_id = $1',
-          [contact.id]
+          [fullContact.id]
         )
 
         const updateClient = async (clientId: number) => {
@@ -186,7 +298,7 @@ export async function POST(request: NextRequest) {
             [
               cpfValue,
               cnpjValue,
-              contact.id,
+              fullContact.id,
               formattedName,
               formattedEmail,
               formattedPhone,
@@ -198,10 +310,10 @@ export async function POST(request: NextRequest) {
 
         if (existingByCpf.rows.length > 0) {
           const existingClient = existingByCpf.rows[0] as { id: number; bling_contact_id: number | null }
-          if (existingClient.bling_contact_id != null && existingClient.bling_contact_id !== contact.id) {
+          if (existingClient.bling_contact_id != null && existingClient.bling_contact_id !== fullContact.id) {
             if (existingByBlingId.rows.length > 0 && existingByBlingId.rows[0].id !== existingClient.id) {
               skippedCount++
-              errors.push(`Contato "${formattedName}" (ID Bling: ${contact.id}) ignorado: conflito de IDs (cliente ${existingClient.id} já tem outro ID Bling)`)
+              errors.push(`Contato "${formattedName}" (ID Bling: ${fullContact.id}) ignorado: conflito de IDs (cliente ${existingClient.id} já tem outro ID Bling)`)
               continue
             }
           }
@@ -214,10 +326,10 @@ export async function POST(request: NextRequest) {
           updatedCount++
         } else if (existingByCnpj.rows.length > 0) {
           const existingClient = existingByCnpj.rows[0] as { id: number; bling_contact_id: number | null }
-          if (existingClient.bling_contact_id != null && existingClient.bling_contact_id !== contact.id) {
+          if (existingClient.bling_contact_id != null && existingClient.bling_contact_id !== fullContact.id) {
             if (existingByBlingId.rows.length > 0 && existingByBlingId.rows[0].id !== existingClient.id) {
               skippedCount++
-              errors.push(`Contato "${formattedName}" (ID Bling: ${contact.id}) ignorado: conflito de IDs (cliente ${existingClient.id} já tem outro ID Bling)`)
+              errors.push(`Contato "${formattedName}" (ID Bling: ${fullContact.id}) ignorado: conflito de IDs (cliente ${existingClient.id} já tem outro ID Bling)`)
               continue
             }
           }
@@ -238,7 +350,7 @@ export async function POST(request: NextRequest) {
             )
             if (conflict.rows.length > 0) {
               skippedCount++
-              errors.push(`Contato "${formattedName}" (ID Bling: ${contact.id}) ignorado: CPF já pertence a outro cliente`)
+              errors.push(`Contato "${formattedName}" (ID Bling: ${fullContact.id}) ignorado: CPF já pertence a outro cliente`)
               continue
             }
           }
@@ -249,7 +361,7 @@ export async function POST(request: NextRequest) {
             )
             if (conflict.rows.length > 0) {
               skippedCount++
-              errors.push(`Contato "${formattedName}" (ID Bling: ${contact.id}) ignorado: CNPJ já pertence a outro cliente`)
+              errors.push(`Contato "${formattedName}" (ID Bling: ${fullContact.id}) ignorado: CNPJ já pertence a outro cliente`)
               continue
             }
           }
@@ -272,7 +384,7 @@ export async function POST(request: NextRequest) {
               formattedEmail,
               formattedPhone,
               whatsapp,
-              contact.id,
+              fullContact.id,
             ]
           )
           const clientId = (insertResult.rows[0] as { id: number }).id
@@ -281,13 +393,45 @@ export async function POST(request: NextRequest) {
           }
           importedCount++
         }
+
+        // Atualizar progresso periodicamente (a cada N contatos ou no último)
+        const processedTotal = importedCount + updatedCount + skippedCount
+        if ((i + 1) % progressUpdateInterval === 0 || (i + 1) === contacts.length) {
+          await query(
+            `UPDATE bling_contact_import_jobs 
+             SET processed_contacts = $1, imported_count = $2, updated_count = $3, skipped_count = $4, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $5`,
+            [processedTotal, importedCount, updatedCount, skippedCount, jobId]
+          )
+        }
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err)
         const contactName = capitalizeName(contact.nome?.trim() || 'Sem nome')
         skippedCount++
         errors.push(`Erro ao processar contato "${contactName}" (ID Bling: ${contact.id}): ${errorMsg}`)
+        
+        // Atualizar progresso mesmo em caso de erro
+        const processedTotal = importedCount + updatedCount + skippedCount
+        if ((i + 1) % progressUpdateInterval === 0 || (i + 1) === contacts.length) {
+          await query(
+            `UPDATE bling_contact_import_jobs 
+             SET processed_contacts = $1, imported_count = $2, updated_count = $3, skipped_count = $4, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $5`,
+            [processedTotal, importedCount, updatedCount, skippedCount, jobId]
+          )
+        }
       }
     }
+
+    // Finalizar job com sucesso
+    await query(
+      `UPDATE bling_contact_import_jobs 
+       SET status = 'completed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [jobId]
+    )
+    
+    console.log(`[Bling] Importação concluída (job ID: ${jobId}): ${importedCount} importado(s), ${updatedCount} atualizado(s), ${skippedCount} ignorado(s)`)
 
     return NextResponse.json({
       success: true,
@@ -297,6 +441,26 @@ export async function POST(request: NextRequest) {
       errors: errors.length > 0 ? errors : undefined,
     })
   } catch (err: unknown) {
+    // Em caso de erro não tratado, marcar job como failed
+    try {
+      const lastJob = await query(
+        `SELECT id FROM bling_contact_import_jobs 
+         WHERE status = 'running' 
+         ORDER BY started_at DESC LIMIT 1`
+      )
+      if (lastJob.rows.length > 0) {
+        const failedJobId = (lastJob.rows[0] as { id: number }).id
+        const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido ao importar contatos.'
+        await query(
+          `UPDATE bling_contact_import_jobs 
+           SET status = 'failed', finished_at = CURRENT_TIMESTAMP, error_message = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [errorMessage, failedJobId]
+        )
+      }
+    } catch (updateErr) {
+      // Ignorar erro ao atualizar job, não queremos mascarar o erro original
+    }
     if (err && typeof err === 'object' && 'message' in err) {
       const msg = (err as { message: string }).message
       if (msg === 'Token não fornecido' || msg === 'Token inválido ou expirado') {

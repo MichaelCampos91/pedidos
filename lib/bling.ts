@@ -296,6 +296,117 @@ function getContactEmail(contact: Record<string, unknown>): string | null {
 }
 
 /**
+ * Extrai endereço de um contato do Bling normalizando diferentes formatos possíveis.
+ * Suporta:
+ * - Formato v3: endereco.geral e endereco.cobranca
+ * - Formato com objeto aninhado: contact.endereco = { endereco, numero, ... }
+ * - Formato com lista: contact.enderecos = [ { ... } ] ou { data: [ ... ] }
+ * - Campos flat diretamente no contato (formato v2)
+ * - enderecoEntrega (fallback para pedidos)
+ */
+function extractBlingAddress(contact: Record<string, unknown>): BlingContactForImport['endereco'] | null {
+  let addrSource: Record<string, unknown> | null = null
+
+  // 1) Formato v3: endereco.geral e endereco.cobranca
+  if (contact.endereco && typeof contact.endereco === 'object' && !Array.isArray(contact.endereco)) {
+    const enderecoObj = contact.endereco as Record<string, unknown>
+
+    // Tentar endereco.geral primeiro (formato v3 mais comum)
+    if (enderecoObj.geral && typeof enderecoObj.geral === 'object' && !Array.isArray(enderecoObj.geral)) {
+      const geral = enderecoObj.geral as Record<string, unknown>
+      // Verificar se tem pelo menos CEP ou endereço preenchido
+      if (geral.cep || geral.endereco) {
+        addrSource = geral
+      }
+    }
+
+    // Se geral não tiver dados válidos, tentar cobranca
+    if (!addrSource && enderecoObj.cobranca && typeof enderecoObj.cobranca === 'object' && !Array.isArray(enderecoObj.cobranca)) {
+      const cobranca = enderecoObj.cobranca as Record<string, unknown>
+      if (cobranca.cep || cobranca.endereco) {
+        addrSource = cobranca
+      }
+    }
+
+    // Se ainda não encontrou e endereco tem campos diretos (sem geral/cobranca), usar diretamente
+    if (!addrSource && (enderecoObj.endereco || enderecoObj.cep)) {
+      addrSource = enderecoObj
+    }
+  }
+
+  // 2) Lista contact.enderecos (pegar o primeiro; pode vir como array direto ou { data: [...] })
+  if (!addrSource && contact.enderecos) {
+    const rawEnderecos = contact.enderecos as unknown
+    let list: unknown[] = []
+
+    if (Array.isArray(rawEnderecos)) {
+      list = rawEnderecos
+    } else if (rawEnderecos && typeof rawEnderecos === 'object' && 'data' in (rawEnderecos as Record<string, unknown>)) {
+      const dataField = (rawEnderecos as { data: unknown }).data
+      if (Array.isArray(dataField)) {
+        list = dataField
+      }
+    }
+
+    if (list.length > 0) {
+      const firstAddr = list[0]
+      if (firstAddr && typeof firstAddr === 'object') {
+        addrSource = firstAddr as Record<string, unknown>
+      }
+    }
+  }
+
+  // 3) Campos de endereço diretamente no contato (formato clássico da API v2)
+  if (!addrSource) {
+    const hasFlatAddressFields =
+      contact.endereco != null ||
+      contact.numero != null ||
+      contact.complemento != null ||
+      contact.bairro != null ||
+      contact.municipio != null ||
+      (contact as Record<string, unknown>).cidade != null ||
+      contact.uf != null ||
+      contact.cep != null
+
+    if (hasFlatAddressFields) {
+      const cidade =
+        (contact.municipio as unknown) ??
+        (contact as Record<string, unknown>).cidade
+
+      addrSource = {
+        endereco: contact.endereco,
+        numero: contact.numero,
+        complemento: contact.complemento,
+        bairro: contact.bairro,
+        municipio: cidade,
+        uf: contact.uf,
+        cep: contact.cep,
+      } as Record<string, unknown>
+    }
+  }
+
+  // 4) Fallback: endereço de entrega (mais comum em pedidos, mas mantido por segurança)
+  if (!addrSource && contact.enderecoEntrega && typeof contact.enderecoEntrega === 'object' && !Array.isArray(contact.enderecoEntrega)) {
+    addrSource = contact.enderecoEntrega as Record<string, unknown>
+  }
+
+  // Normalizar addrSource para BlingContactForImport['endereco']
+  if (addrSource) {
+    return {
+      endereco: addrSource.endereco ? String(addrSource.endereco).trim() : undefined,
+      numero: addrSource.numero ? String(addrSource.numero).trim() : undefined,
+      complemento: addrSource.complemento ? String(addrSource.complemento).trim() : undefined,
+      bairro: addrSource.bairro ? String(addrSource.bairro).trim() : undefined,
+      municipio: addrSource.municipio ? String(addrSource.municipio).trim() : undefined,
+      uf: addrSource.uf ? String(addrSource.uf).trim() : undefined,
+      cep: addrSource.cep ? String(addrSource.cep).replace(/\D/g, '') : undefined,
+    }
+  }
+
+  return null
+}
+
+/**
  * Tipo para contato do Bling usado na importação.
  */
 export interface BlingContactForImport {
@@ -378,6 +489,7 @@ export async function fetchAllBlingContacts(
       const listData = await listResponse.json().catch(() => null)
       const contacts = parseBlingContactsList(listData)
       
+      
       // Parar quando lista vazia (fim dos resultados)
       if (contacts.length === 0) {
         logBlingRequest('fetchAllBlingContacts', 'FIM', listUrl, listResponse.status, { fimResultados: true, paginas: page - 1 })
@@ -403,20 +515,8 @@ export async function fetchAllBlingContacts(
           const celular = contact.celular ? String(contact.celular).trim() || null : null
           const telefone = contact.telefone ? String(contact.telefone).trim() || null : null
 
-          // Extrair endereço se existir
-          let endereco: BlingContactForImport['endereco'] = null
-          if (contact.endereco && typeof contact.endereco === 'object') {
-            const addr = contact.endereco as Record<string, unknown>
-            endereco = {
-              endereco: addr.endereco ? String(addr.endereco).trim() : undefined,
-              numero: addr.numero ? String(addr.numero).trim() : undefined,
-              complemento: addr.complemento ? String(addr.complemento).trim() : undefined,
-              bairro: addr.bairro ? String(addr.bairro).trim() : undefined,
-              municipio: addr.municipio ? String(addr.municipio).trim() : undefined,
-              uf: addr.uf ? String(addr.uf).trim() : undefined,
-              cep: addr.cep ? String(addr.cep).replace(/\D/g, '') : undefined,
-            }
-          }
+          // Extrair endereço usando função auxiliar que trata todos os formatos possíveis
+          const endereco = extractBlingAddress(contact)
 
           allContacts.push({
             id,
@@ -428,6 +528,63 @@ export async function fetchAllBlingContacts(
             endereco,
           })
         }
+      }
+
+      // Se há limite pequeno (ex: teste com 5 contatos), buscar detalhes completos incluindo endereço
+      // A listagem não retorna endereços, então precisamos fazer GET /contatos/{id} para cada um
+      if (maxContacts && maxContacts <= 10 && allContacts.length > 0) {
+        const enrichedContacts: BlingContactForImport[] = []
+        
+        for (const contact of allContacts) {
+          try {
+            // Delay entre requisições para respeitar rate limit
+            if (enrichedContacts.length > 0) {
+              await new Promise(resolve => setTimeout(resolve, delayBetweenRequests))
+            }
+
+            const detailUrl = `${BLING_API_BASE}/contatos/${contact.id}`
+            const detailResponse = await fetchWithRetry(detailUrl, { method: 'GET', headers })
+            
+            if (detailResponse.ok) {
+              const detailData = await detailResponse.json().catch(() => null)
+              const detailContact = detailData?.data || detailData
+              
+              if (detailContact && typeof detailContact === 'object') {
+                const dc = detailContact as Record<string, unknown>
+                
+                // Extrair endereço usando função auxiliar que trata todos os formatos (incluindo endereco.geral e endereco.cobranca)
+                const endereco = extractBlingAddress(dc)
+
+                // Atualizar email e telefones também (podem estar mais completos no detalhe)
+                const detailEmail = getContactEmail(dc)
+                const detailCelular = dc.celular ? String(dc.celular).trim() || null : null
+                const detailTelefone = dc.telefone ? String(dc.telefone).trim() || null : null
+
+                enrichedContacts.push({
+                  ...contact,
+                  email: detailEmail || contact.email,
+                  celular: detailCelular || contact.celular,
+                  telefone: detailTelefone || contact.telefone,
+                  endereco,
+                })
+              } else {
+                // Se não conseguir parsear detalhes, manter contato original
+                enrichedContacts.push(contact)
+              }
+            } else {
+              // Se falhar ao buscar detalhes, manter contato original
+              console.warn(`[Bling] Erro ao buscar detalhes do contato ${contact.id}: ${detailResponse.status}`)
+              enrichedContacts.push(contact)
+            }
+          } catch (err) {
+            console.warn(`[Bling] Erro ao buscar detalhes do contato ${contact.id}:`, err)
+            enrichedContacts.push(contact)
+          }
+        }
+
+        // Substituir contatos originais pelos enriquecidos
+        allContacts.length = 0
+        allContacts.push(...enrichedContacts)
       }
 
       // Log periódico a cada 10 páginas
@@ -449,6 +606,78 @@ export async function fetchAllBlingContacts(
   })
 
   return allContacts
+}
+
+/**
+ * Busca detalhes completos de um contato específico do Bling por ID.
+ * Retorna dados completos incluindo email e endereço (que não vêm na listagem).
+ * 
+ * @param contactId ID do contato no Bling
+ * @param accessToken Token de acesso do Bling
+ * @returns Contato completo ou null se não encontrado ou houver erro
+ */
+export async function fetchBlingContactDetail(
+  contactId: number,
+  accessToken: string
+): Promise<BlingContactForImport | null> {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, '')
+  if (!token || !contactId) {
+    return null
+  }
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+  }
+
+  try {
+    const detailUrl = `${BLING_API_BASE}/contatos/${contactId}`
+    const detailResponse = await fetchWithRetry(detailUrl, { method: 'GET', headers })
+    
+    if (!detailResponse.ok) {
+      console.warn(`[Bling] Erro ao buscar detalhes do contato ${contactId}: ${detailResponse.status}`)
+      return null
+    }
+
+    const detailData = await detailResponse.json().catch(() => null)
+    const detailContact = detailData?.data || detailData
+    
+    if (!detailContact || typeof detailContact !== 'object') {
+      return null
+    }
+
+    const dc = detailContact as Record<string, unknown>
+    
+    // Extrair campos básicos
+    const id = dc.id != null ? Number(dc.id) : null
+    if (id == null || isNaN(id)) {
+      return null
+    }
+
+    const nome = String(dc.nome || dc.name || 'Sem nome').trim()
+    const numeroDocumento = getContactDocumentDigits(dc)
+    
+    // Extrair email e telefones usando funções auxiliares
+    const email = getContactEmail(dc)
+    const celular = dc.celular ? String(dc.celular).trim() || null : null
+    const telefone = dc.telefone ? String(dc.telefone).trim() || null : null
+
+    // Extrair endereço usando função auxiliar que trata todos os formatos
+    const endereco = extractBlingAddress(dc)
+
+    return {
+      id,
+      nome,
+      numeroDocumento,
+      email,
+      celular,
+      telefone,
+      endereco,
+    }
+  } catch (err) {
+    console.warn(`[Bling] Erro ao buscar detalhes do contato ${contactId}:`, err)
+    return null
+  }
 }
 
 /**
@@ -751,12 +980,10 @@ async function findBlingContactAggressively(
   const token = accessToken.trim().replace(/^Bearer\s+/i, '')
   if (!token || !cleanCpf) return null
 
-  console.log(`[Bling] Busca agressiva iniciada para CPF: ${cleanCpf}, Nome: ${clientName}`)
 
   // Estratégia 1: Busca por documento
   const foundById = await findBlingContactByDocument(cleanCpf, accessToken)
   if (foundById != null) {
-    console.log(`[Bling] Contato encontrado na busca expandida: ID ${foundById}`)
     return foundById
   }
 
@@ -767,7 +994,6 @@ async function findBlingContactAggressively(
     if (paddedCpf !== cleanCpf) {
       const foundPadded = await findBlingContactByDocument(paddedCpf, accessToken)
       if (foundPadded != null) {
-        console.log(`[Bling] Contato encontrado com CPF com zeros: ID ${foundPadded}`)
         return foundPadded
       }
     }
@@ -808,7 +1034,6 @@ async function findBlingContactAggressively(
       const listData = await listResponse.json().catch(() => null)
       const contacts = parseBlingContactsList(listData)
       if (contacts.length === 0) {
-        console.log(`[Bling] Busca agressiva: página ${page} retornou lista vazia, fim dos contatos`)
         break
       }
 
@@ -819,7 +1044,6 @@ async function findBlingContactAggressively(
           const contactDoc = getContactDocumentDigits(contact)
           // Se o documento bate, retornar o ID (documento é único)
           if (contactDoc === cleanCpf && contact.id != null) {
-            console.log(`[Bling] Contato encontrado na busca agressiva (página ${page}, ${pagesChecked * limit} contatos verificados): ID ${contact.id}`)
             return Number(contact.id)
           }
         }
