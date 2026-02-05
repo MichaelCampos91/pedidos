@@ -86,8 +86,12 @@ export interface OrderForBling {
   observations?: string | null
   /** Número da venda no Bling (único por pedido). Se preenchido, reutilizado em reenvios. */
   bling_sale_numero?: string | null
+  /** ID do cliente no banco (para atualizar bling_contact_id após criar/encontrar contato no Bling). */
+  client_id: number
   client_name: string
   client_cpf: string
+  /** CNPJ do cliente (PJ). Usado quando client_cpf não está preenchido. */
+  client_cnpj?: string | null
   client_email?: string | null
   client_whatsapp?: string | null
   client_phone?: string | null
@@ -1130,15 +1134,15 @@ async function createOrGetContactId(
     throw new Error('[Sistema] Token Bling não configurado.')
   }
 
-  const cleanCpf = (order.client_cpf || '').replace(/\D/g, '')
-  if (!cleanCpf) {
+  const cleanDoc = (order.client_cpf || order.client_cnpj || '').replace(/\D/g, '')
+  if (!cleanDoc) {
     throw new Error('[Sistema] CPF/CNPJ do cliente é obrigatório para criar contato no Bling.')
   }
 
-  logBlingRequest('createOrGetContactId', 'INICIO', 'Criar/obter contato', null, { cpf: maskSensitiveData(cleanCpf) })
+  logBlingRequest('createOrGetContactId', 'INICIO', 'Criar/obter contato', null, { cpf: maskSensitiveData(cleanDoc) })
 
   // Passo 1: Buscar primeiro usando todas as estratégias (A → B → C)
-  const searchResult = await findBlingContactWithFallback(cleanCpf, accessToken)
+  const searchResult = await findBlingContactWithFallback(cleanDoc, accessToken)
   if (searchResult.id != null) {
     logBlingRequest('createOrGetContactId', 'SUCESSO', 'Contato encontrado', null, {
       id: searchResult.id,
@@ -1155,12 +1159,12 @@ async function createOrGetContactId(
   }
 
   // Passo 2: Não encontrou, tentar criar
-  logBlingRequest('createOrGetContactId', 'CRIAR', 'Tentando criar contato', null, { cpf: maskSensitiveData(cleanCpf) })
+  logBlingRequest('createOrGetContactId', 'CRIAR', 'Tentando criar contato', null, { cpf: maskSensitiveData(cleanDoc) })
   
-  const tipo = cleanCpf.length === 11 ? 'F' : 'J'
+  const tipo = cleanDoc.length === 11 ? 'F' : 'J'
   const contactPayload: Record<string, unknown> = {
     nome: order.client_name || 'Cliente',
-    numeroDocumento: cleanCpf,
+    numeroDocumento: cleanDoc,
     tipo,
   }
 
@@ -1227,7 +1231,7 @@ async function createOrGetContactId(
       })
       
       // Refazer busca completa (A+B+C) após erro de duplicidade
-      const retrySearchResult = await findBlingContactWithFallback(cleanCpf, accessToken)
+      const retrySearchResult = await findBlingContactWithFallback(cleanDoc, accessToken)
       if (retrySearchResult.id != null) {
         logBlingRequest('createOrGetContactId', 'SUCESSO', 'Contato encontrado após duplicidade', null, {
           id: retrySearchResult.id,
@@ -1251,7 +1255,7 @@ async function createOrGetContactId(
       ].filter(Boolean).join(', ') || 'todas as estratégias'
 
       throw new Error(
-        `Contato com CPF/CNPJ ${maskSensitiveData(cleanCpf)} já existe no Bling mas não foi possível obter o ID após ${totalAttempts} tentativas. ` +
+        `Contato com CPF/CNPJ ${maskSensitiveData(cleanDoc)} já existe no Bling mas não foi possível obter o ID após ${totalAttempts} tentativas. ` +
         `Estratégias tentadas: ${strategiesTried}. ` +
         `Verifique se o app Bling tem escopo 'Gerenciar Contatos' (ID: 318257565) habilitado e reautorize a integração se necessário. ` +
         `Erro original do Bling: ${errorMsg}`
@@ -1429,30 +1433,13 @@ export async function sendOrderToBling(
 
     blingContactId = contactResult.id
 
-    // Opcionalmente, atualizar o cliente com o bling_contact_id para próximos pedidos
-    // (apenas se foi criado/encontrado agora e não tinha antes)
-    if (contactResult.found && blingContactId != null) {
+    // Atualizar o cliente com o bling_contact_id recém-obtido para próximos pedidos
+    if (order.client_id != null && blingContactId != null) {
       try {
-        const cleanDoc = order.client_cpf.replace(/\D/g, '')
-        const docLength = cleanDoc.length
-        
-        // Determinar se é CPF (11 dígitos) ou CNPJ (14 dígitos)
-        if (docLength === 11) {
-          // CPF: atualizar usando coluna cpf
-          await query(
-            'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE cpf = $2 AND bling_contact_id IS NULL',
-            [blingContactId, cleanDoc]
-          )
-        } else if (docLength === 14) {
-          // CNPJ: atualizar usando coluna cnpj
-          await query(
-            'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE cnpj = $2 AND bling_contact_id IS NULL',
-            [blingContactId, cleanDoc]
-          )
-        } else {
-          // Documento inválido: não atualizar
-          console.warn(`[Bling] Não foi possível atualizar bling_contact_id: documento com tamanho inválido (${docLength} dígitos)`)
-        }
+        await query(
+          'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND bling_contact_id IS NULL',
+          [blingContactId, order.client_id]
+        )
       } catch (err) {
         // Não falhar o envio se a atualização do cliente falhar
         console.warn('[Bling] Erro ao atualizar bling_contact_id do cliente:', err)
@@ -1546,8 +1533,8 @@ export async function sendOrderToBling(
  * Resiliente à ausência da coluna orders.observations (adicionada por migration).
  */
 async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | null> {
-  const baseSelect = `SELECT o.id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
-            c.name as client_name, c.cpf as client_cpf, c.email as client_email,
+  const baseSelect = `SELECT o.id, o.client_id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
+            c.name as client_name, c.cpf as client_cpf, c.cnpj as client_cnpj, c.email as client_email,
             c.whatsapp as client_whatsapp, c.phone as client_phone, c.bling_contact_id as client_bling_contact_id
      FROM orders o
      JOIN clients c ON o.client_id = c.id
@@ -1559,9 +1546,9 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
 
   try {
     orderResult = await query(
-      `SELECT o.id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
+      `SELECT o.id, o.client_id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
               o.observations, o.bling_sale_numero,
-              c.name as client_name, c.cpf as client_cpf, c.email as client_email,
+              c.name as client_name, c.cpf as client_cpf, c.cnpj as client_cnpj, c.email as client_email,
               c.whatsapp as client_whatsapp, c.phone as client_phone, c.bling_contact_id as client_bling_contact_id
        FROM orders o
        JOIN clients c ON o.client_id = c.id
@@ -1608,6 +1595,7 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
 
   const orderData: OrderForBling = {
     id: row.id as number,
+    client_id: Number(row.client_id),
     total: Number(row.total) ?? 0,
     total_items: Number(row.total_items) ?? 0,
     total_shipping: Number(row.total_shipping) ?? 0,
@@ -1616,6 +1604,7 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
     bling_sale_numero: blingSaleNumeroValue ?? (row.bling_sale_numero as string | null) ?? null,
     client_name: (row.client_name as string) ?? '',
     client_cpf: (row.client_cpf as string) ?? '',
+    client_cnpj: (row.client_cnpj as string) ?? null,
     client_email: (row.client_email as string | null) ?? null,
     client_whatsapp: (row.client_whatsapp as string | null) ?? null,
     client_phone: (row.client_phone as string | null) ?? null,

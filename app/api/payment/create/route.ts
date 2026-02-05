@@ -249,6 +249,10 @@ export async function POST(request: NextRequest) {
     // Recalcular valor total no backend (itens + frete) — nunca confiar no frontend
     const totalShipping = parseFloat(order.total_shipping || '0')
     const backendTotal = recalculateOrderTotal(orderItems, totalShipping)
+    const itemsTotal = orderItems.reduce(
+      (sum, item) => sum + parseFloat(String(item.price)) * (item.quantity || 1),
+      0
+    )
 
     if (backendTotal <= 0) {
       return NextResponse.json(
@@ -261,21 +265,22 @@ export async function POST(request: NextRequest) {
     let chargeBaseValue = backendTotal
     let amount: number
 
-    // Aplicar desconto PIX se método for PIX
+    // Aplicar desconto PIX apenas sobre o valor dos itens (frete não recebe desconto)
     let pixDiscountApplied = 0
     if (payment_method === 'pix') {
       try {
-        const discountResult = await calculatePixDiscount(backendTotal)
+        const discountResult = await calculatePixDiscount(itemsTotal)
         if (discountResult.discount > 0) {
           pixDiscountApplied = Math.round(discountResult.discount * 100) // centavos
-          chargeBaseValue = discountResult.finalValue
+          chargeBaseValue = discountResult.finalValue + totalShipping
         }
         amount = Math.round(chargeBaseValue * 100)
         if (process.env.NODE_ENV === 'development' && discountResult.discount > 0) {
-          console.log('[Payment Create] Desconto PIX aplicado:', {
-            original: backendTotal,
+          console.log('[Payment Create] Desconto PIX aplicado (apenas itens):', {
+            itemsTotal,
+            totalShipping,
             discount: discountResult.discount,
-            final: discountResult.finalValue,
+            final: chargeBaseValue,
           })
         }
       } catch (error) {

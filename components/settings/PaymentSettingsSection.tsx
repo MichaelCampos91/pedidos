@@ -292,7 +292,7 @@ export function PaymentSettingsSection({
               Desconto PIX
             </CardTitle>
             <CardDescription>
-              Configure desconto para pagamentos via PIX
+              Configure desconto para pagamentos via PIX. Aplicado apenas ao valor dos itens do pedido (frete não recebe desconto).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import {
   Dialog,
   DialogContent,
@@ -348,7 +348,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
       toast.warning('Selecione um endereço de entrega')
       return
     }
-    if (currentStep === 3 && !selectedShipping) {
+    if (currentStep === 3 && hasPhysicalItems && !selectedShipping) {
       toast.warning('Selecione uma modalidade de frete')
       return
     }
@@ -403,7 +403,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
       toast.warning('Selecione um endereço de entrega antes de salvar o pedido')
       return
     }
-    if (!selectedShipping) {
+    if (hasPhysicalItems && !selectedShipping) {
       toast.warning('Selecione uma modalidade de frete antes de salvar o pedido')
       return
     }
@@ -430,8 +430,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         total: itemsTotal + shippingTotal,
       }
 
-      // Add shipping data if selected
-      if (selectedShipping) {
+      // Add shipping data only when there are physical items and user selected a shipping option
+      if (hasPhysicalItems && selectedShipping) {
         orderData.shipping_method = selectedShipping.name
         orderData.shipping_option_id = selectedShipping.id.toString()
         orderData.shipping_company_name = selectedShipping.company.name
@@ -443,6 +443,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
           originalPrice: selectedShipping.originalPrice, // Preço original antes do frete grátis
           // environment removido - não é mais necessário
         }
+      } else {
+        orderData.total_shipping = 0
       }
 
       if (isNew) {
@@ -467,6 +469,46 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
   const itemsTotal = formData.items.reduce((sum, item) => {
     return sum + (parseFloat(item.price || 0) * parseInt(item.quantity || 1))
   }, 0)
+
+  // Itens físicos: têm produto do catálogo com ao menos uma dimensão/peso (para cotação de frete)
+  const hasPhysicalItems = useMemo(() => {
+    return formData.items.some((item: any) => {
+      if (!item.product_id || item.product_id === 'custom') return false
+      const product = products.find((p: any) => p.id.toString() === item.product_id)
+      if (!product) return false
+      const w = Number(product.width)
+      const h = Number(product.height)
+      const l = Number(product.length)
+      const weight = Number(product.weight)
+      return (w > 0) || (h > 0) || (l > 0) || (weight > 0)
+    })
+  }, [formData.items, products])
+
+  const physicalProductsForQuote = useMemo(() => {
+    return formData.items
+      .filter((item: any) => {
+        if (!item.product_id || item.product_id === 'custom') return false
+        const product = products.find((p: any) => p.id.toString() === item.product_id)
+        if (!product) return false
+        const w = Number(product.width)
+        const h = Number(product.height)
+        const l = Number(product.length)
+        const weight = Number(product.weight)
+        return (w > 0) || (h > 0) || (l > 0) || (weight > 0)
+      })
+      .map((item: any, index: number) => {
+        const product = products.find((p: any) => p.id.toString() === item.product_id)
+        return {
+          id: item.product_id,
+          largura: product?.width ? Number(product.width) : undefined,
+          altura: product?.height ? Number(product.height) : undefined,
+          comprimento: product?.length ? Number(product.length) : undefined,
+          peso: product?.weight ? Number(product.weight) : undefined,
+          valor: parseFloat(item.price || 0) * parseInt(item.quantity || 1),
+          quantidade: parseInt(item.quantity || 1),
+        }
+      })
+  }, [formData.items, products])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -858,6 +900,10 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                     <p className="text-center text-muted-foreground py-8">
                       Selecione um endereço acima
                     </p>
+                  ) : !hasPhysicalItems ? (
+                    <p className="text-center text-muted-foreground py-8">
+                      Este pedido contém apenas itens digitais. Não é necessário selecionar frete.
+                    </p>
                   ) : (
                     <>
                       {selectedShipping ? (
@@ -892,18 +938,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                       ) : (
                         <ShippingSelector
                           cep={selectedAddress.cep}
-                          produtos={formData.items.map((item, index) => {
-                            const product = products.find((p: any) => p.id.toString() === item.product_id)
-                            return {
-                              id: item.product_id !== 'custom' ? item.product_id : `item-${index}`,
-                              largura: product?.width ? Number(product.width) : undefined,
-                              altura: product?.height ? Number(product.height) : undefined,
-                              comprimento: product?.length ? Number(product.length) : undefined,
-                              peso: product?.weight ? Number(product.weight) : undefined,
-                              valor: parseFloat(item.price || 0) * parseInt(item.quantity || 1),
-                              quantidade: parseInt(item.quantity || 1),
-                            }
-                          })}
+                          produtos={physicalProductsForQuote}
                           orderValue={itemsTotal}
                           destinationState={selectedAddress?.state}
                           // environment removido - componente busca automaticamente ou API usa padrão
@@ -1111,7 +1146,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                         <Truck className="h-5 w-5" />
                         <CardTitle>Frete</CardTitle>
                       </div>
-                      {selectedShipping && (
+                      {hasPhysicalItems && selectedShipping && (
                         <Button
                           type="button"
                           variant="outline"
@@ -1125,7 +1160,11 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                     </div>
                   </CardHeader>
                   <CardContent>
-                    {selectedShipping ? (
+                    {!hasPhysicalItems ? (
+                      <p className="text-sm text-muted-foreground">
+                        Este pedido contém apenas itens digitais. Não é necessário frete.
+                      </p>
+                    ) : selectedShipping ? (
                       <div className="space-y-3">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">

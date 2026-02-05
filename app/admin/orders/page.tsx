@@ -381,6 +381,7 @@ export default function OrdersPage() {
           </div>
         ) : (
           <>
+            <div className="max-h-[60vh] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -480,7 +481,7 @@ export default function OrdersPage() {
                               {order.payment_status === "failed" && "Recusado"}
                             </Badge>
                             {order.payment_status === "paid" && getPaymentMethodLabel(order) && (
-                              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 rounded-full border border-muted bg-white text-muted-foreground">
+                              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 rounded-full border border-gray-300 bg-white text-muted-foreground">
                                 {getPaymentMethodLabel(order)}
                               </Badge>
                             )}
@@ -515,27 +516,55 @@ export default function OrdersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap gap-1 items-center">
-                        {order.tags && (Array.isArray(order.tags) ? order.tags : String(order.tags).split(",").map((t: string) => t.trim()).filter(Boolean)).length > 0
-                          ? (Array.isArray(order.tags) ? order.tags : String(order.tags).split(",").map((t: string) => t.trim()).filter(Boolean)).map((tag: string, i: number) => (
-                              <Badge
-                                key={i}
-                                className="text-[10px] px-1.5 py-0 rounded-md bg-blue-600 text-white border-0"
-                              >
-                                {tag}
-                              </Badge>
-                            ))
-                          : (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                              onClick={() => handleOpenTagsModal(order)}
-                            >
-                              +Adicionar
-                            </Button>
-                          )}
+                      <div className="flex flex-col gap-1">
+                        {(() => {
+                          const tagsArray = order.tags && (Array.isArray(order.tags) ? order.tags : String(order.tags).split(",").map((t: string) => t.trim()).filter(Boolean))
+                          const hasTags = tagsArray && tagsArray.length > 0
+                          const rows: string[][] = []
+                          if (hasTags) {
+                            for (let i = 0; i < tagsArray.length; i += 2) {
+                              rows.push(tagsArray.slice(i, i + 2))
+                            }
+                          }
+                          return (
+                            <>
+                              {hasTags && rows.map((rowTags, rowIndex) => (
+                                <div key={rowIndex} className="flex gap-1">
+                                  {rowTags.map((tag: string, i: number) => (
+                                    <Badge
+                                      key={`${rowIndex}-${i}`}
+                                      className="text-[10px] px-1.5 py-0 rounded-md bg-blue-600 text-white border-0 w-fit whitespace-nowrap"
+                                    >
+                                      {tag}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ))}
+                              {hasTags && (
+                                <div className="flex gap-1">
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1.5 py-0 rounded-md border border-gray-300 bg-white text-muted-foreground cursor-pointer hover:bg-muted/50 w-fit whitespace-nowrap"
+                                    onClick={() => handleOpenTagsModal(order)}
+                                  >
+                                    +Adicionar
+                                  </Badge>
+                                </div>
+                              )}
+                              {!hasTags && (
+                                <div className="flex gap-1">
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1.5 py-0 rounded-md border border-gray-300 bg-white text-muted-foreground cursor-pointer hover:bg-muted/50 w-fit whitespace-nowrap"
+                                    onClick={() => handleOpenTagsModal(order)}
+                                  >
+                                    +Adicionar
+                                  </Badge>
+                                </div>
+                              )}
+                            </>
+                          )
+                        })()}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -705,6 +734,7 @@ export default function OrdersPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
 
             {/* Paginação */}
             {pagination.last_page > 1 && (

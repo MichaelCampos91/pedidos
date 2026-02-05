@@ -14,6 +14,8 @@ import { cepApi } from "@/lib/api"
 interface PaymentFormProps {
   orderId: number
   total: number
+  totalItems: number
+  totalShipping?: number
   customer: {
     name: string
     email: string
@@ -32,7 +34,7 @@ interface PaymentFormProps {
   onSuccess: (transaction: any) => void
 }
 
-export function PaymentForm({ orderId, total, customer, shippingAddress, onSuccess }: PaymentFormProps) {
+export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, customer, shippingAddress, onSuccess }: PaymentFormProps) {
   const [paymentMethod, setPaymentMethod] = useState<'pix' | 'credit_card' | null>(null)
   const [loading, setLoading] = useState(false)
   const [pixData, setPixData] = useState<any>(null)
@@ -231,13 +233,13 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
             const discountValue = parseFloat(pixSetting.discount_value)
             let discount = 0
             if (pixSetting.discount_type === 'percentage') {
-              discount = (total * discountValue) / 100
+              discount = (totalItems * discountValue) / 100
             } else {
               discount = discountValue
             }
             setPixDiscount({
               discount,
-              finalValue: Math.max(0, total - discount),
+              finalValue: Math.max(0, totalItems - discount) + totalShipping,
             })
           }
         }
@@ -301,7 +303,7 @@ export function PaymentForm({ orderId, total, customer, shippingAddress, onSucce
     }
 
     loadPaymentSettings()
-  }, [total, activeEnvironment])
+  }, [total, totalItems, totalShipping, activeEnvironment])
 
   // Buscar ambiente ativo ao montar componente
   useEffect(() => {

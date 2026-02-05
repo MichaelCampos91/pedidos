@@ -88,6 +88,30 @@ export async function getProductionDays(): Promise<number> {
 }
 
 /**
+ * Soma o prazo de produção (configuração local) ao prazo de cada opção.
+ * Deve ser usada depois de receber as opções da API do Melhor Envio.
+ */
+export function addProductionDaysToOptions(
+  options: ShippingOption[],
+  productionDays: number
+): ShippingOption[] {
+  if (!productionDays || productionDays <= 0) return options
+  return options.map(option => {
+    const modified: ShippingOption = {
+      ...option,
+      delivery_time: option.delivery_time + productionDays,
+    }
+    if (option.delivery_range) {
+      modified.delivery_range = {
+        min: option.delivery_range.min + productionDays,
+        max: option.delivery_range.max + productionDays,
+      }
+    }
+    return modified
+  })
+}
+
+/**
  * Verifica se uma regra se aplica baseado nas condições
  * 
  * Lógica de condições:
@@ -277,23 +301,17 @@ export async function applyShippingRules(
       price: finalPrice.toFixed(2),
     }
 
-    // Adicionar dias de produção ao prazo
-    if (productionDays > 0) {
-      modifiedOption.delivery_time = option.delivery_time + productionDays
-      if (modifiedOption.delivery_range && option.delivery_range) {
-        modifiedOption.delivery_range.min = option.delivery_range.min + productionDays
-        modifiedOption.delivery_range.max = option.delivery_range.max + productionDays
-      }
-    }
-
     modifiedOptions.push(modifiedOption)
     appliedRules.push(...optionAppliedRules)
   }
 
+  // Adicionar dias de produção ao prazo (após receber opções da API)
+  const optionsWithProduction = addProductionDaysToOptions(modifiedOptions, productionDays)
+
   // SEGUNDA PASSADA: Identificar opção mais barata e aplicar frete grátis apenas a ela
-  if (modifiedOptions.length > 0) {
+  if (optionsWithProduction.length > 0) {
     // Encontrar opção mais barata (após acréscimos)
-    const cheapestOption = modifiedOptions.reduce((cheapest, current) => {
+    const cheapestOption = optionsWithProduction.reduce((cheapest, current) => {
       const cheapestPrice = parseFloat(cheapest.price)
       const currentPrice = parseFloat(current.price)
       return currentPrice < cheapestPrice ? current : cheapest
@@ -323,7 +341,7 @@ export async function applyShippingRules(
   }
 
   return {
-    options: modifiedOptions,
+    options: optionsWithProduction,
     appliedRules,
     productionDaysAdded: productionDays,
   }

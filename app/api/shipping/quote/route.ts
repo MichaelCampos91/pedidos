@@ -5,7 +5,7 @@ import { query } from '@/lib/database'
 import { calculateShipping } from '@/lib/melhor-envio'
 import { getToken, updateTokenValidation, type IntegrationEnvironment } from '@/lib/integrations'
 import { generateCacheKey, getCachedQuote, setCachedQuote, cleanupExpiredCache } from '@/lib/shipping-cache'
-import { applyShippingRules } from '@/lib/shipping-rules'
+import { applyShippingRules, getProductionDays, addProductionDaysToOptions } from '@/lib/shipping-rules'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -158,6 +158,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Array vazio = nenhum item para envio (ex.: pedido só digital); não usar modo legacy
+    if (produtos && Array.isArray(produtos) && produtos.length === 0) {
+      return NextResponse.json({
+        success: true,
+        options: [],
+        message: 'Nenhum item para envio',
+      })
+    }
+
     // Processar produtos (suporta array ou valores únicos para compatibilidade)
     let productsList: Array<{ id: string; width: number; height: number; length: number; weight: number; insurance_value: number; quantity: number }>
     
@@ -293,7 +302,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Sem regras (ex.: tela consultiva admin): retornar opções brutas, sem cache
+    // Sem regras (ex.: tela consultiva admin): retornar opções com prazo de produção somado
     if (!applyRules) {
       const optionsNormalized = validOptions.map(option => ({
         ...option,
@@ -302,9 +311,11 @@ export async function POST(request: NextRequest) {
           max: option.delivery_time,
         },
       }))
+      const productionDays = await getProductionDays()
+      const optionsWithProduction = addProductionDaysToOptions(optionsNormalized, productionDays)
       return NextResponse.json({
         success: true,
-        options: optionsNormalized,
+        options: optionsWithProduction,
         cached: false,
       })
     }

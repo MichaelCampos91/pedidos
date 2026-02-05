@@ -439,6 +439,8 @@ export default function CheckoutPage() {
                 <PaymentForm
                   orderId={parseInt(orderId)}
                   total={totalWithShipping}
+                  totalItems={totalItems}
+                  totalShipping={totalShipping}
                   customer={{
                     name: order.client_name,
                     email: order.client_email || '',

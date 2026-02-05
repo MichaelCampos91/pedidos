@@ -69,7 +69,10 @@ export function ShippingSelector({
   const [options, setOptions] = useState<ShippingOption[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  const hasProductsToShip = !produtos || produtos.length > 0
+
   const calculateShipping = async () => {
+    if (!hasProductsToShip) return
     if (!cep || cep.replace(/\D/g, '').length !== 8) {
       setError('CEP inválido')
       return
@@ -140,6 +143,16 @@ export function ShippingSelector({
     } finally {
       setLoading(false)
     }
+  }
+
+  // Sem itens com dimensões para envio: não chamar API, exibir mensagem
+  if (!hasProductsToShip) {
+    return (
+      <div className={`text-center py-6 text-muted-foreground text-sm ${className || ''}`.trim()}>
+        <p>Nenhum item com dimensões para envio.</p>
+        <p className="mt-1">Adicione itens físicos ao pedido para calcular o frete.</p>
+      </div>
+    )
   }
 
   if (options.length === 0 && !loading && !error) {
