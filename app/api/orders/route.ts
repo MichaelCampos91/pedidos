@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1')
     const per_page = parseInt(searchParams.get('per_page') || '20')
     const status = searchParams.get('status')
+    const payment_status = searchParams.get('payment_status')
     const search = searchParams.get('search')
     const start_date = searchParams.get('start_date')
     const end_date = searchParams.get('end_date')
@@ -52,12 +53,23 @@ export async function GET(request: NextRequest) {
       paramIndex += 3
     }
 
+    // Adicionar filtro de payment_status se fornecido
+    let paymentStatusWhereClause = whereClause
+    if (payment_status) {
+      paymentStatusWhereClause += ` AND EXISTS (
+        SELECT 1 FROM payments p
+        WHERE p.order_id = o.id AND p.status = $${paramIndex}
+      )`
+      params.push(payment_status)
+      paramIndex++
+    }
+
     // Total de registros
     const countResult = await query(
       `SELECT COUNT(*) as total 
        FROM orders o
        JOIN clients c ON o.client_id = c.id
-       WHERE ${whereClause}`,
+       WHERE ${paymentStatusWhereClause}`,
       params
     )
     const total = parseInt(countResult.rows[0].total)
@@ -81,7 +93,7 @@ export async function GET(request: NextRequest) {
         ORDER BY p.paid_at DESC NULLS LAST, p.created_at DESC
         LIMIT 1
       ) pay ON true
-      WHERE ${whereClause}
+      WHERE ${paymentStatusWhereClause}
       ORDER BY o.${sortColumn} ${sortOrder}
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `

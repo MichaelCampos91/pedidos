@@ -58,7 +58,8 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [shippingStatusFilter, setShippingStatusFilter] = useState<string>("all")
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all")
   const [startDate, setStartDate] = useState<Date | undefined>(() => {
     const date = new Date()
     date.setDate(date.getDate() - 6) // 7 dias atrás (hoje + 6 dias anteriores)
@@ -126,8 +127,12 @@ export default function OrdersPage() {
         per_page: pagination.per_page,
       }
 
-      if (statusFilter !== "all") {
-        params.status = statusFilter
+      if (shippingStatusFilter !== "all") {
+        params.status = shippingStatusFilter
+      }
+
+      if (paymentStatusFilter !== "all") {
+        params.payment_status = paymentStatusFilter
       }
 
       if (startDate && endDate) {
@@ -160,7 +165,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     loadOrders()
-  }, [pagination.current_page, statusFilter])
+  }, [pagination.current_page, shippingStatusFilter, paymentStatusFilter])
 
   const handleSearch = () => {
     setPagination((prev) => ({ ...prev, current_page: 1 }))
@@ -314,7 +319,7 @@ export default function OrdersPage() {
       {/* Filtros */}
       <div className="bg-white p-4 rounded-lg border">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[180px]">
+          <div className="relative min-w-[300px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Buscar por ID, nome ou CPF..." 
@@ -324,15 +329,66 @@ export default function OrdersPage() {
               className="pl-9 h-9"
             />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[160px] h-9">
-              <SelectValue placeholder="Status" />
+          <Select value={shippingStatusFilter} onValueChange={setShippingStatusFilter}>
+            <SelectTrigger className="w-[180px] h-9">
+              <SelectValue placeholder="Status de Envio" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os Status</SelectItem>
-              {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
-              ))}
+              {Object.entries(STATUS_LABELS).map(([value, label]) => {
+                const config = ORDER_STATUS_CONFIG[value]
+                const Icon = config?.icon
+                return (
+                  <SelectItem 
+                    key={value} 
+                    value={value}
+                    className={cn(
+                      "border-l-4 pl-8",
+                      config?.className || ""
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      {Icon && <Icon className="h-4 w-4" />}
+                      <span className="font-medium">{label}</span>
+                    </div>
+                  </SelectItem>
+                )
+              })}
+            </SelectContent>
+          </Select>
+          <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
+            <SelectTrigger className="w-[180px] h-9">
+              <SelectValue placeholder="Status de Pagamento" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os Status</SelectItem>
+              <SelectItem 
+                value="paid"
+                className="border-l-4 pl-8 bg-emerald-50 text-emerald-800 border-emerald-200"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span className="font-medium">Aprovado</span>
+                </div>
+              </SelectItem>
+              <SelectItem 
+                value="pending"
+                className="border-l-4 pl-8 bg-amber-50 text-amber-800 border-amber-200"
+              >
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  <span className="font-medium">Pendente</span>
+                </div>
+              </SelectItem>
+              <SelectItem 
+                value="failed"
+                className="border-l-4 pl-8 bg-rose-50 text-rose-800 border-rose-200"
+              >
+                <div className="flex items-center gap-2">
+                  <XCircle className="h-4 w-4" />
+                  <span className="font-medium">Recusado</span>
+                </div>
+              </SelectItem>
             </SelectContent>
           </Select>
           <Popover>

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { CalendarIcon, ShoppingCart, DollarSign, Clock, Loader2, CreditCard, Smartphone, Banknote, AlertCircle, TrendingUp, CheckCircle, Users, Timer, Truck, Wallet, Package, MapPin, BarChart3, XCircle, PackageCheck } from "lucide-react"
+import { CalendarIcon, ShoppingCart, DollarSign, Clock, Loader2, CreditCard, Smartphone, Banknote, AlertCircle, TrendingUp, CheckCircle, Users, Timer, Truck, Wallet, Package, MapPin, BarChart3, XCircle, PackageCheck, Calculator } from "lucide-react"
 import { metricsApi } from "@/lib/api"
 import { formatCurrency } from "@/lib/utils"
 import { format, parseISO, startOfMonth, startOfYear, subMonths, endOfMonth } from "date-fns" 
@@ -439,8 +439,14 @@ export default function DashboardPage() {
 
       <Tabs defaultValue="charts" className="w-full">
         <TabsList>
-          <TabsTrigger value="charts">Gráficos</TabsTrigger>
-          <TabsTrigger value="metrics">Métricas</TabsTrigger>
+          <TabsTrigger value="charts" className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Gráficos
+          </TabsTrigger>
+          <TabsTrigger value="metrics" className="flex items-center gap-2">
+            <Calculator className="h-4 w-4" />
+            Métricas
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="charts" className="space-y-6">

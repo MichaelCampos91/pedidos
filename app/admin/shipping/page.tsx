@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Truck, Search, Package, MessageCircle, Zap, DollarSign } from "lucide-react"
+import { Loader2, Truck, Search, Package, MessageCircle, Zap, DollarSign, X, Minus, Plus, Eraser } from "lucide-react"
 import { formatShippingPrice, formatDeliveryTime } from "@/lib/melhor-envio-utils"
 import { calculateDeliveryDate, formatDeliveryDate, generateWhatsAppShareLink } from "@/lib/shipping-utils"
 import { maskCEP } from "@/lib/utils"
@@ -49,6 +49,13 @@ interface Product {
   length?: number | string
   weight?: number | string
   active?: boolean
+  category_name?: string | null
+  category_id?: number | null
+}
+
+interface ProductGroup {
+  categoryName: string | null
+  products: Product[]
 }
 
 export default function ShippingPage() {
@@ -69,7 +76,8 @@ export default function ShippingPage() {
   const [showModal, setShowModal] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [productSearch, setProductSearch] = useState('')
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(new Set())
+  const [productQuantities, setProductQuantities] = useState<Record<number, number>>({})
   const [productPopoverOpen, setProductPopoverOpen] = useState(false)
 
   // Buscar ambiente ativo ao montar componente
@@ -101,11 +109,80 @@ export default function ShippingPage() {
   }, [])
 
   // Lista filtrada para o combobox (usada apenas dentro do popover)
-  const filteredProducts = productSearch.trim()
-    ? products.filter(product =>
-        product.name.toLowerCase().includes(productSearch.toLowerCase())
-      ).slice(0, 20)
-    : products.slice(0, 20)
+  const filteredProducts = useMemo(() => {
+    const filtered = productSearch.trim()
+      ? products.filter(product =>
+          product.name.toLowerCase().includes(productSearch.toLowerCase())
+        )
+      : products
+    return filtered.slice(0, 50) // Aumentar limite para multi-select
+  }, [products, productSearch])
+
+  // Agrupar produtos por categoria
+  const groupedProducts = useMemo(() => {
+    const groups = new Map<string | null, Product[]>()
+    
+    filteredProducts.forEach(product => {
+      const categoryName = product.category_name || null
+      if (!groups.has(categoryName)) {
+        groups.set(categoryName, [])
+      }
+      groups.get(categoryName)!.push(product)
+    })
+
+    // Converter para array e ordenar: categorias por nome, null por último
+    const sortedGroups: ProductGroup[] = Array.from(groups.entries())
+      .map(([categoryName, products]) => ({
+        categoryName,
+        products: products.sort((a, b) => a.name.localeCompare(b.name))
+      }))
+      .sort((a, b) => {
+        if (a.categoryName === null && b.categoryName === null) return 0
+        if (a.categoryName === null) return 1 // null sempre por último
+        if (b.categoryName === null) return -1
+        return a.categoryName.localeCompare(b.categoryName)
+      })
+
+    return sortedGroups
+  }, [filteredProducts])
+
+  // Produtos selecionados (derivado de selectedProductIds)
+  const selectedProducts = useMemo(() => {
+    return products.filter(p => selectedProductIds.has(p.id))
+  }, [products, selectedProductIds])
+
+  // Preencher peso, dimensões e valor com totais quando há produtos selecionados (considerando quantidade)
+  useEffect(() => {
+    if (selectedProducts.length === 0) return
+    const peso = selectedProducts.reduce(
+      (sum, p) => sum + (Number(p.weight) || 0.3) * (productQuantities[p.id] ?? 1),
+      0
+    )
+    const altura = selectedProducts.reduce(
+      (sum, p) => sum + (Number(p.height) || 10) * (productQuantities[p.id] ?? 1),
+      0
+    )
+    const largura = selectedProducts.reduce(
+      (sum, p) => sum + (Number(p.width) || 20) * (productQuantities[p.id] ?? 1),
+      0
+    )
+    const comprimento = selectedProducts.reduce(
+      (sum, p) => sum + (Number(p.length) || 30) * (productQuantities[p.id] ?? 1),
+      0
+    )
+    const valor = selectedProducts.reduce(
+      (sum, p) => sum + (Number(p.base_price) || 100) * (productQuantities[p.id] ?? 1),
+      0
+    )
+    setFormData(prev => ({
+      ...prev,
+      peso: String(peso.toFixed(2)),
+      altura: String(altura.toFixed(2)),
+      largura: String(largura.toFixed(2)),
+      comprimento: String(comprimento.toFixed(2)),
+      valor: String(valor.toFixed(2)),
+    }))
+  }, [selectedProductIds, selectedProducts, productQuantities])
 
   const loadProducts = async () => {
     setLoadingProducts(true)
@@ -119,25 +196,66 @@ export default function ShippingPage() {
     }
   }
 
-  const handleProductSelect = (product: Product) => {
-    setSelectedProduct(product)
-    setProductSearch(product.name)
-
-    // Preencher dimensões, peso e preço se disponíveis
-    setFormData(prev => ({
-      ...prev,
-      largura: product.width ? String(product.width) : prev.largura,
-      altura: product.height ? String(product.height) : prev.altura,
-      comprimento: product.length ? String(product.length) : prev.comprimento,
-      peso: product.weight ? String(product.weight) : prev.peso,
-      valor: product.base_price ? String(product.base_price) : prev.valor,
-    }))
-    setProductPopoverOpen(false)
+  const handleProductToggle = (productId: number) => {
+    setSelectedProductIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(productId)) {
+        newSet.delete(productId)
+        setProductQuantities(q => {
+          const next = { ...q }
+          delete next[productId]
+          return next
+        })
+      } else {
+        newSet.add(productId)
+        setProductQuantities(q => ({ ...q, [productId]: 1 }))
+      }
+      return newSet
+    })
   }
 
-  const handleClearProduct = () => {
-    setSelectedProduct(null)
+  const handleQuantityChange = (productId: number, delta: number) => {
+    const current = productQuantities[productId] ?? 0
+    const next = Math.min(10, Math.max(0, current + delta))
+    if (next === 0) {
+      setSelectedProductIds(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(productId)
+        return newSet
+      })
+      setProductQuantities(q => {
+        const nextQ = { ...q }
+        delete nextQ[productId]
+        return nextQ
+      })
+    } else {
+      if (current === 0) {
+        setSelectedProductIds(prev => new Set(prev).add(productId))
+      }
+      setProductQuantities(q => ({ ...q, [productId]: next }))
+    }
+  }
+
+  const handleClearSelection = () => {
+    setSelectedProductIds(new Set())
+    setProductQuantities({})
+  }
+
+  const handleClearForm = () => {
+    setFormData({
+      cep_destino: '',
+      peso: '0.3',
+      altura: '10',
+      largura: '20',
+      comprimento: '30',
+      valor: '100',
+    })
+    setSelectedProductIds(new Set())
+    setProductQuantities({})
     setProductSearch('')
+    setError(null)
+    setShippingOptions([])
+    setShowModal(false)
     setProductPopoverOpen(false)
   }
 
@@ -148,13 +266,37 @@ export default function ShippingPage() {
     setShippingOptions([])
 
     try {
+      // Se há produtos selecionados, enviar array de produtos
+      // Caso contrário, usar dados manuais do formulário (modo legacy)
+      const body: any = {
+        cep_destino: formData.cep_destino,
+        apply_rules: false,
+      }
+
+      if (selectedProductIds.size > 0) {
+        // Montar array de produtos com defaults da API e quantidade por item
+        body.produtos = selectedProducts.map(p => ({
+          id: String(p.id),
+          width: Number(p.width) || 20,
+          height: Number(p.height) || 10,
+          length: Number(p.length) || 30,
+          weight: Number(p.weight) || 0.3,
+          valor: Number(p.base_price) || 100,
+          quantity: productQuantities[p.id] ?? 1,
+        }))
+      } else {
+        // Modo legacy: enviar campos individuais
+        body.peso = formData.peso
+        body.altura = formData.altura
+        body.largura = formData.largura
+        body.comprimento = formData.comprimento
+        body.valor = formData.valor
+      }
+
       const response = await fetch('/api/shipping/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          apply_rules: false,
-        }),
+        body: JSON.stringify(body),
         credentials: 'include',
       })
 
@@ -227,7 +369,7 @@ export default function ShippingPage() {
         </p>
       </div>
 
-      <Card>
+      <Card className="max-w-5xl">
         <CardHeader>
           <div className="flex items-start justify-between">
             <div>
@@ -241,79 +383,182 @@ export default function ShippingPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Produto (opcional) – combobox com busca */}
-            <div className="space-y-2">
-              <Label>Produto (opcional)</Label>
-              <Popover open={productPopoverOpen} onOpenChange={setProductPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full justify-between font-normal"
-                  >
-                    <span className={selectedProduct ? "text-foreground" : "text-muted-foreground"}>
-                      {selectedProduct ? selectedProduct.name : "Selecione ou busque um produto"}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {selectedProduct && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleClearProduct()
-                          }}
-                          className="rounded p-0.5 hover:bg-muted"
-                          aria-label="Limpar seleção"
-                        >
-                          ×
-                        </button>
-                      )}
-                      <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+            {/* Primeira linha: Produto (max 300px), Valor (max 80px), CEP flutuante à direita (max 100px) */}
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="w-full max-w-[500px] space-y-2">
+                <Label>Produto (opcional)</Label>
+                <Popover open={productPopoverOpen} onOpenChange={setProductPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className={selectedProductIds.size > 0 ? "text-foreground" : "text-muted-foreground"}>
+                        {selectedProductIds.size > 0 
+                          ? `${selectedProductIds.size} produto(s) selecionado(s)`
+                          : "Selecione um ou mais produtos"}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {selectedProductIds.size > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleClearSelection()
+                            }}
+                            className="rounded p-0.5 hover:bg-muted"
+                            aria-label="Limpar seleção"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                        <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </div>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <div className="p-2 border-b">
+                      <Input
+                        placeholder="Digite para buscar..."
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                        className="h-9"
+                        autoFocus
+                      />
                     </div>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                  <div className="p-2 border-b">
-                    <Input
-                      placeholder="Digite para buscar..."
-                      value={productSearch}
-                      onChange={(e) => setProductSearch(e.target.value)}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="max-h-60 overflow-auto">
-                    {filteredProducts.length === 0 ? (
-                      <p className="p-4 text-sm text-muted-foreground text-center">
-                        Nenhum produto encontrado
-                      </p>
-                    ) : (
-                      filteredProducts.map((product) => (
-                        <button
-                          key={product.id}
-                          type="button"
-                          onClick={() => handleProductSelect(product)}
-                          className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground transition-colors border-b last:border-b-0"
-                        >
-                          <div className="font-medium">{product.name}</div>
-                          {(product.width || product.height || product.length || product.weight) && (
-                            <div className="text-xs text-muted-foreground">
-                              {product.width && `L: ${product.width}cm`}
-                              {product.height && ` × A: ${product.height}cm`}
-                              {product.length && ` × C: ${product.length}cm`}
-                              {product.weight && ` | P: ${product.weight}kg`}
+                    <div className="max-h-60 overflow-auto">
+                      {groupedProducts.length === 0 ? (
+                        <p className="p-4 text-sm text-muted-foreground text-center">
+                          Nenhum produto encontrado
+                        </p>
+                      ) : (
+                        groupedProducts.map((group) => (
+                          <div key={group.categoryName || 'sem-categoria'}>
+                            <div className="px-4 pt-3 pb-1 sticky top-0 bg-background z-10 border-b">
+                              <p className="text-xs font-semibold text-muted-foreground uppercase">
+                                {group.categoryName || 'Sem categoria'}
+                              </p>
                             </div>
-                          )}
-                        </button>
-                      ))
+                            {group.products.map((product) => {
+                              const isSelected = selectedProductIds.has(product.id)
+                              const qty = productQuantities[product.id] ?? 0
+                              const checkboxId = `product-${product.id}`
+                              return (
+                                <div
+                                  key={product.id}
+                                  className="flex items-center gap-3 w-full text-left px-4 py-3 hover:bg-accent hover:text-accent-foreground transition-colors border-b last:border-b-0 min-h-[44px]"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <label className="flex flex-1 min-w-0 cursor-pointer flex items-start gap-3">
+                                    <input
+                                      type="checkbox"
+                                      id={checkboxId}
+                                      checked={isSelected}
+                                      onChange={(e) => {
+                                        e.stopPropagation()
+                                        handleProductToggle(product.id)
+                                      }}
+                                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-input text-primary focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer accent-primary"
+                                      onClick={(e) => e.stopPropagation()}
+                                      aria-label={`Selecionar ${product.name}`}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-medium">{product.name}</div>
+                                      {(product.width || product.height || product.length || product.weight) && (
+                                        <div className="text-xs text-muted-foreground mt-0.5">
+                                          {product.width && `L: ${product.width}cm`}
+                                          {product.height && ` × A: ${product.height}cm`}
+                                          {product.length && ` × C: ${product.length}cm`}
+                                          {product.weight && ` | P: ${product.weight}kg`}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </label>
+                                  <div
+                                    className="flex items-center gap-1 shrink-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <button
+                                      type="button"
+                                      aria-label="Diminuir quantidade"
+                                      disabled={qty === 0}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleQuantityChange(product.id, -1)
+                                      }}
+                                      className="h-6 w-6 shrink-0 rounded-full border border-input bg-background p-0 flex items-center justify-center hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
+                                    >
+                                      <Minus className="h-3 w-3" />
+                                    </button>
+                                    <span className="min-w-[1rem] text-center text-xs tabular-nums" aria-label={`Quantidade: ${qty}`}>
+                                      {qty}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      aria-label="Aumentar quantidade"
+                                      disabled={qty === 10}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleQuantityChange(product.id, 1)
+                                      }}
+                                      className="h-6 w-6 shrink-0 rounded-full border border-input bg-background p-0 flex items-center justify-center hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                {/*
+                {selectedProductIds.size > 0 && (
+                  <div className="mt-2 p-2 bg-muted/50 rounded-md text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        {selectedProductIds.size} produto(s) selecionado(s)
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleClearSelection}
+                        className="h-7 text-xs"
+                      >
+                        Limpar
+                      </Button>
+                    </div>
+                    {selectedProducts.length > 0 && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Peso total: {selectedProducts.reduce((sum, p) => sum + (Number(p.weight) || 0), 0).toFixed(2)}kg
+                        {' · '}
+                        Valor total: R$ {selectedProducts.reduce((sum, p) => sum + (Number(p.base_price) || 0), 0).toFixed(2)}
+                      </div>
                     )}
                   </div>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="cep_destino">CEP de Destino *</Label>
+                )}
+                */}
+              </div>
+              <div className="space-y-2 max-w-[120px]">
+                <Label htmlFor="valor">Valor R$</Label>
+                <Input
+                  id="valor"
+                  type="number"
+                  step="0.01"
+                  value={formData.valor}
+                  onChange={(e) => setFormData({ ...formData, valor: e.target.value })}
+                  placeholder="100.00"
+                />
+              </div>
+              <div className="ml-auto space-y-2 max-w-[250px] text-right">
+                <Label htmlFor="cep_destino" className="text-blue-600 dark:text-blue-400">
+                  CEP de Destino *
+                </Label>
                 <Input
                   id="cep_destino"
                   value={formData.cep_destino}
@@ -321,8 +566,13 @@ export default function ShippingPage() {
                   placeholder="00000-000"
                   maxLength={9}
                   required
+                  className="border-blue-300 focus-visible:ring-blue-500 dark:border-blue-400"
                 />
               </div>
+            </div>
+
+            {/* Segunda linha: Peso, Altura, Largura, Comprimento */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="peso">Peso (kg)</Label>
                 <Input
@@ -367,17 +617,6 @@ export default function ShippingPage() {
                   placeholder="30"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="valor">Valor do Produto (R$)</Label>
-                <Input
-                  id="valor"
-                  type="number"
-                  step="0.01"
-                  value={formData.valor}
-                  onChange={(e) => setFormData({ ...formData, valor: e.target.value })}
-                  placeholder="100.00"
-                />
-              </div>
             </div>
 
             {error && (
@@ -396,19 +635,36 @@ export default function ShippingPage() {
               </div>
             )}
 
-            <Button type="submit" disabled={loading} className="w-full md:w-auto">
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Calculando...
-                </>
-              ) : (
-                <>
-                  <Search className="mr-2 h-4 w-4" />
-                  Calcular Frete
-                </>
-              )}
-            </Button>
+            <div className="flex justify-center items-center gap-4 pt-2 flex-wrap">
+              <Button
+                type="submit"
+                disabled={loading}
+                size="lg"
+                className="min-w-[200px] py-6 px-8 text-lg"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Calculando...
+                  </>
+                ) : (
+                  <>
+                    <Search className="mr-2 h-5 w-5" />
+                    Calcular Frete
+                  </>
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="min-w-[200px] py-6 px-8 text-lg"
+                onClick={handleClearForm}
+              >
+                <Eraser className="mr-2 h-5 w-5" />
+                Limpar
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>

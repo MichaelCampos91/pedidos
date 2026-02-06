@@ -213,7 +213,7 @@ export default function IntegrationsPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as IntegrationTab)} className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList>
           <TabsTrigger value="pagarme" className="flex items-center gap-2">
             <CreditCard className="h-4 w-4" />
             Pagar.me

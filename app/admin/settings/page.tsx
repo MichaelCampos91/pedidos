@@ -99,7 +99,7 @@ export default function SettingsPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList>
           <TabsTrigger value="frete" className="flex items-center gap-2">
             <Truck className="h-4 w-4" />
             Frete
