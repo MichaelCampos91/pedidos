@@ -1233,15 +1233,27 @@ async function createOrGetContactId(
   if (order.client_whatsapp) {
     let cleanWhatsapp = String(order.client_whatsapp).replace(/\D/g, '')
     // Remover código do país (55) se estiver presente no início
-    if (cleanWhatsapp.startsWith('55') && cleanWhatsapp.length > 11) {
-      cleanWhatsapp = cleanWhatsapp.substring(2)
+    // Casos: 55 + DDD (2) + número (8-9) = 12-13 dígitos OU 55 + DDD (2) + número (8-9) = 11 dígitos (incompleto mas comum)
+    if (cleanWhatsapp.startsWith('55')) {
+      if (cleanWhatsapp.length >= 12) {
+        // Número completo com código do país: remover 55
+        cleanWhatsapp = cleanWhatsapp.substring(2)
+      } else if (cleanWhatsapp.length === 11) {
+        // Caso especial: 11 dígitos começando com 55 pode ser 55 + DDD (2) + número (8) incompleto
+        // Tentar remover 55 e verificar se o DDD é válido
+        const withoutCountry = cleanWhatsapp.substring(2)
+        const ddd = withoutCountry.substring(0, 2)
+        if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99) {
+          cleanWhatsapp = withoutCountry
+        }
+      }
     }
     // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
     if (cleanWhatsapp.length === 11 && cleanWhatsapp[2] === '0') {
       cleanWhatsapp = cleanWhatsapp.substring(0, 2) + cleanWhatsapp.substring(3)
     }
     // Validar formato: DDD (2 dígitos) + número (8 ou 9 dígitos)
-    // Celular deve ter 10 ou 11 dígitos no total
+    // Celular deve ter 10 ou 11 dígitos no total após sanitização
     if (cleanWhatsapp.length === 10 || cleanWhatsapp.length === 11) {
       const ddd = cleanWhatsapp.substring(0, 2)
       const numero = cleanWhatsapp.substring(2)
@@ -1255,8 +1267,20 @@ async function createOrGetContactId(
   if (order.client_phone) {
     let cleanPhone = String(order.client_phone).replace(/\D/g, '')
     // Remover código do país (55) se estiver presente no início
-    if (cleanPhone.startsWith('55') && cleanPhone.length > 11) {
-      cleanPhone = cleanPhone.substring(2)
+    // Casos: 55 + DDD (2) + número (8-9) = 12-13 dígitos OU 55 + DDD (2) + número (8-9) = 11 dígitos (incompleto mas comum)
+    if (cleanPhone.startsWith('55')) {
+      if (cleanPhone.length >= 12) {
+        // Número completo com código do país: remover 55
+        cleanPhone = cleanPhone.substring(2)
+      } else if (cleanPhone.length === 11) {
+        // Caso especial: 11 dígitos começando com 55 pode ser 55 + DDD (2) + número (8) incompleto
+        // Tentar remover 55 e verificar se o DDD é válido
+        const withoutCountry = cleanPhone.substring(2)
+        const ddd = withoutCountry.substring(0, 2)
+        if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99) {
+          cleanPhone = withoutCountry
+        }
+      }
     }
     // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
     if (cleanPhone.length === 11 && cleanPhone[2] === '0') {
@@ -2238,8 +2262,20 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
     if (row.whatsapp) {
       let cleanWhatsapp = String(row.whatsapp).replace(/\D/g, '')
       // Remover código do país (55) se estiver presente no início
-      if (cleanWhatsapp.startsWith('55') && cleanWhatsapp.length > 11) {
-        cleanWhatsapp = cleanWhatsapp.substring(2)
+      // Casos: 55 + DDD (2) + número (8-9) = 12-13 dígitos OU 55 + DDD (2) + número (8-9) = 11 dígitos (incompleto mas comum)
+      if (cleanWhatsapp.startsWith('55')) {
+        if (cleanWhatsapp.length >= 12) {
+          // Número completo com código do país: remover 55
+          cleanWhatsapp = cleanWhatsapp.substring(2)
+        } else if (cleanWhatsapp.length === 11) {
+          // Caso especial: 11 dígitos começando com 55 pode ser 55 + DDD (2) + número (8) incompleto
+          // Tentar remover 55 e verificar se o DDD é válido
+          const withoutCountry = cleanWhatsapp.substring(2)
+          const ddd = withoutCountry.substring(0, 2)
+          if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99) {
+            cleanWhatsapp = withoutCountry
+          }
+        }
       }
       // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
       if (cleanWhatsapp.length === 11 && cleanWhatsapp[2] === '0') {
@@ -2258,8 +2294,20 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
     if (row.phone) {
       let cleanPhone = String(row.phone).replace(/\D/g, '')
       // Remover código do país (55) se estiver presente no início
-      if (cleanPhone.startsWith('55') && cleanPhone.length > 11) {
-        cleanPhone = cleanPhone.substring(2)
+      // Casos: 55 + DDD (2) + número (8-9) = 12-13 dígitos OU 55 + DDD (2) + número (8-9) = 11 dígitos (incompleto mas comum)
+      if (cleanPhone.startsWith('55')) {
+        if (cleanPhone.length >= 12) {
+          // Número completo com código do país: remover 55
+          cleanPhone = cleanPhone.substring(2)
+        } else if (cleanPhone.length === 11) {
+          // Caso especial: 11 dígitos começando com 55 pode ser 55 + DDD (2) + número (8) incompleto
+          // Tentar remover 55 e verificar se o DDD é válido
+          const withoutCountry = cleanPhone.substring(2)
+          const ddd = withoutCountry.substring(0, 2)
+          if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99) {
+            cleanPhone = withoutCountry
+          }
+        }
       }
       // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
       if (cleanPhone.length === 11 && cleanPhone[2] === '0') {

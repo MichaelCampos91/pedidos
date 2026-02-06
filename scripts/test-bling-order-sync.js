@@ -218,41 +218,101 @@ async function createContact(order, token) {
   // Formato esperado: DDD (2 dígitos) + número (8 ou 9 dígitos)
   if (order.client_whatsapp) {
     let cleanWhatsapp = String(order.client_whatsapp).replace(/\D/g, '')
+    const originalWhatsapp = cleanWhatsapp
+    console.log(`\n[DEBUG] WhatsApp original: ${order.client_whatsapp}`)
+    console.log(`[DEBUG] WhatsApp apenas dígitos: ${cleanWhatsapp} (${cleanWhatsapp.length} dígitos)`)
+    
     // Remover código do país (55) se estiver presente no início
-    if (cleanWhatsapp.startsWith('55') && cleanWhatsapp.length > 11) {
-      cleanWhatsapp = cleanWhatsapp.substring(2)
+    // Casos: 55 + DDD (2) + número (8-9) = 12-13 dígitos OU 55 + DDD (2) + número (8-9) = 11 dígitos (incompleto mas comum)
+    if (cleanWhatsapp.startsWith('55')) {
+      if (cleanWhatsapp.length >= 12) {
+        // Número completo com código do país: remover 55
+        cleanWhatsapp = cleanWhatsapp.substring(2)
+        console.log(`[DEBUG] Removido código do país (55): ${cleanWhatsapp} (${cleanWhatsapp.length} dígitos)`)
+      } else if (cleanWhatsapp.length === 11) {
+        // Caso especial: 11 dígitos começando com 55 pode ser 55 + DDD (2) + número (8) incompleto
+        // Tentar remover 55 e verificar se o DDD é válido
+        const withoutCountry = cleanWhatsapp.substring(2)
+        const ddd = withoutCountry.substring(0, 2)
+        if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99) {
+          cleanWhatsapp = withoutCountry
+          console.log(`[DEBUG] Removido código do país (55) de número 11 dígitos: ${cleanWhatsapp} (${cleanWhatsapp.length} dígitos)`)
+        }
+      }
     }
+    
     // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
     if (cleanWhatsapp.length === 11 && cleanWhatsapp[2] === '0') {
       cleanWhatsapp = cleanWhatsapp.substring(0, 2) + cleanWhatsapp.substring(3)
+      console.log(`[DEBUG] Removido 0 após DDD: ${cleanWhatsapp} (${cleanWhatsapp.length} dígitos)`)
     }
+    
     // Validar formato: DDD (2 dígitos) + número (8 ou 9 dígitos)
+    // Celular deve ter 10 ou 11 dígitos no total após sanitização
     if (cleanWhatsapp.length === 10 || cleanWhatsapp.length === 11) {
       const ddd = cleanWhatsapp.substring(0, 2)
       const numero = cleanWhatsapp.substring(2)
+      console.log(`[DEBUG] DDD: ${ddd}, Número: ${numero} (${numero.length} dígitos)`)
+      
+      // Validar DDD (11-99) e número (8 ou 9 dígitos para celular)
       if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99 && numero.length >= 8 && numero.length <= 9) {
         contactPayload.celular = cleanWhatsapp
+        console.log(`[DEBUG] ✅ Celular válido: ${cleanWhatsapp}`)
+      } else {
+        console.log(`[DEBUG] ⚠️  Celular inválido: DDD=${ddd} (${parseInt(ddd) >= 11 && parseInt(ddd) <= 99 ? 'válido' : 'inválido'}), Número=${numero.length} dígitos (esperado: 8-9)`)
       }
+    } else {
+      console.log(`[DEBUG] ⚠️  Celular com comprimento inválido: ${cleanWhatsapp.length} dígitos (esperado: 10-11)`)
     }
   }
   
   if (order.client_phone) {
     let cleanPhone = String(order.client_phone).replace(/\D/g, '')
+    const originalPhone = cleanPhone
+    console.log(`\n[DEBUG] Telefone original: ${order.client_phone}`)
+    console.log(`[DEBUG] Telefone apenas dígitos: ${cleanPhone} (${cleanPhone.length} dígitos)`)
+    
     // Remover código do país (55) se estiver presente no início
-    if (cleanPhone.startsWith('55') && cleanPhone.length > 11) {
-      cleanPhone = cleanPhone.substring(2)
+    // Casos: 55 + DDD (2) + número (8-9) = 12-13 dígitos OU 55 + DDD (2) + número (8-9) = 11 dígitos (incompleto mas comum)
+    if (cleanPhone.startsWith('55')) {
+      if (cleanPhone.length >= 12) {
+        // Número completo com código do país: remover 55
+        cleanPhone = cleanPhone.substring(2)
+        console.log(`[DEBUG] Removido código do país (55): ${cleanPhone} (${cleanPhone.length} dígitos)`)
+      } else if (cleanPhone.length === 11) {
+        // Caso especial: 11 dígitos começando com 55 pode ser 55 + DDD (2) + número (8) incompleto
+        // Tentar remover 55 e verificar se o DDD é válido
+        const withoutCountry = cleanPhone.substring(2)
+        const ddd = withoutCountry.substring(0, 2)
+        if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99) {
+          cleanPhone = withoutCountry
+          console.log(`[DEBUG] Removido código do país (55) de número 11 dígitos: ${cleanPhone} (${cleanPhone.length} dígitos)`)
+        }
+      }
     }
+    
     // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
     if (cleanPhone.length === 11 && cleanPhone[2] === '0') {
       cleanPhone = cleanPhone.substring(0, 2) + cleanPhone.substring(3)
+      console.log(`[DEBUG] Removido 0 após DDD: ${cleanPhone} (${cleanPhone.length} dígitos)`)
     }
+    
     // Validar formato: DDD (2 dígitos) + número (8 ou 9 dígitos)
+    // Telefone fixo deve ter 10 dígitos (DDD + 8 dígitos) ou 11 dígitos (DDD + 9 dígitos)
     if (cleanPhone.length === 10 || cleanPhone.length === 11) {
       const ddd = cleanPhone.substring(0, 2)
       const numero = cleanPhone.substring(2)
+      console.log(`[DEBUG] DDD: ${ddd}, Número: ${numero} (${numero.length} dígitos)`)
+      
+      // Validar DDD (11-99) e número (8 ou 9 dígitos)
       if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99 && numero.length >= 8 && numero.length <= 9) {
         contactPayload.telefone = cleanPhone
+        console.log(`[DEBUG] ✅ Telefone válido: ${cleanPhone}`)
+      } else {
+        console.log(`[DEBUG] ⚠️  Telefone inválido: DDD=${ddd} (${parseInt(ddd) >= 11 && parseInt(ddd) <= 99 ? 'válido' : 'inválido'}), Número=${numero.length} dígitos (esperado: 8-9)`)
       }
+    } else {
+      console.log(`[DEBUG] ⚠️  Telefone com comprimento inválido: ${cleanPhone.length} dígitos (esperado: 10-11)`)
     }
   }
 
