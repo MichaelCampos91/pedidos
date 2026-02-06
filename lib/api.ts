@@ -135,6 +135,11 @@ export const blingApi = {
       method: 'POST',
       body: { orderId },
     }),
+  syncClient: (clientId: number) =>
+    request<{ success: boolean; blingContactId?: number; message?: string }>('/bling/sync-client', {
+      method: 'POST',
+      body: { clientId },
+    }),
   getSyncStatus: () =>
     request<{ categories?: string | null; products?: string | null; contacts?: string | null; orders?: string | null }>('/bling/sync/status'),
   syncCategories: (sinceDate: string) =>

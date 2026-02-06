@@ -281,6 +281,115 @@ Consulte a documentação específica de cada integração para mais detalhes:
 8. **Sincronização com Bling**: Pedido é automaticamente sincronizado quando pago
 9. **Acompanhamento**: Acompanhe o pedido até o envio
 
+## Enviar Pedido ao Bling via Terminal
+
+O sistema inclui um script de teste que permite enviar pedidos ao Bling diretamente pelo terminal, útil para debug e testes.
+
+### Script de Teste
+
+O script `test-bling-order-sync.js` permite testar o envio completo de um pedido ao Bling com logs detalhados de todas as etapas:
+
+1. Busca do pedido no banco de dados
+2. Busca/criação do contato no Bling
+3. Envio do pedido ao Bling
+4. (Opcional) Atualização dos campos no banco de dados
+
+### Uso Básico
+
+```bash
+node scripts/test-bling-order-sync.js <ORDER_ID>
+```
+
+**Exemplo:**
+```bash
+node scripts/test-bling-order-sync.js 1
+```
+
+Este comando irá:
+- Exibir todos os dados do pedido, cliente e itens
+- Tentar buscar o contato no Bling pelo CPF/CNPJ
+- Se não encontrar, criar o contato no Bling
+- Enviar o pedido ao Bling
+- Exibir todas as requisições e respostas da API do Bling (sem sanitização)
+- Mostrar logs detalhados de cada etapa
+
+### Persistir Dados no Banco (Flag --save)
+
+Por padrão, o script apenas testa o fluxo sem alterar o banco de dados. Para atualizar os campos após um teste bem-sucedido, use a flag `--save`:
+
+```bash
+node scripts/test-bling-order-sync.js <ORDER_ID> --save
+```
+
+**Exemplo:**
+```bash
+node scripts/test-bling-order-sync.js 1 --save
+```
+
+Quando usado com `--save`, o script irá atualizar:
+- `bling_contact_id` no cliente (se diferente do atual)
+- `bling_sync_status` = 'synced'
+- `bling_sync_error` = NULL
+- `bling_sale_numero` = número usado no envio
+
+### Requisitos
+
+- Variáveis de ambiente do banco de dados configuradas (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)
+- Token do Bling configurado e ativo no banco de dados
+- Pedido deve ter endereço de entrega cadastrado
+- Cliente deve ter CPF ou CNPJ válido
+
+### Exemplo de Saída
+
+```
+================================================================================
+[2026-02-06T11:29:30.498Z] 1: Buscando pedido no banco de dados
+================================================================================
+
+--- Dados do Pedido ---
+{
+  "id": "1",
+  "client_id": "4",
+  "total": "1149.70",
+  ...
+}
+
+================================================================================
+[2026-02-06T11:29:32.138Z] 3: Buscando contato no Bling por documento: 079***
+================================================================================
+
+GET https://api.bling.com.br/Api/v3/contatos?numeroDocumento=07980983920
+Status: 200 OK
+
+✅ Contato encontrado: ID 17943806992
+
+================================================================================
+[2026-02-06T11:29:32.488Z] 5: Enviando pedido ao Bling
+================================================================================
+
+POST https://api.bling.com.br/Api/v3/pedidos/vendas
+Status: 201 Created
+
+✅ Pedido enviado com sucesso! ID Bling: 25021087270
+
+================================================================================
+[2026-02-06T11:29:33.224Z] FINAL: Processo concluído com sucesso!
+================================================================================
+
+Resumo:
+- Pedido ID: 1
+- Contato Bling ID: 17943806992
+- Pedido Bling ID: 25021087270
+- Número Bling: PED-20260206-FECEBC
+```
+
+### Troubleshooting
+
+- **Erro de conexão com banco**: Verifique as variáveis de ambiente DB_*
+- **Token não encontrado**: Configure o token do Bling na página de Integrações
+- **Pedido sem endereço**: Adicione um endereço de entrega ao pedido antes de enviar
+- **Cliente sem CPF/CNPJ**: O cliente deve ter CPF ou CNPJ válido para criar contato no Bling
+
 ## Logs e Auditoria
 
 O sistema mantém logs de todas as operações importantes:

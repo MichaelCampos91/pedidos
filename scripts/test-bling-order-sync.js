@@ -4,10 +4,14 @@
  * Script para testar envio de pedido ao Bling com logs detalhados
  * 
  * Uso: 
- *   node scripts/test-bling-order-sync.js <ORDER_ID>
+ *   node scripts/test-bling-order-sync.js <ORDER_ID> [--save]
  * 
  * Exibe todos os dados sendo enviados/retornados pela API do Bling sem sanitização.
  * Mostra cada etapa do processo: busca contato, criação contato, envio pedido.
+ * 
+ * Opções:
+ *   --save ou --persist: Atualiza os campos no banco de dados após teste bem-sucedido
+ *                        (bling_sync_status, bling_sync_error, bling_sale_numero, bling_contact_id)
  * 
  * Requer variáveis de ambiente do banco de dados (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)
  * que podem estar em .env.local ou definidas no ambiente.
@@ -18,10 +22,12 @@ const fs = require('fs')
 const path = require('path')
 
 const ORDER_ID = process.argv[2]
+const SAVE_TO_DB = process.argv.includes('--save') || process.argv.includes('--persist')
 
 if (!ORDER_ID || isNaN(parseInt(ORDER_ID))) {
   console.error('Erro: ID do pedido é obrigatório.')
-  console.error('Uso: node scripts/test-bling-order-sync.js <ORDER_ID>')
+  console.error('Uso: node scripts/test-bling-order-sync.js <ORDER_ID> [--save]')
+  console.error('     Use --save para atualizar campos no banco após teste bem-sucedido')
   process.exit(1)
 }
 
@@ -328,6 +334,9 @@ async function sendOrder(order, contactId, token) {
   // Garantir que created_at seja uma string antes de usar slice
   const createdDate = order.created_at ? (typeof order.created_at === 'string' ? order.created_at : new Date(order.created_at).toISOString()) : new Date().toISOString()
   const dataEmissao = createdDate.slice(0, 10)
+  
+  // Armazenar numeroBling para possível atualização no banco
+  order._numeroBling = numeroBling
 
   const payload = {
     numero: numeroBling,
@@ -423,11 +432,69 @@ async function main() {
     // Enviar pedido
     const result = await sendOrder(order, contactId, token)
 
+    // Se flag --save estiver ativa e envio foi bem-sucedido, atualizar banco de dados
+    if (SAVE_TO_DB && result.success) {
+      logStep('6', 'Atualizando campos no banco de dados')
+      
+      try {
+        // Atualizar bling_contact_id no cliente (se foi criado/encontrado e diferente do atual)
+        if (contactId && order.client_bling_contact_id !== contactId) {
+          const clientUpdateResult = await query(
+            'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [contactId, order.client_id]
+          )
+          if (clientUpdateResult.rowCount && clientUpdateResult.rowCount > 0) {
+            console.log(`✅ bling_contact_id atualizado no cliente: ${contactId}`)
+          } else {
+            console.log(`⚠️  bling_contact_id não atualizado (cliente não encontrado)`)
+          }
+        } else if (contactId && order.client_bling_contact_id === contactId) {
+          console.log(`ℹ️  bling_contact_id já está correto no cliente: ${contactId}`)
+        }
+        
+        // Atualizar campos do pedido
+        const orderUpdateResult = await query(
+          `UPDATE orders 
+           SET bling_sync_status = 'synced', 
+               bling_sync_error = NULL,
+               bling_sale_numero = $1,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [order._numeroBling, ORDER_ID]
+        )
+        if (orderUpdateResult.rowCount && orderUpdateResult.rowCount > 0) {
+          console.log(`✅ Campos do pedido atualizados:`)
+          console.log(`   - bling_sync_status: synced`)
+          console.log(`   - bling_sync_error: NULL`)
+          console.log(`   - bling_sale_numero: ${order._numeroBling}`)
+        } else {
+          console.log(`⚠️  Campos do pedido não atualizados (pedido não encontrado)`)
+        }
+      } catch (dbError) {
+        console.error(`\n❌ Erro ao atualizar banco de dados:`)
+        console.error(dbError.message)
+        if (dbError.stack) {
+          console.error(dbError.stack)
+        }
+        // Não falhar o script, apenas avisar
+      }
+    } else if (SAVE_TO_DB && !result.success) {
+      console.log(`\n⚠️  Envio não foi bem-sucedido, campos não serão atualizados no banco`)
+    } else if (!SAVE_TO_DB) {
+      console.log(`\nℹ️  Use --save para atualizar campos no banco de dados após teste bem-sucedido`)
+    }
+
     logStep('FINAL', 'Processo concluído com sucesso!')
     console.log(`\nResumo:`)
     console.log(`- Pedido ID: ${ORDER_ID}`)
     console.log(`- Contato Bling ID: ${contactId}`)
     console.log(`- Pedido Bling ID: ${result.blingId || 'N/A'}`)
+    console.log(`- Número Bling: ${order._numeroBling}`)
+    if (SAVE_TO_DB && result.success) {
+      console.log(`- Campos atualizados no banco: Sim`)
+    } else {
+      console.log(`- Campos atualizados no banco: Não`)
+    }
 
   } catch (error) {
     logStep('ERRO', 'Falha no processo')

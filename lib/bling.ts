@@ -27,11 +27,13 @@ const CONTACT_CACHE_TTL = 5 * 60 * 1000 // 5 minutos
  */
 function cleanExpiredContactCache(): void {
   const now = Date.now()
-  for (const [doc, entry] of contactCache.entries()) {
+  const keysToDelete: string[] = []
+  contactCache.forEach((entry, doc) => {
     if (now - entry.timestamp > CONTACT_CACHE_TTL) {
-      contactCache.delete(doc)
+      keysToDelete.push(doc)
     }
-  }
+  })
+  keysToDelete.forEach(key => contactCache.delete(key))
 }
 
 /**
@@ -1599,19 +1601,36 @@ export async function sendOrderToBling(
     // Atualizar o cliente com o bling_contact_id recém-obtido para próximos pedidos
     if (order.client_id != null && blingContactId != null) {
       try {
-        const updateResult = await query(
-          'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND bling_contact_id IS NULL',
-          [blingContactId, order.client_id]
-        )
-        if (updateResult.rowCount && updateResult.rowCount > 0) {
-          logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE', 'bling_contact_id atualizado no cliente', null, {
-            clientId: order.client_id,
-            blingContactId: blingContactId
-          })
+        // Se contato foi criado, sempre atualizar
+        // Se contato foi encontrado, atualizar se diferente do atual ou se NULL
+        const shouldUpdate = contactResult.created || 
+                             order.client_bling_contact_id === null ||
+                             order.client_bling_contact_id !== blingContactId
+        
+        if (shouldUpdate) {
+          const updateResult = await query(
+            'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [blingContactId, order.client_id]
+          )
+          if (updateResult.rowCount && updateResult.rowCount > 0) {
+            logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE', 'bling_contact_id atualizado no cliente', null, {
+              clientId: order.client_id,
+              blingContactId: blingContactId,
+              created: contactResult.created,
+              previousId: order.client_bling_contact_id
+            })
+          } else {
+            logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE', 'bling_contact_id não atualizado (cliente não encontrado)', null, {
+              clientId: order.client_id,
+              blingContactId: blingContactId
+            })
+          }
         } else {
-          logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE', 'bling_contact_id não atualizado (já tinha valor ou cliente não encontrado)', null, {
+          // Log quando não atualiza porque já tem o mesmo valor
+          logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE', 'bling_contact_id não atualizado (já tem o mesmo valor)', null, {
             clientId: order.client_id,
-            blingContactId: blingContactId
+            currentId: order.client_bling_contact_id,
+            newId: blingContactId
           })
         }
       } catch (err) {
@@ -1817,6 +1836,181 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
   }
 
   return orderData
+}
+
+/**
+ * Interface para resultado de sincronização de cliente ao Bling.
+ */
+export interface SyncClientToBlingResult {
+  success: boolean
+  blingContactId?: number
+  error?: string
+  message?: string
+}
+
+/**
+ * Sincroniza um cliente com o Bling (busca/cria contato e atualiza bling_contact_id).
+ * Usa os mesmos métodos validados do envio de pedidos.
+ */
+export async function syncClientToBling(clientId: number): Promise<SyncClientToBlingResult> {
+  const tokenValue = await getTokenWithFallback('bling', 'production')
+  if (!tokenValue) {
+    return { success: false, error: '[Sistema] Integração Bling não configurada.' }
+  }
+
+  // Buscar dados do cliente com endereço padrão
+  const clientResult = await query(
+    `SELECT c.id, c.name, c.cpf, c.cnpj, c.email, c.phone, c.whatsapp, c.bling_contact_id
+     FROM clients c
+     WHERE c.id = $1`,
+    [clientId]
+  )
+
+  if (clientResult.rows.length === 0) {
+    return { success: false, error: 'Cliente não encontrado.' }
+  }
+
+  const client = clientResult.rows[0] as Record<string, unknown>
+  const cleanDoc = (String(client.cpf || client.cnpj || '')).replace(/\D/g, '')
+
+  if (!cleanDoc) {
+    return { success: false, error: 'CPF/CNPJ do cliente é obrigatório para sincronizar com o Bling.' }
+  }
+
+  // Buscar endereço padrão do cliente
+  let address: OrderForBling['address'] = null
+  const addrResult = await query(
+    'SELECT street, number, complement, neighborhood, city, state, cep FROM client_addresses WHERE client_id = $1 ORDER BY is_default DESC LIMIT 1',
+    [clientId]
+  )
+  if (addrResult.rows.length > 0) {
+    const a = addrResult.rows[0] as Record<string, unknown>
+    address = {
+      street: (a.street as string) ?? '',
+      number: (a.number as string | null) ?? null,
+      complement: (a.complement as string | null) ?? null,
+      neighborhood: (a.neighborhood as string | null) ?? null,
+      city: (a.city as string) ?? '',
+      state: (a.state as string) ?? '',
+      cep: (a.cep as string) ?? '',
+    }
+  }
+
+  // Converter dados do cliente para formato OrderForBling (compatível com createOrGetContactId)
+  const orderForBling: OrderForBling = {
+    id: 0, // Não usado para criação de contato
+    client_id: Number(client.id),
+    total: 0,
+    total_items: 0,
+    total_shipping: 0,
+    created_at: new Date().toISOString(),
+    client_name: (client.name as string) ?? 'Cliente',
+    client_cpf: client.cpf ? String(client.cpf) : '',
+    client_cnpj: client.cnpj ? String(client.cnpj) : null,
+    client_email: client.email ? String(client.email) : null,
+    client_whatsapp: client.whatsapp ? String(client.whatsapp) : null,
+    client_phone: client.phone ? String(client.phone) : null,
+    client_bling_contact_id: client.bling_contact_id != null ? Number(client.bling_contact_id) : null,
+    address,
+    items: [], // Não usado para criação de contato
+  }
+
+  // Buscar ou criar contato no Bling
+  let contactResult: ContactResult
+  try {
+    contactResult = await createOrGetContactId(orderForBling, tokenValue)
+    logBlingRequest('syncClientToBling', 'CONTATO', 'Contato obtido', null, {
+      clientId,
+      contactId: contactResult.id,
+      strategy: contactResult.strategy,
+      created: contactResult.created
+    })
+  } catch (contactErr: unknown) {
+    const contactErrorMsg = contactErr instanceof Error ? contactErr.message : String(contactErr)
+    logBlingRequest('syncClientToBling', 'ERRO', 'Falha ao obter contato', null, { erro: contactErrorMsg })
+    return { success: false, error: `[Bling] Não foi possível cadastrar o cliente no Bling. ${contactErrorMsg}` }
+  }
+
+  // Validar que temos o ID do contato
+  if (contactResult.id === null || contactResult.id === undefined) {
+    const errorMsg = 'Não foi possível obter ID do contato no Bling após todas as tentativas.'
+    logBlingRequest('syncClientToBling', 'ERRO', 'ID do contato inválido (null/undefined)', null, {
+      contactResult: JSON.stringify(contactResult)
+    })
+    return { success: false, error: `[Bling] ${errorMsg}` }
+  }
+
+  // Validar que o ID é um número válido
+  const contactIdNumber = Number(contactResult.id)
+  if (isNaN(contactIdNumber) || contactIdNumber <= 0 || !Number.isInteger(contactIdNumber)) {
+    const errorMsg = `ID do contato obtido é inválido: ${contactResult.id}.`
+    logBlingRequest('syncClientToBling', 'ERRO', 'ID do contato inválido (não é número válido)', null, {
+      contactId: contactResult.id,
+      contactIdType: typeof contactResult.id
+    })
+    return { success: false, error: `[Bling] ${errorMsg}` }
+  }
+
+  // Atualizar bling_contact_id no cliente usando a lógica melhorada
+  const currentBlingContactId = client.bling_contact_id != null ? Number(client.bling_contact_id) : null
+  const shouldUpdate = contactResult.created || 
+                       currentBlingContactId === null ||
+                       currentBlingContactId !== contactIdNumber
+
+  if (shouldUpdate) {
+    try {
+      const updateResult = await query(
+        'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [contactIdNumber, clientId]
+      )
+      if (updateResult.rowCount && updateResult.rowCount > 0) {
+        logBlingRequest('syncClientToBling', 'CLIENT_UPDATE', 'bling_contact_id atualizado no cliente', null, {
+          clientId,
+          blingContactId: contactIdNumber,
+          created: contactResult.created,
+          previousId: currentBlingContactId
+        })
+        return {
+          success: true,
+          blingContactId: contactIdNumber,
+          message: contactResult.created 
+            ? 'Cliente criado no Bling com sucesso.' 
+            : 'Cliente encontrado no Bling e atualizado com sucesso.'
+        }
+      } else {
+        logBlingRequest('syncClientToBling', 'CLIENT_UPDATE', 'bling_contact_id não atualizado (cliente não encontrado)', null, {
+          clientId,
+          blingContactId: contactIdNumber
+        })
+        return { success: false, error: 'Cliente não encontrado para atualização.' }
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      logBlingRequest('syncClientToBling', 'CLIENT_UPDATE_ERRO', 'Falha ao atualizar bling_contact_id do cliente', null, {
+        clientId,
+        blingContactId: contactIdNumber,
+        erro: errorMsg
+      })
+      // Não falhar a sincronização se update falhar, mas retornar aviso
+      return {
+        success: true,
+        blingContactId: contactIdNumber,
+        message: `Contato sincronizado no Bling (ID: ${contactIdNumber}), mas houve erro ao atualizar no banco: ${errorMsg}`
+      }
+    }
+  } else {
+    // Já tem o mesmo valor
+    logBlingRequest('syncClientToBling', 'CLIENT_UPDATE', 'bling_contact_id não atualizado (já tem o mesmo valor)', null, {
+      clientId,
+      currentId: currentBlingContactId,
+      newId: contactIdNumber
+    })
+    return {
+      success: true,
+      blingContactId: contactIdNumber,
+      message: 'Cliente já está sincronizado com o Bling.'
+    }
+  }
 }
 
 /**

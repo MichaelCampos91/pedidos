@@ -1,5 +1,5 @@
 import type { ComponentType } from "react"
-import { Clock, Truck, CheckCircle2, AlertCircle, XCircle } from "lucide-react"
+import { Clock, Truck, CheckCircle2, AlertCircle, XCircle, Wrench } from "lucide-react"
 
 export const STATUS_LABELS: Record<string, string> = {
   aguardando_pagamento: "Aguardando Pagamento",
@@ -28,7 +28,7 @@ export const ORDER_STATUS_CONFIG: Record<
   em_producao: {
     label: STATUS_LABELS.em_producao,
     className: "bg-indigo-50 text-indigo-800 border-indigo-200",
-    icon: Clock,
+    icon: Wrench,
   },
   aguardando_envio: {
     label: STATUS_LABELS.aguardando_envio,

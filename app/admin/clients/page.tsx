@@ -6,9 +6,11 @@ import { format } from "date-fns"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, MessageCircle, Plus, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
-import { clientsApi } from "@/lib/api"
+import { Search, MessageCircle, Plus, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Send } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { clientsApi, blingApi } from "@/lib/api"
 import { formatPhone, formatCPF, formatDateTime } from "@/lib/utils"
+import { toast } from "@/lib/toast"
 
 export default function ClientsPage() {
   const router = useRouter()
@@ -17,6 +19,8 @@ export default function ClientsPage() {
   const [search, setSearch] = useState("")
   const [sortBy, setSortBy] = useState<string>("created_at")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
+  const [actionsOpenClientId, setActionsOpenClientId] = useState<number | null>(null)
+  const [blingSyncingClientId, setBlingSyncingClientId] = useState<number | null>(null)
   const [pagination, setPagination] = useState({
     current_page: 1,
     per_page: 20,
@@ -103,6 +107,20 @@ export default function ClientsPage() {
       pages.push(i)
     }
     return pages
+  }
+
+  const handleSyncToBling = async (clientId: number) => {
+    setBlingSyncingClientId(clientId)
+    try {
+      const res = await blingApi.syncClient(clientId)
+      toast.success(res.message ?? "Cliente enviado ao Bling com sucesso.")
+      loadClients() // Recarregar lista para atualizar bling_contact_id
+    } catch (err: any) {
+      const message = err.message ?? "Erro ao enviar cliente ao Bling."
+      toast.error(message)
+    } finally {
+      setBlingSyncingClientId(null)
+    }
   }
 
   return (
@@ -216,14 +234,40 @@ export default function ClientsPage() {
                       {formatDateTime(client.created_at)}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => router.push(`/admin/clients/${client.id}`)}
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        Editar
-                      </Button>
+                      <Popover open={actionsOpenClientId === client.id} onOpenChange={(open) => setActionsOpenClientId(open ? client.id : null)}>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" className="h-8 bg-primary text-primary-foreground hover:bg-primary/90">
+                            <MoreHorizontal className="h-5 w-5" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-56 p-1" align="end">
+                          <div className="flex flex-col gap-0.5">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="justify-start gap-2"
+                              onClick={() => { setActionsOpenClientId(null); router.push(`/admin/clients/${client.id}`) }}
+                            >
+                              <Edit className="h-4 w-4" />
+                              Editar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="justify-start gap-2"
+                              disabled={blingSyncingClientId === client.id}
+                              onClick={() => { setActionsOpenClientId(null); handleSyncToBling(client.id) }}
+                            >
+                              {blingSyncingClientId === client.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              Enviar ao Bling
+                            </Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </TableCell>
                   </TableRow>
                 ))}

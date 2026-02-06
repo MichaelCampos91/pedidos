@@ -390,7 +390,6 @@ export default function OrdersPage() {
                   <TableHead>Status Envio</TableHead>
                   <TableHead>Status Pagamento</TableHead>
                   <TableHead>Total</TableHead>
-                  <TableHead>Frete</TableHead>
                   <TableHead>Tags</TableHead>
                   <TableHead>Bling</TableHead>
                   <TableHead>Criado em</TableHead>
@@ -446,7 +445,7 @@ export default function OrdersPage() {
                             <Badge
                               variant="outline"
                               className={cn(
-                                "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border",
+                                "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full border whitespace-nowrap",
                                 config.className
                               )}
                             >
@@ -490,14 +489,12 @@ export default function OrdersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="font-medium">
-                        {formatCurrency(parseFloat(order.total))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
                       <div className="space-y-1">
                         <div className="font-medium">
-                          {formatCurrency(parseFloat(order.total_shipping || 0))}
+                          Total: <span className="font-bold">{formatCurrency(parseFloat(order.total))}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Frete: <span className="font-bold">{formatCurrency(parseFloat(order.total_shipping || 0))}</span>
                         </div>
                         {order.shipping_method && (
                           <Badge
