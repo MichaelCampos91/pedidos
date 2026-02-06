@@ -263,6 +263,18 @@ export const metricsApi = {
       by_state: { state: string; count: number; total: number }[]
     }>(`/metrics/orders?${query}`)
   },
+  revenueEvolution: (params: { start_date: string; end_date: string; group_by: 'day' | 'week' | 'month' | 'year'; timezone?: string }) => {
+    const query = new URLSearchParams(params as any).toString()
+    return request<Array<{ date: string; revenue: number }>>(`/metrics/revenue-evolution?${query}`)
+  },
+  revenueMonthly: (params?: { year?: number }) => {
+    const query = new URLSearchParams(params as any).toString()
+    return request<Array<{ month: number; month_name: string; revenue: number }>>(`/metrics/revenue-monthly?${query}`)
+  },
+  topClients: (params: { start_date?: string; end_date?: string; timezone?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams(params as any).toString()
+    return request<Array<{ client_id: number; client_name: string; order_count: number; total_revenue: number }>>(`/metrics/top-clients?${query}`)
+  },
 }
 
 // Shipping
