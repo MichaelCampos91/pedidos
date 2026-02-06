@@ -14,6 +14,45 @@ import { getToken, getTokenWithFallback } from '@/lib/integrations'
 
 const BLING_API_BASE = 'https://api.bling.com.br/Api/v3'
 
+/**
+ * Cache em memória para contatos buscados recentemente.
+ * Estrutura: Map<documento, { id: number, timestamp: number }>
+ * TTL: 5 minutos (300000ms)
+ */
+const contactCache = new Map<string, { id: number; timestamp: number }>()
+const CONTACT_CACHE_TTL = 5 * 60 * 1000 // 5 minutos
+
+/**
+ * Limpa entradas expiradas do cache de contatos.
+ */
+function cleanExpiredContactCache(): void {
+  const now = Date.now()
+  for (const [doc, entry] of contactCache.entries()) {
+    if (now - entry.timestamp > CONTACT_CACHE_TTL) {
+      contactCache.delete(doc)
+    }
+  }
+}
+
+/**
+ * Busca contato no cache. Retorna o ID se encontrado e ainda válido, null caso contrário.
+ */
+function getCachedContactId(cleanDoc: string): number | null {
+  cleanExpiredContactCache()
+  const cached = contactCache.get(cleanDoc)
+  if (cached && (Date.now() - cached.timestamp) <= CONTACT_CACHE_TTL) {
+    return cached.id
+  }
+  return null
+}
+
+/**
+ * Armazena contato no cache.
+ */
+function setCachedContactId(cleanDoc: string, id: number): void {
+  contactCache.set(cleanDoc, { id, timestamp: Date.now() })
+}
+
 export interface BlingValidateResult {
   valid: boolean
   message: string
@@ -805,12 +844,14 @@ async function findBlingContactBySearch(
  * Estratégia C: busca paginada (último recurso quando filtros não funcionam).
  * Para quando lista vazia (fim dos resultados), não por limite fixo de páginas.
  * Respeita limite de 3 requisições/segundo do Bling com delay de 350ms.
+ * 
+ * Otimização: limitado a 10 páginas inicialmente (timeout de 30s) para reduzir tempo de espera.
  */
 async function findBlingContactByPagination(
   cleanCpf: string,
   accessToken: string,
-  maxPages: number = 100,
-  timeoutMs: number = 60000
+  maxPages: number = 10, // Reduzido de 100 para 10 para melhor performance
+  timeoutMs: number = 30000 // Reduzido de 60s para 30s
 ): Promise<number | null> {
   const token = accessToken.trim().replace(/^Bearer\s+/i, '')
   if (!token || !cleanCpf) return null
@@ -911,7 +952,7 @@ async function findBlingContactByPagination(
  */
 interface ContactSearchResult {
   id: number | null
-  strategy: 'documento' | 'pesquisa' | 'paginacao' | null
+  strategy: 'cache' | 'documento' | 'pesquisa' | 'paginacao' | null
   attempts: number
 }
 
@@ -926,11 +967,22 @@ async function findBlingContactWithFallback(
 ): Promise<ContactSearchResult> {
   let attempts = 0
 
+  // Verificar cache primeiro
+  const cachedId = getCachedContactId(cleanCpf)
+  if (cachedId != null) {
+    logBlingRequest('findBlingContactWithFallback', 'CACHE', 'Contato encontrado no cache', null, { 
+      id: cachedId, 
+      cpf: maskSensitiveData(cleanCpf) 
+    })
+    return { id: cachedId, strategy: 'cache', attempts: 0 }
+  }
+
   // Estratégia A: Busca por numeroDocumento
   attempts++
   logBlingRequest('findBlingContactWithFallback', 'INICIO', 'Busca contato', null, { estrategia: 'A: numeroDocumento', cpf: maskSensitiveData(cleanCpf) })
   const foundByDocument = await findBlingContactByDocument(cleanCpf, accessToken)
   if (foundByDocument != null) {
+    setCachedContactId(cleanCpf, foundByDocument)
     logBlingRequest('findBlingContactWithFallback', 'SUCESSO', 'Busca contato', null, { estrategia: 'A: numeroDocumento', id: foundByDocument })
     return { id: foundByDocument, strategy: 'documento', attempts }
   }
@@ -940,6 +992,7 @@ async function findBlingContactWithFallback(
   logBlingRequest('findBlingContactWithFallback', 'CONTINUA', 'Busca contato', null, { estrategia: 'B: pesquisa' })
   const foundBySearch = await findBlingContactBySearch(cleanCpf, accessToken)
   if (foundBySearch != null) {
+    setCachedContactId(cleanCpf, foundBySearch)
     logBlingRequest('findBlingContactWithFallback', 'SUCESSO', 'Busca contato', null, { estrategia: 'B: pesquisa', id: foundBySearch })
     return { id: foundBySearch, strategy: 'pesquisa', attempts }
   }
@@ -949,6 +1002,7 @@ async function findBlingContactWithFallback(
   logBlingRequest('findBlingContactWithFallback', 'CONTINUA', 'Busca contato', null, { estrategia: 'C: paginação' })
   const foundByPagination = await findBlingContactByPagination(cleanCpf, accessToken)
   if (foundByPagination != null) {
+    setCachedContactId(cleanCpf, foundByPagination)
     logBlingRequest('findBlingContactWithFallback', 'SUCESSO', 'Busca contato', null, { estrategia: 'C: paginação', id: foundByPagination })
     return { id: foundByPagination, strategy: 'paginacao', attempts }
   }
@@ -1103,7 +1157,7 @@ interface ContactResult {
   id: number | null
   found: boolean
   created: boolean
-  strategy?: 'documento' | 'pesquisa' | 'paginacao' | null
+  strategy?: 'cache' | 'documento' | 'pesquisa' | 'paginacao' | null
   attempts?: number
 }
 
@@ -1166,11 +1220,57 @@ async function createOrGetContactId(
     nome: order.client_name || 'Cliente',
     numeroDocumento: cleanDoc,
     tipo,
+    situacao: 'A', // A = Ativo (obrigatório pela API do Bling)
   }
 
   if (order.client_email) contactPayload.email = order.client_email
-  if (order.client_whatsapp) contactPayload.celular = order.client_whatsapp
-  if (order.client_phone) contactPayload.telefone = order.client_phone
+  
+  // Limpar telefones: remover formatação e deixar apenas dígitos
+  // A API do Bling espera apenas DDD + número (sem código do país)
+  // Formato esperado: DDD (2 dígitos) + número (8 ou 9 dígitos para celular, 8 dígitos para fixo)
+  if (order.client_whatsapp) {
+    let cleanWhatsapp = String(order.client_whatsapp).replace(/\D/g, '')
+    // Remover código do país (55) se estiver presente no início
+    if (cleanWhatsapp.startsWith('55') && cleanWhatsapp.length > 11) {
+      cleanWhatsapp = cleanWhatsapp.substring(2)
+    }
+    // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
+    if (cleanWhatsapp.length === 11 && cleanWhatsapp[2] === '0') {
+      cleanWhatsapp = cleanWhatsapp.substring(0, 2) + cleanWhatsapp.substring(3)
+    }
+    // Validar formato: DDD (2 dígitos) + número (8 ou 9 dígitos)
+    // Celular deve ter 10 ou 11 dígitos no total
+    if (cleanWhatsapp.length === 10 || cleanWhatsapp.length === 11) {
+      const ddd = cleanWhatsapp.substring(0, 2)
+      const numero = cleanWhatsapp.substring(2)
+      // Validar DDD (11-99) e número (8 ou 9 dígitos)
+      if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99 && numero.length >= 8 && numero.length <= 9) {
+        contactPayload.celular = cleanWhatsapp
+      }
+    }
+  }
+  
+  if (order.client_phone) {
+    let cleanPhone = String(order.client_phone).replace(/\D/g, '')
+    // Remover código do país (55) se estiver presente no início
+    if (cleanPhone.startsWith('55') && cleanPhone.length > 11) {
+      cleanPhone = cleanPhone.substring(2)
+    }
+    // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
+    if (cleanPhone.length === 11 && cleanPhone[2] === '0') {
+      cleanPhone = cleanPhone.substring(0, 2) + cleanPhone.substring(3)
+    }
+    // Validar formato: DDD (2 dígitos) + número (8 ou 9 dígitos)
+    // Telefone fixo geralmente tem 10 dígitos, mas pode ter 11 se for celular
+    if (cleanPhone.length === 10 || cleanPhone.length === 11) {
+      const ddd = cleanPhone.substring(0, 2)
+      const numero = cleanPhone.substring(2)
+      // Validar DDD (11-99) e número (8 ou 9 dígitos)
+      if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99 && numero.length >= 8 && numero.length <= 9) {
+        contactPayload.telefone = cleanPhone
+      }
+    }
+  }
 
   if (order.address) {
     contactPayload.endereco = {
@@ -1208,7 +1308,39 @@ async function createOrGetContactId(
     logBlingRequest('createOrGetContactId', 'POST', url, response.status, responseData)
 
     if (response.ok) {
-      const contactId = extractBlingIdFromResponse(responseData)
+      let contactId = extractBlingIdFromResponse(responseData)
+      
+      // Se não conseguiu extrair ID da resposta, tentar buscar o contato recém-criado
+      if (contactId == null) {
+        logBlingRequest('createOrGetContactId', 'FALLBACK', 'ID não encontrado na resposta, buscando contato recém-criado', response.status, {
+          resposta: maskSensitiveData(JSON.stringify(responseData).slice(0, 200))
+        })
+        
+        // Aguardar 500ms para garantir que a API processou a criação (latência da API)
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        // Tentar buscar usando estratégia A (mais rápida) primeiro
+        const fallbackSearchResult = await findBlingContactByDocument(cleanDoc, accessToken)
+        if (fallbackSearchResult != null) {
+          contactId = fallbackSearchResult
+          logBlingRequest('createOrGetContactId', 'FALLBACK_SUCESSO', 'Contato encontrado após criação', null, {
+            id: contactId,
+            estrategia: 'documento'
+          })
+        } else {
+          // Se estratégia A não funcionou, tentar busca completa (A→B→C)
+          logBlingRequest('createOrGetContactId', 'FALLBACK', 'Estratégia A falhou, tentando busca completa', null)
+          const fullSearchResult = await findBlingContactWithFallback(cleanDoc, accessToken)
+          if (fullSearchResult.id != null) {
+            contactId = fullSearchResult.id
+            logBlingRequest('createOrGetContactId', 'FALLBACK_SUCESSO', 'Contato encontrado após criação', null, {
+              id: contactId,
+              estrategia: fullSearchResult.strategy || 'completa'
+            })
+          }
+        }
+      }
+      
       if (contactId != null) {
         logBlingRequest('createOrGetContactId', 'SUCESSO', 'Contato criado', response.status, { id: contactId })
         return {
@@ -1219,7 +1351,16 @@ async function createOrGetContactId(
           attempts: searchResult.attempts + 1
         }
       }
-      throw new Error('Resposta do Bling não contém ID do contato criado.')
+      
+      // Se ainda não encontrou após todas as tentativas, lançar erro com detalhes
+      logBlingRequest('createOrGetContactId', 'ERRO', 'Não foi possível obter ID após criar contato', response.status, {
+        resposta: maskSensitiveData(JSON.stringify(responseData).slice(0, 300))
+      })
+      throw new Error(
+        `Contato foi criado no Bling mas não foi possível obter o ID. ` +
+        `Resposta da API: ${maskSensitiveData(JSON.stringify(responseData).slice(0, 200))}. ` +
+        `Verifique se o app Bling tem escopo 'Gerenciar Contatos' (ID: 318257565) habilitado e reautorize a integração se necessário.`
+      )
     }
 
     // Passo 3: Se criação falhou por duplicidade, refazer busca completa
@@ -1422,26 +1563,65 @@ export async function sendOrderToBling(
 
     // Validar que temos o ID do contato antes de criar a venda
     // A API v3 não aceita dados inline quando o contato já existe no sistema
-    if (contactResult.id === null) {
+    if (contactResult.id === null || contactResult.id === undefined) {
       const errorMsg = 'Não foi possível obter ID do contato no Bling. O contato pode já existir mas não foi encontrado após todas as tentativas de busca. ' +
         'Verifique se o app Bling tem o escopo "Gerenciar Contatos" (ID: 318257565) habilitado e reautorize a integração se necessário. ' +
         'Se o problema persistir, verifique se o CPF/CNPJ do cliente está correto e se o contato existe na conta Bling correta.'
+      logBlingRequest('sendOrderToBling', 'ERRO', 'ID do contato inválido (null/undefined)', null, {
+        contactResult: JSON.stringify(contactResult)
+      })
       await updateOrderSync(orderId, 'error', errorMsg)
       await insertLog(orderId, 'error', errorMsg, null)
       return { success: false, error: `[Bling] ${errorMsg}` }
     }
 
-    blingContactId = contactResult.id
+    // Validar que o ID é um número válido e maior que zero
+    const contactIdNumber = Number(contactResult.id)
+    if (isNaN(contactIdNumber) || contactIdNumber <= 0 || !Number.isInteger(contactIdNumber)) {
+      const errorMsg = `ID do contato obtido é inválido: ${contactResult.id}. Esperado um número inteiro maior que zero.`
+      logBlingRequest('sendOrderToBling', 'ERRO', 'ID do contato inválido (não é número válido)', null, {
+        contactId: contactResult.id,
+        contactIdType: typeof contactResult.id,
+        contactResult: JSON.stringify(contactResult)
+      })
+      await updateOrderSync(orderId, 'error', errorMsg)
+      await insertLog(orderId, 'error', errorMsg, JSON.stringify(contactResult))
+      return { success: false, error: `[Bling] ${errorMsg}` }
+    }
+
+    blingContactId = contactIdNumber
+    logBlingRequest('sendOrderToBling', 'VALIDACAO', 'ID do contato validado', null, {
+      id: blingContactId,
+      created: contactResult.created,
+      strategy: contactResult.strategy
+    })
 
     // Atualizar o cliente com o bling_contact_id recém-obtido para próximos pedidos
     if (order.client_id != null && blingContactId != null) {
       try {
-        await query(
+        const updateResult = await query(
           'UPDATE clients SET bling_contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND bling_contact_id IS NULL',
           [blingContactId, order.client_id]
         )
+        if (updateResult.rowCount && updateResult.rowCount > 0) {
+          logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE', 'bling_contact_id atualizado no cliente', null, {
+            clientId: order.client_id,
+            blingContactId: blingContactId
+          })
+        } else {
+          logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE', 'bling_contact_id não atualizado (já tinha valor ou cliente não encontrado)', null, {
+            clientId: order.client_id,
+            blingContactId: blingContactId
+          })
+        }
       } catch (err) {
-        // Não falhar o envio se a atualização do cliente falhar
+        // Não falhar o envio se a atualização do cliente falhar, mas registrar aviso
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        logBlingRequest('sendOrderToBling', 'CLIENT_UPDATE_ERRO', 'Falha ao atualizar bling_contact_id do cliente', null, {
+          clientId: order.client_id,
+          blingContactId: blingContactId,
+          erro: errorMsg
+        })
         console.warn('[Bling] Erro ao atualizar bling_contact_id do cliente:', err)
       }
     }
@@ -1454,7 +1634,18 @@ export async function sendOrderToBling(
 
   let syncedInThisRun = false
   try {
-    logBlingRequest('sendOrderToBling', 'POST', url, null, { pedidoId: orderId, contatoId: blingContactId })
+    // Logar payload antes de enviar (mascarando dados sensíveis)
+    const payloadForLog = {
+      ...payload,
+      contato: { id: blingContactId },
+      // Não logar dados completos do contato por segurança
+    }
+    logBlingRequest('sendOrderToBling', 'POST', url, null, { 
+      pedidoId: orderId, 
+      contatoId: blingContactId,
+      payload: maskSensitiveData(JSON.stringify(payloadForLog))
+    })
+    
     const response = await fetchWithRetry(url, {
       method: 'POST',
       headers: {
@@ -1514,6 +1705,13 @@ export async function sendOrderToBling(
 
     const snippet = decodeUnicodeEscapes(responseText.trim().slice(0, 400))
     const details = snippet ? ` Detalhes: ${snippet}` : ''
+    
+    // Logar payload completo em caso de erro para debug
+    logBlingRequest('sendOrderToBling', 'ERRO', 'Falha ao enviar pedido', response.status, {
+      erro: errMsg,
+      payload: maskSensitiveData(JSON.stringify(payload)),
+      resposta: maskSensitiveData(JSON.stringify(responseData))
+    })
 
     await updateOrderSync(orderId, 'error', errMsg)
     await insertLog(orderId, 'error', errMsg, responseText.slice(0, 1000))
@@ -1836,10 +2034,53 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
       nome: row.name || 'Cliente',
       numeroDocumento: cleanCpf,
       tipo,
+      situacao: 'A', // A = Ativo (obrigatório pela API do Bling)
     }
     if (row.email) contactPayload.email = row.email
-    if (row.whatsapp) contactPayload.celular = row.whatsapp
-    if (row.phone) contactPayload.telefone = row.phone
+    
+    // Limpar telefones: remover formatação e deixar apenas dígitos
+    // A API do Bling espera apenas DDD + número (sem código do país)
+    // Formato esperado: DDD (2 dígitos) + número (8 ou 9 dígitos)
+    if (row.whatsapp) {
+      let cleanWhatsapp = String(row.whatsapp).replace(/\D/g, '')
+      // Remover código do país (55) se estiver presente no início
+      if (cleanWhatsapp.startsWith('55') && cleanWhatsapp.length > 11) {
+        cleanWhatsapp = cleanWhatsapp.substring(2)
+      }
+      // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
+      if (cleanWhatsapp.length === 11 && cleanWhatsapp[2] === '0') {
+        cleanWhatsapp = cleanWhatsapp.substring(0, 2) + cleanWhatsapp.substring(3)
+      }
+      // Validar formato: DDD (2 dígitos) + número (8 ou 9 dígitos)
+      if (cleanWhatsapp.length === 10 || cleanWhatsapp.length === 11) {
+        const ddd = cleanWhatsapp.substring(0, 2)
+        const numero = cleanWhatsapp.substring(2)
+        // Validar DDD (11-99) e número (8 ou 9 dígitos)
+        if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99 && numero.length >= 8 && numero.length <= 9) {
+          contactPayload.celular = cleanWhatsapp
+        }
+      }
+    }
+    if (row.phone) {
+      let cleanPhone = String(row.phone).replace(/\D/g, '')
+      // Remover código do país (55) se estiver presente no início
+      if (cleanPhone.startsWith('55') && cleanPhone.length > 11) {
+        cleanPhone = cleanPhone.substring(2)
+      }
+      // Remover 0 inicial após DDD se presente (formato antigo brasileiro)
+      if (cleanPhone.length === 11 && cleanPhone[2] === '0') {
+        cleanPhone = cleanPhone.substring(0, 2) + cleanPhone.substring(3)
+      }
+      // Validar formato: DDD (2 dígitos) + número (8 ou 9 dígitos)
+      if (cleanPhone.length === 10 || cleanPhone.length === 11) {
+        const ddd = cleanPhone.substring(0, 2)
+        const numero = cleanPhone.substring(2)
+        // Validar DDD (11-99) e número (8 ou 9 dígitos)
+        if (parseInt(ddd) >= 11 && parseInt(ddd) <= 99 && numero.length >= 8 && numero.length <= 9) {
+          contactPayload.telefone = cleanPhone
+        }
+      }
+    }
     const addrResult = await query(
       'SELECT street, number, complement, neighborhood, city, state, cep FROM client_addresses WHERE client_id = $1 ORDER BY is_default DESC LIMIT 1',
       [row.id]
