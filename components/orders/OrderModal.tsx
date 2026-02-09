@@ -414,6 +414,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
       const itemsTotal = formData.items.reduce((sum, item) => {
         return sum + (parseFloat(item.price || 0) * parseInt(item.quantity || 1))
       }, 0)
+      // total_shipping deve vir somente da opção selecionada (0 = frete grátis; > 0 = modalidade paga)
       const shippingTotal = selectedShipping ? parseFloat(selectedShipping.price) : 0
 
       const orderData: any = {
@@ -441,7 +442,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
           delivery_range: selectedShipping.delivery_range,
           packages: selectedShipping.packages,
           originalPrice: selectedShipping.originalPrice, // Preço original antes do frete grátis
-          // environment removido - não é mais necessário
+          freeShippingSelected: shippingTotal === 0, // true quando o vendedor escolheu a opção com frete grátis
         }
       } else {
         orderData.total_shipping = 0

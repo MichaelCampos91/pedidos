@@ -200,13 +200,18 @@ export async function calculateInstallmentTotal(
     }
   }
 
+  // Parcela inexistente na tabela: aplicar juros com taxa padrão (nunca tratar como sem juros).
   if (!rateData) {
+    const rate = getDefaultRateForInstallments(installments)
+    const totalWithInterest = originalValue * (1 + rate / 100)
+    const installmentValue = totalWithInterest / installments
+    const interestAmount = totalWithInterest - originalValue
     return {
-      rate: 0,
-      totalWithInterest: originalValue,
-      installmentValue: originalValue / installments,
-      interestAmount: 0,
-      hasInterest: false,
+      rate,
+      totalWithInterest,
+      installmentValue,
+      interestAmount,
+      hasInterest: rate > 0,
     }
   }
 
@@ -253,7 +258,7 @@ export async function calculateAllInstallments(
       (minInstallment === 0 || valuePerInstallment >= minInstallment)
     const rate = useZeroInterest
       ? 0
-      : (rateRow?.rate_percentage ?? 0)
+      : (rateRow?.rate_percentage ?? getDefaultRateForInstallments(i))
     const totalWithInterest = originalValue * (1 + rate / 100)
     const installmentValue = totalWithInterest / i
     const interestAmount = totalWithInterest - originalValue
@@ -281,6 +286,7 @@ export async function hasPixDiscount(): Promise<boolean> {
 
 /**
  * Tarifas padrão para o modal "Aplicar Tarifas Padrão" (referência; editáveis pelo admin antes de confirmar).
+ * Usado também como fallback quando não existe linha em installment_rates para um dado número de parcelas.
  */
 export const DEFAULT_INSTALLMENT_RATES: Array<{ installments: number; rate_percentage: number }> = [
   { installments: 1, rate_percentage: 4.37 },
@@ -296,6 +302,15 @@ export const DEFAULT_INSTALLMENT_RATES: Array<{ installments: number; rate_perce
   { installments: 11, rate_percentage: 19.17 },
   { installments: 12, rate_percentage: 20.57 },
 ]
+
+/**
+ * Retorna a taxa padrão (fallback) para um número de parcelas.
+ * Usado quando não existe configuração em installment_rates — nesse caso sempre aplicamos juros.
+ */
+function getDefaultRateForInstallments(installments: number): number {
+  const entry = DEFAULT_INSTALLMENT_RATES.find(r => r.installments === installments)
+  return entry ? entry.rate_percentage : DEFAULT_INSTALLMENT_RATES[DEFAULT_INSTALLMENT_RATES.length - 1].rate_percentage
+}
 
 /**
  * Recalcula o total do pedido a partir dos itens e do frete (fonte confiável no backend).

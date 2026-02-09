@@ -326,10 +326,28 @@ export async function POST(request: NextRequest) {
         ? produtos.reduce((sum: number, p: any) => sum + (parseFloat(p.valor || p.insurance_value || 0) * parseInt(p.quantidade || p.quantity || 1)), 0)
         : parseFloat(valor || 0))
 
+      // Resolver estado de destino a partir do CEP quando não enviado (ex.: tela de cotação admin)
+      let resolvedDestinationState: string | undefined = destination_state != null && String(destination_state).trim() !== '' ? String(destination_state).trim().toUpperCase().substring(0, 2) : undefined
+      if (applyRules && !resolvedDestinationState && cleanCepDestino.length === 8) {
+        try {
+          const viaCepRes = await fetch(`https://viacep.com.br/ws/${cleanCepDestino}/json/`)
+          if (viaCepRes.ok) {
+            const viaCepData = await viaCepRes.json()
+            if (viaCepData && !viaCepData.erro && viaCepData.uf) {
+              resolvedDestinationState = String(viaCepData.uf).toUpperCase().substring(0, 2)
+            }
+          }
+        } catch (viaCepErr) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('[Shipping Quote] ViaCEP falhou ao obter UF para regras:', viaCepErr)
+          }
+        }
+      }
+
       const result = await applyShippingRules({
         shippingOptions: validOptions,
         orderValue,
-        destinationState: destination_state,
+        destinationState: resolvedDestinationState,
         destinationCep: cleanCepDestino,
       })
 

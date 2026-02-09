@@ -79,6 +79,19 @@ function logData(label, data) {
   console.log(JSON.stringify(data, null, 2))
 }
 
+/** Normaliza número do endereço: trim; vazio ou só espaços vira null. */
+function normalizeAddressNumber(value) {
+  if (value == null) return null
+  const s = String(value).trim()
+  return s === '' ? null : s
+}
+
+/** Número para payload Bling: normalizado ou 'S/N'. */
+function addressNumeroForBling(number) {
+  const n = normalizeAddressNumber(number)
+  return n ?? 'S/N'
+}
+
 async function fetchOrder(orderId) {
   logStep('1', 'Buscando pedido no banco de dados')
   
@@ -109,7 +122,11 @@ async function fetchOrder(orderId) {
       [order.shipping_address_id]
     )
     if (addrResult.rows.length > 0) {
-      address = addrResult.rows[0]
+      const row = addrResult.rows[0]
+      address = {
+        ...row,
+        number: normalizeAddressNumber(row.number),
+      }
       logData('Endereço de Entrega', address)
     }
   }
@@ -319,7 +336,7 @@ async function createContact(order, token) {
   if (order.address) {
     contactPayload.endereco = {
       endereco: order.address.street || '',
-      numero: order.address.number || 'S/N',
+      numero: addressNumeroForBling(order.address.number),
       complemento: order.address.complement || '',
       bairro: order.address.neighborhood || '',
       municipio: order.address.city || '',
@@ -415,6 +432,22 @@ async function sendOrder(order, contactId, token) {
 
   if (order.observations) {
     payload.observacao = order.observations
+  }
+
+  if (order.address) {
+    payload.transporte = {
+      enderecoEntrega: {
+        nome: order.client_name || 'Cliente',
+        endereco: order.address.street || '',
+        numero: addressNumeroForBling(order.address.number),
+        complemento: order.address.complement || '',
+        bairro: order.address.neighborhood || '',
+        municipio: order.address.city || '',
+        uf: order.address.state || '',
+        cep: (order.address.cep || '').replace(/\D/g, ''),
+      },
+      valorFrete: Number(order.total_shipping) || 0,
+    }
   }
 
   const url = `${BLING_API_BASE}/pedidos/vendas`

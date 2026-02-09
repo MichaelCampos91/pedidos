@@ -11,6 +11,22 @@ import { formatCurrency, formatCPF, formatCNPJ, maskCPFOrCNPJ, maskCEP, unmaskCE
 import { toast } from "@/lib/toast"
 import { cepApi } from "@/lib/api"
 
+/** Taxas padrão de parcelamento (fallback quando a API não retorna taxa para um N de parcelas). Alinhado ao backend. */
+const FALLBACK_INSTALLMENT_RATES: Array<{ installments: number; rate_percentage: number }> = [
+  { installments: 1, rate_percentage: 4.37 },
+  { installments: 2, rate_percentage: 6.28 },
+  { installments: 3, rate_percentage: 7.68 },
+  { installments: 4, rate_percentage: 9.08 },
+  { installments: 5, rate_percentage: 10.48 },
+  { installments: 6, rate_percentage: 11.88 },
+  { installments: 7, rate_percentage: 13.57 },
+  { installments: 8, rate_percentage: 14.97 },
+  { installments: 9, rate_percentage: 16.37 },
+  { installments: 10, rate_percentage: 17.77 },
+  { installments: 11, rate_percentage: 19.17 },
+  { installments: 12, rate_percentage: 20.57 },
+]
+
 interface PaymentFormProps {
   orderId: number
   total: number
@@ -260,7 +276,8 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
               const installments = i + 1
               const valuePerInstallment = total / installments
               const rateData = rates.find((r: any) => r.installments === installments)
-              const baseRate = rateData ? parseFloat(rateData.rate_percentage) : 0
+              const fallbackRate = FALLBACK_INSTALLMENT_RATES.find((r) => r.installments === installments)?.rate_percentage ?? 0
+              const baseRate = rateData != null ? parseFloat(rateData.rate_percentage) : fallbackRate
               const useZeroInterest =
                 rateData?.interest_free === true &&
                 (minInstallmentValue === 0 || valuePerInstallment >= minInstallmentValue)

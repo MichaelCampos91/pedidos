@@ -83,11 +83,12 @@ export async function GET(request: NextRequest) {
         c.whatsapp as client_whatsapp,
         pay.payment_status,
         pay.payment_method,
+        pay.payment_amount,
         pay.installments
       FROM orders o
       JOIN clients c ON o.client_id = c.id
       LEFT JOIN LATERAL (
-        SELECT p.status as payment_status, p.method as payment_method, p.installments
+        SELECT p.status as payment_status, p.method as payment_method, p.amount as payment_amount, p.installments
         FROM payments p
         WHERE p.order_id = o.id
         ORDER BY p.paid_at DESC NULLS LAST, p.created_at DESC
@@ -186,11 +187,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Calcular totais se não fornecidos
+    // Calcular totais se não fornecidos. total_shipping vem apenas do frontend (opção selecionada pelo vendedor); não recalcular com regras de frete grátis.
     const calculatedTotalItems = total_items || items.reduce((sum: number, item: any) => {
       return sum + (parseFloat(item.price) * parseInt(item.quantity))
     }, 0)
-    const calculatedShipping = total_shipping || 0
+    const calculatedShipping = total_shipping ?? 0
     const calculatedTotal = total || (calculatedTotalItems + calculatedShipping)
 
     // Criar pedido

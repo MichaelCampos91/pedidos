@@ -169,6 +169,7 @@ export async function PUT(
       paramIndex++
     }
 
+    // total_shipping vem apenas do frontend (opção selecionada); não alterar com base em regras de frete grátis.
     if (total_shipping !== undefined) {
       updateFields.push(`total_shipping = $${paramIndex}`)
       updateValues.push(total_shipping)

@@ -55,6 +55,24 @@ function setCachedContactId(cleanDoc: string, id: number): void {
   contactCache.set(cleanDoc, { id, timestamp: Date.now() })
 }
 
+/**
+ * Normaliza o campo "número" do endereço para envio ao Bling.
+ * Retorna null se value for null/undefined ou string vazia/só espaços; caso contrário retorna o valor em trim.
+ */
+function normalizeAddressNumber(value: unknown): string | null {
+  if (value == null) return null
+  const s = String(value).trim()
+  return s === '' ? null : s
+}
+
+/**
+ * Retorna o número do endereço para o payload Bling: valor normalizado ou 'S/N'.
+ */
+function addressNumeroForBling(number: string | null | undefined | unknown): string {
+  const normalized = normalizeAddressNumber(number)
+  return normalized ?? 'S/N'
+}
+
 export interface BlingValidateResult {
   valid: boolean
   message: string
@@ -1301,7 +1319,7 @@ async function createOrGetContactId(
   if (order.address) {
     contactPayload.endereco = {
       endereco: order.address.street || '',
-      numero: order.address.number || 'S/N',
+      numero: addressNumeroForBling(order.address.number),
       complemento: order.address.complement || '',
       bairro: order.address.neighborhood || '',
       municipio: order.address.city || '',
@@ -1498,7 +1516,7 @@ export function mapOrderToBlingSale(order: OrderForBling, blingContactId?: numbe
       enderecoEntrega: {
         nome: order.client_name || 'Cliente',
         endereco: order.address.street || '',
-        numero: order.address.number || 'S/N',
+        numero: addressNumeroForBling(order.address.number),
         complemento: order.address.complement || '',
         bairro: order.address.neighborhood || '',
         municipio: order.address.city || '',
@@ -1675,6 +1693,23 @@ export async function sendOrderToBling(
   const payload = mapOrderToBlingSale(order, blingContactId, numeroBling)
   const url = `${BLING_API_BASE}/pedidos/vendas`
 
+  // Registrar payload completo em system_logs para exibição em admin/logs
+  try {
+    await query(
+      'INSERT INTO system_logs (level, message, category, metadata) VALUES ($1, $2, $3, $4)',
+      [
+        'info',
+        `Pedido #${orderId} enviado ao Bling`,
+        'bling',
+        JSON.stringify({ orderId, payload }),
+      ]
+    )
+  } catch (logErr) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[Bling] Erro ao registrar log do payload em system_logs:', logErr)
+    }
+  }
+
   let syncedInThisRun = false
   try {
     // Logar payload antes de enviar (mascarando dados sensíveis)
@@ -1817,9 +1852,10 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
     )
     if (addrResult.rows.length > 0) {
       const a = addrResult.rows[0] as Record<string, unknown>
+      const rawNumber = a.number ?? (a as Record<string, unknown>).Number
       address = {
         street: (a.street as string) ?? '',
-        number: (a.number as string | null) ?? null,
+        number: normalizeAddressNumber(rawNumber),
         complement: (a.complement as string | null) ?? null,
         neighborhood: (a.neighborhood as string | null) ?? null,
         city: (a.city as string) ?? '',
@@ -1909,9 +1945,10 @@ export async function syncClientToBling(clientId: number): Promise<SyncClientToB
   )
   if (addrResult.rows.length > 0) {
     const a = addrResult.rows[0] as Record<string, unknown>
+    const rawNumber = a.number ?? (a as Record<string, unknown>).Number
     address = {
       street: (a.street as string) ?? '',
-      number: (a.number as string | null) ?? null,
+      number: normalizeAddressNumber(rawNumber),
       complement: (a.complement as string | null) ?? null,
       neighborhood: (a.neighborhood as string | null) ?? null,
       city: (a.city as string) ?? '',
@@ -2329,9 +2366,10 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
     )
     if (addrResult.rows.length > 0) {
       const a = addrResult.rows[0] as Record<string, unknown>
+      const rawNumber = a.number ?? (a as Record<string, unknown>).Number
       contactPayload.endereco = {
         endereco: a.street || '',
-        numero: a.number || 'S/N',
+        numero: addressNumeroForBling(rawNumber),
         complemento: a.complement || '',
         bairro: a.neighborhood || '',
         municipio: a.city || '',

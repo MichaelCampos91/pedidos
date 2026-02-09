@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query } from '@/lib/database'
 import { getSetting } from '@/lib/settings'
+import { DEFAULT_INSTALLMENT_RATES } from '@/lib/payment-rules'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET público (não exige autenticação): retorna taxas de parcelamento e parcela mínima para o checkout.
- * Usado pelo PaymentForm no link de pagamento; o cliente acessa sem login.
+ * Sempre retorna 12 opções (1x a 12x). Faltantes no banco são preenchidas com taxa padrão e interest_free: false.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -22,12 +23,27 @@ export async function GET(request: NextRequest) {
       [environment]
     )
 
-    const rates = result.rows.map(row => ({
-      ...row,
-      rate_percentage: parseFloat(row.rate_percentage) || 0,
-      installments: parseInt(row.installments) || 0,
-      interest_free: row.interest_free === true,
-    }))
+    const byInstallments = new Map<number, { rate_percentage: number; interest_free: boolean }>()
+    for (const row of result.rows) {
+      const installments = parseInt(row.installments) || 0
+      if (installments >= 1 && installments <= 12) {
+        byInstallments.set(installments, {
+          rate_percentage: parseFloat(row.rate_percentage) || 0,
+          interest_free: row.interest_free === true,
+        })
+      }
+    }
+
+    const rates = Array.from({ length: 12 }, (_, i) => {
+      const installments = i + 1
+      const fromDb = byInstallments.get(installments)
+      const defaultRate = DEFAULT_INSTALLMENT_RATES.find(r => r.installments === installments)
+      return {
+        installments,
+        rate_percentage: fromDb?.rate_percentage ?? defaultRate?.rate_percentage ?? 0,
+        interest_free: fromDb?.interest_free ?? false,
+      }
+    })
 
     const minValueRaw = await getSetting('min_installment_value')
     const min_installment_value = minValueRaw != null && minValueRaw !== ''

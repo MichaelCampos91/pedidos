@@ -540,6 +540,15 @@ export default function OrdersPage() {
                                 {getPaymentMethodLabel(order)}
                               </Badge>
                             )}
+                            {order.payment_status === "paid" &&
+                              order.payment_method &&
+                              order.payment_method !== "pix_manual" &&
+                              (order.payment_method === "pix" || order.payment_method === "credit_card") &&
+                              order.payment_amount != null && (
+                              <span className="text-[11px] text-muted-foreground block">
+                                Cobrado: {formatCurrency(parseFloat(String(order.payment_amount)))}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>

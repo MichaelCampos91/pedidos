@@ -107,6 +107,7 @@ export async function GET(
       }
     }
 
+    // Retornar pedido do banco sem recalcular total_shipping: é a fonte única para exibição e cobrança.
     return NextResponse.json({
       ...order,
       items: itemsResult.rows,
@@ -148,7 +149,7 @@ export async function POST(
       )
     }
 
-    // Atualizar endereço de entrega
+    // Atualizar apenas endereço de entrega; nunca alterar total_shipping (definido pelo vendedor no pedido).
     if (shipping_address_id) {
       await query(
         'UPDATE orders SET shipping_address_id = $1 WHERE id = $2',

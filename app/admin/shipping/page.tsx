@@ -270,7 +270,6 @@ export default function ShippingPage() {
       // Caso contrário, usar dados manuais do formulário (modo legacy)
       const body: any = {
         cep_destino: formData.cep_destino,
-        apply_rules: false,
       }
 
       if (selectedProductIds.size > 0) {
@@ -284,6 +283,10 @@ export default function ShippingPage() {
           valor: Number(p.base_price) || 100,
           quantity: productQuantities[p.id] ?? 1,
         }))
+        body.order_value = selectedProducts.reduce(
+          (sum, p) => sum + (Number(p.base_price) || 100) * (productQuantities[p.id] ?? 1),
+          0
+        )
       } else {
         // Modo legacy: enviar campos individuais
         body.peso = formData.peso
@@ -291,6 +294,7 @@ export default function ShippingPage() {
         body.largura = formData.largura
         body.comprimento = formData.comprimento
         body.valor = formData.valor
+        body.order_value = parseFloat(formData.valor) || 0
       }
 
       const response = await fetch('/api/shipping/quote', {

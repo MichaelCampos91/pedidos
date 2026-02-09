@@ -39,7 +39,9 @@ export async function POST(request: NextRequest) {
       metadata?: { order_id?: string }
       order?: { metadata?: { order_id?: string } }
       id?: string
-      charge?: { id?: string; status?: string; last_transaction?: { status?: string } }
+      amount?: number
+      charge?: { id?: string; status?: string; amount?: number; last_transaction?: { status?: string } }
+      charges?: Array<{ amount?: number }>
     }
     const data = (body.data ?? body) as WebhookData
 
@@ -87,16 +89,40 @@ export async function POST(request: NextRequest) {
       paymentStatus = 'pending'
     }
 
-    await query(
-      `UPDATE payments 
-       SET status = $1, paid_at = $2
-       WHERE id = $3`,
-      [
-        paymentStatus,
-        paymentStatus === 'paid' ? new Date() : null,
-        payment.id,
-      ]
-    )
+    // Valor cobrado: Pagar.me envia em centavos (data.amount, data.charge.amount ou data.charges[0].amount)
+    let amountReais: number | null = null
+    const rawAmount =
+      typeof data.amount === 'number'
+        ? data.amount
+        : typeof (data.charge as { amount?: number })?.amount === 'number'
+          ? (data.charge as { amount: number }).amount
+          : Array.isArray(data.charges) && data.charges[0] && typeof data.charges[0].amount === 'number'
+            ? data.charges[0].amount
+            : null
+    if (rawAmount != null && rawAmount >= 0) {
+      amountReais = Math.round(rawAmount) / 100
+    }
+
+    if (amountReais != null) {
+      await query(
+        `UPDATE payments SET status = $1, paid_at = $2, amount = $3 WHERE id = $4`,
+        [
+          paymentStatus,
+          paymentStatus === 'paid' ? new Date() : null,
+          amountReais.toFixed(2),
+          payment.id,
+        ]
+      )
+    } else {
+      await query(
+        `UPDATE payments SET status = $1, paid_at = $2 WHERE id = $3`,
+        [
+          paymentStatus,
+          paymentStatus === 'paid' ? new Date() : null,
+          payment.id,
+        ]
+      )
+    }
 
     // Se pagamento foi confirmado, atualizar pedido
     if (paymentStatus === 'paid' && payment.status !== 'paid') {

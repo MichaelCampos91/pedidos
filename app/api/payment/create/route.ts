@@ -3,7 +3,7 @@ import { query } from '@/lib/database'
 import { createPixTransaction, createCreditCardTransaction } from '@/lib/pagarme'
 import { getActiveEnvironment } from '@/lib/settings'
 import { getToken } from '@/lib/integrations'
-import { calculatePixDiscount, calculateInstallmentTotal, recalculateOrderTotal } from '@/lib/payment-rules'
+import { calculatePixDiscount, calculateInstallmentTotal, getInstallmentRate, recalculateOrderTotal } from '@/lib/payment-rules'
 import { saveLog } from '@/lib/logger'
 import { syncOrderToBling } from '@/lib/bling'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
@@ -246,7 +246,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Recalcular valor total no backend (itens + frete) — nunca confiar no frontend
+    // Valor do frete vem somente de order.total_shipping (escolha do vendedor ao criar/editar o pedido).
+    // Não recalcular com regras de frete grátis: cobrança deve refletir a modalidade selecionada.
     const totalShipping = parseFloat(order.total_shipping || '0')
     const backendTotal = recalculateOrderTotal(orderItems, totalShipping)
     const itemsTotal = orderItems.reduce(
@@ -290,6 +291,7 @@ export async function POST(request: NextRequest) {
     } else if (payment_method === 'credit_card') {
       // Recalcular valor com juros de parcelamento no backend
       const installments = Math.max(1, parseInt(String(credit_card?.installments || 1), 10))
+      const rateFromDb = installments > 1 ? await getInstallmentRate(installments, detectedEnvironment as IntegrationEnvironment) : { rate_percentage: 0 }
       const installmentResult = await calculateInstallmentTotal(
         backendTotal,
         installments,
@@ -297,6 +299,9 @@ export async function POST(request: NextRequest) {
       )
       chargeBaseValue = installmentResult.totalWithInterest
       amount = Math.round(chargeBaseValue * 100)
+      if (process.env.NODE_ENV === 'development' && installments > 1 && !rateFromDb) {
+        console.log('[Payment Create] Taxa de fallback usada para parcelamento:', { order_id, installments, totalWithInterest: installmentResult.totalWithInterest })
+      }
     } else {
       amount = Math.round(backendTotal * 100)
     }
@@ -306,6 +311,10 @@ export async function POST(request: NextRequest) {
         { error: 'Valor do pedido deve ser maior que zero' },
         { status: 400 }
       )
+    }
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Payment Create] Cobrança:', { order_id, total_shipping: totalShipping, charge_total: (amount / 100).toFixed(2) })
     }
 
     let transaction

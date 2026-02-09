@@ -50,6 +50,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   error: "Erro",
   integration: "Integração",
   system: "Sistema",
+  bling: "Bling",
 }
 
 export default function LogsPage() {
