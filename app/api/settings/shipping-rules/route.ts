@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { query } from '@/lib/database'
 import type { ShippingRule } from '@/lib/shipping-rules'
+import { clearCache as clearShippingCache } from '@/lib/shipping-cache'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -98,6 +99,9 @@ export async function POST(request: NextRequest) {
     rule.condition_value = rule.condition_value ? (typeof rule.condition_value === 'string' ? JSON.parse(rule.condition_value) : rule.condition_value) : null
     rule.shipping_methods = rule.shipping_methods ? (typeof rule.shipping_methods === 'string' ? JSON.parse(rule.shipping_methods) : rule.shipping_methods) : null
 
+    // Qualquer mudança em shipping_rules deve invalidar o cache de cotações de frete
+    clearShippingCache()
+
     return NextResponse.json({ rule }, { status: 201 })
   } catch (error: any) {
     if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {
@@ -185,6 +189,9 @@ export async function PUT(request: NextRequest) {
     rule.condition_value = rule.condition_value ? (typeof rule.condition_value === 'string' ? JSON.parse(rule.condition_value) : rule.condition_value) : null
     rule.shipping_methods = rule.shipping_methods ? (typeof rule.shipping_methods === 'string' ? JSON.parse(rule.shipping_methods) : rule.shipping_methods) : null
 
+    // Atualização de regras também deve limpar o cache de cotações
+    clearShippingCache()
+
     return NextResponse.json({ rule })
   } catch (error: any) {
     if (error.message === 'Token não fornecido' || error.message === 'Token inválido ou expirado') {
@@ -215,6 +222,9 @@ export async function DELETE(request: NextRequest) {
     }
 
     await query('DELETE FROM shipping_rules WHERE id = $1', [id])
+
+    // Remoção de regras invalida todas as cotações em cache
+    clearShippingCache()
 
     return NextResponse.json({ success: true })
   } catch (error: any) {

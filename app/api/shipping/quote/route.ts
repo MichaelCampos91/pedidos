@@ -6,6 +6,7 @@ import { calculateShipping } from '@/lib/melhor-envio'
 import { getToken, updateTokenValidation, type IntegrationEnvironment } from '@/lib/integrations'
 import { generateCacheKey, getCachedQuote, setCachedQuote, cleanupExpiredCache } from '@/lib/shipping-cache'
 import { applyShippingRules, getProductionDays, addProductionDaysToOptions } from '@/lib/shipping-rules'
+import { createHash } from 'crypto'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -199,10 +200,16 @@ export async function POST(request: NextRequest) {
       }))
     } else {
       // Modo legacy: valores únicos (garantir que nunca sejam 0 ou NaN)
-      const weight = ensureDimension(peso, 0.3, WEIGHT_MIN)
-      const height = ensureDimension(altura, 10, DIMENSIONS_MIN.height)
-      const width = ensureDimension(largura, 20, DIMENSIONS_MIN.width)
-      const length = ensureDimension(comprimento, 30, DIMENSIONS_MIN.length)
+    const weightBase = ensureDimension(peso, 0.3, WEIGHT_MIN)
+    const heightBase = ensureDimension(altura, 10, DIMENSIONS_MIN.height)
+    const widthBase = ensureDimension(largura, 20, DIMENSIONS_MIN.width)
+    const lengthBase = ensureDimension(comprimento, 30, DIMENSIONS_MIN.length)
+
+    // Limites adicionais de negócio (20kg, 50x50x50cm) para chamadas legacy
+    const weight = Math.min(20, weightBase)
+    const height = Math.min(50, heightBase)
+    const width = Math.min(50, widthBase)
+    const length = Math.min(50, lengthBase)
       const insuranceValue = Math.max(Number(valor) || 100, 0)
 
       // Validar dimensões
@@ -344,6 +351,15 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Shipping Quote][ApplyRules]', {
+          cepDestino: cleanCepDestino,
+          destinationState: resolvedDestinationState,
+          orderValue,
+          applyRules,
+        })
+      }
+
       const result = await applyShippingRules({
         shippingOptions: validOptions,
         orderValue,
@@ -362,6 +378,91 @@ export async function POST(request: NextRequest) {
 
       // Armazenar no cache apenas opções válidas (após aplicar regras)
       setCachedQuote(cacheKey, optionsForCache)
+
+      // Persistir histórico de cotação em shipping_quotes (não deve quebrar o fluxo em caso de erro)
+      try {
+        const mode = produtos && Array.isArray(produtos) && produtos.length > 0 ? 'products' : 'legacy'
+        const freeShippingRule = result.appliedRules.find(
+          (r) => String(r.ruleType) === 'free_shipping' && r.applied
+        )
+        const freeShippingApplied = Boolean(freeShippingRule)
+
+        // Payload de entrada normalizado para assinatura e histórico
+        const signaturePayload = {
+          cep_destino: cleanCepDestino,
+          destination_state: resolvedDestinationState || null,
+          order_value: orderValue,
+          mode,
+          environment,
+          products: productsList.map((p) => ({
+            id: p.id,
+            width: p.width,
+            height: p.height,
+            length: p.length,
+            weight: p.weight,
+            insurance_value: p.insurance_value,
+            quantity: p.quantity,
+          })),
+        }
+
+        const signature = createHash('sha256')
+          .update(JSON.stringify(signaturePayload))
+          .digest('hex')
+
+        await query(
+          `INSERT INTO shipping_quotes (
+            signature,
+            cep_destino,
+            destination_state,
+            order_value,
+            mode,
+            environment,
+            request_body,
+            products_snapshot,
+            options,
+            applied_rules,
+            free_shipping_applied,
+            free_shipping_rule_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          ON CONFLICT (signature) DO UPDATE SET
+            options = EXCLUDED.options,
+            applied_rules = EXCLUDED.applied_rules,
+            free_shipping_applied = EXCLUDED.free_shipping_applied,
+            free_shipping_rule_id = EXCLUDED.free_shipping_rule_id,
+            destination_state = EXCLUDED.destination_state,
+            order_value = EXCLUDED.order_value,
+            updated_at = CURRENT_TIMESTAMP`,
+          [
+            signature,
+            cleanCepDestino,
+            resolvedDestinationState || null,
+            orderValue,
+            mode,
+            environment,
+            JSON.stringify({
+              cep_destino,
+              peso,
+              altura,
+              largura,
+              comprimento,
+              valor,
+              produtos,
+              order_value,
+              destination_state,
+            }),
+            JSON.stringify(productsList),
+            JSON.stringify(result.options),
+            JSON.stringify(result.appliedRules),
+            freeShippingApplied,
+            freeShippingRule ? freeShippingRule.ruleId : null,
+          ]
+        )
+      } catch (historyError: any) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[Shipping Quote] Erro ao salvar histórico de cotação:', historyError?.message || historyError)
+        }
+        // Não interromper o fluxo de resposta ao cliente
+      }
 
       return NextResponse.json({
         success: true,

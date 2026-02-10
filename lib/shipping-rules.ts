@@ -113,12 +113,12 @@ export function addProductionDaysToOptions(
 
 /**
  * Verifica se uma regra se aplica baseado nas condições
- * 
+ *
  * Lógica de condições:
  * - Se apenas min_value está definido: verifica apenas valor mínimo
  * - Se apenas states está definido: verifica apenas estados
  * - Se ambas estão definidas: ambas devem ser atendidas (AND)
- * - Se nenhuma está definida: aplica para todos
+ * - Se nenhuma está definida: aplica para todos (fallback por condition_type)
  */
 function ruleApplies(
   rule: ShippingRule,
@@ -126,12 +126,6 @@ function ruleApplies(
   destinationState?: string,
   shippingMethodId?: number
 ): boolean {
-  // Se condition_type é 'all' ou condition_value está vazio/null, aplicar para todos
-  if (rule.condition_type === 'all' || !rule.condition_value || 
-      (typeof rule.condition_value === 'object' && Object.keys(rule.condition_value).length === 0)) {
-    return true
-  }
-
   const conditionValue = rule.condition_value || {}
   
   // Verificar quais condições estão definidas
@@ -186,8 +180,12 @@ function ruleApplies(
     if (!destinationState) {
       return false // Estado é obrigatório mas não foi fornecido
     }
-    const stateUpper = destinationState.toUpperCase()
-    if (!conditionValue.states.includes(stateUpper)) {
+    const stateUpper = destinationState.toUpperCase().trim().substring(0, 2)
+    // Normalizar estados configurados para comparação robusta
+    const configuredStates = (conditionValue.states as any[]).map((s: any) =>
+      String(s).toUpperCase().trim().substring(0, 2)
+    )
+    if (!configuredStates.includes(stateUpper)) {
       return false // Estado não está na lista permitida
     }
   }
@@ -320,23 +318,73 @@ export async function applyShippingRules(
     // Verificar se há regra de frete grátis aplicável à opção mais barata
     const freeShippingRules = rules.filter(r => r.rule_type === 'free_shipping')
     for (const rule of freeShippingRules) {
-      if (ruleApplies(rule, orderValue, destinationState, cheapestOption.id)) {
-        // Aplicar frete grátis apenas à opção mais barata
-        const cheapestPrice = parseFloat(cheapestOption.price)
-        cheapestOption.originalPrice = cheapestPrice
-        cheapestOption.price = '0.00'
-        
-        // Registrar regra aplicada
-        appliedRules.push({
+      const applies = ruleApplies(rule, orderValue, destinationState, cheapestOption.id)
+
+      if (process.env.NODE_ENV === 'development') {
+        // Log de diagnóstico para entender por que uma regra de frete grátis foi (ou não) aplicada
+        console.log('[ShippingRules][FreeShippingEval]', {
           ruleId: rule.id,
           ruleType: rule.rule_type,
-          applied: true,
-          originalPrice: cheapestPrice,
-          finalPrice: 0,
+          condition_type: rule.condition_type,
+          condition_value: rule.condition_value,
+          orderValue,
+          destinationState,
+          applies,
         })
-        
-        break // Apenas uma regra de frete grátis por vez
       }
+
+      if (!applies) {
+        continue
+      }
+
+      // Camada extra de segurança: revalidar estados e valor mínimo antes de aplicar frete grátis
+      const cv: any = rule.condition_value || {}
+      if (cv.states && Array.isArray(cv.states) && cv.states.length > 0) {
+        const dest = destinationState ? destinationState.toUpperCase().trim().substring(0, 2) : ''
+        const configuredStates = cv.states.map((s: any) =>
+          String(s).toUpperCase().trim().substring(0, 2)
+        )
+        if (!dest || !configuredStates.includes(dest)) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('[ShippingRules][FreeShippingGuard] Estado não permitido para frete grátis', {
+              ruleId: rule.id,
+              destinationState: dest,
+              states: configuredStates,
+            })
+          }
+          continue
+        }
+      }
+
+      if (cv.min_value !== undefined && cv.min_value !== null) {
+        const minVal = parseFloat(String(cv.min_value))
+        if (!isNaN(minVal) && orderValue < minVal) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('[ShippingRules][FreeShippingGuard] Valor abaixo do mínimo para frete grátis', {
+              ruleId: rule.id,
+              orderValue,
+              min_value: minVal,
+            })
+          }
+          continue
+        }
+      }
+
+      // Aplicar frete grátis apenas à opção mais barata
+      const cheapestPrice = parseFloat(cheapestOption.price)
+      cheapestOption.originalPrice = cheapestPrice
+      cheapestOption.price = '0.00'
+      
+      // Registrar regra aplicada
+      appliedRules.push({
+        ruleId: rule.id,
+        ruleType: rule.rule_type,
+        applied: true,
+        originalPrice: cheapestPrice,
+        finalPrice: 0,
+      })
+      
+      break // Apenas uma regra de frete grátis por vez
     }
   }
 

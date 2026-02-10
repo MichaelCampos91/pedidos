@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Loader2, Truck, Search, Package, MessageCircle, Zap, DollarSign, X, Minus, Plus, Eraser } from "lucide-react"
 import { formatShippingPrice, formatDeliveryTime } from "@/lib/melhor-envio-utils"
 import { calculateDeliveryDate, formatDeliveryDate, generateWhatsAppShareLink } from "@/lib/shipping-utils"
-import { maskCEP } from "@/lib/utils"
+import { maskCEP, formatDateTime, formatCurrency } from "@/lib/utils"
 import { EnvironmentBadge } from "@/components/integrations/EnvironmentBadge"
 import { productsApi } from "@/lib/api"
 import {
@@ -58,6 +58,14 @@ interface ProductGroup {
   products: Product[]
 }
 
+interface ShippingRuleSummary {
+  id: number
+  rule_type: string
+  condition_type: string
+  condition_value: any
+  active: boolean
+}
+
 export default function ShippingPage() {
   const [loading, setLoading] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
@@ -79,6 +87,18 @@ export default function ShippingPage() {
   const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(new Set())
   const [productQuantities, setProductQuantities] = useState<Record<number, number>>({})
   const [productPopoverOpen, setProductPopoverOpen] = useState(false)
+  const [freeShippingRules, setFreeShippingRules] = useState<ShippingRuleSummary[]>([])
+const [quotes, setQuotes] = useState<any[]>([])
+const [loadingHistory, setLoadingHistory] = useState(false)
+const [historyError, setHistoryError] = useState<string | null>(null)
+const [detailsModal, setDetailsModal] = useState<{ open: boolean; quote: any | null }>({ open: false, quote: null })
+const [historyQuoteModal, setHistoryQuoteModal] = useState<{ open: boolean; quote: any | null; refreshing: boolean }>({ open: false, quote: null, refreshing: false })
+
+// Limites máximos de negócio para cotação manual
+const MAX_WEIGHT = 20 // kg
+const MAX_HEIGHT = 50 // cm
+const MAX_WIDTH = 50  // cm
+const MAX_LENGTH = 50 // cm
 
   // Buscar ambiente ativo ao montar componente
   useEffect(() => {
@@ -106,6 +126,54 @@ export default function ShippingPage() {
   // Carregar produtos ao montar componente
   useEffect(() => {
     loadProducts()
+  }, [])
+
+  // Carregar histórico de cotações
+  useEffect(() => {
+    const loadHistory = async () => {
+      setLoadingHistory(true)
+      try {
+        const res = await fetch('/api/shipping/quotes?per_page=10', { credentials: 'include' })
+        if (!res.ok) throw new Error('Erro ao carregar histórico de cotações')
+        const data = await res.json()
+        setQuotes(data.data || [])
+        setHistoryError(null)
+      } catch (e: any) {
+        setHistoryError(e.message || 'Erro ao carregar histórico de cotações')
+      } finally {
+        setLoadingHistory(false)
+      }
+    }
+    loadHistory()
+  }, [])
+
+  // Carregar regras de frete grátis ativas (para debug no console)
+  useEffect(() => {
+    const loadFreeShippingRules = async () => {
+      try {
+        const response = await fetch('/api/settings/shipping-rules', {
+          credentials: 'include',
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        const rules = (data.rules || []) as any[]
+        const freeRules = rules.filter(
+          (r) => r.rule_type === 'free_shipping' && r.active === true
+        )
+        setFreeShippingRules(
+          freeRules.map((r) => ({
+            id: r.id,
+            rule_type: r.rule_type,
+            condition_type: r.condition_type,
+            condition_value: r.condition_value,
+            active: r.active,
+          }))
+        )
+      } catch {
+        // Silencioso: logs são apenas para debug, não quebrar a tela
+      }
+    }
+    loadFreeShippingRules()
   }, [])
 
   // Lista filtrada para o combobox (usada apenas dentro do popover)
@@ -174,12 +242,19 @@ export default function ShippingPage() {
       (sum, p) => sum + (Number(p.base_price) || 100) * (productQuantities[p.id] ?? 1),
       0
     )
+
+    // Aplicar limites máximos de negócio
+    const pesoClamped = Math.min(MAX_WEIGHT, peso)
+    const alturaClamped = Math.min(MAX_HEIGHT, altura)
+    const larguraClamped = Math.min(MAX_WIDTH, largura)
+    const comprimentoClamped = Math.min(MAX_LENGTH, comprimento)
+
     setFormData(prev => ({
       ...prev,
-      peso: String(peso.toFixed(2)),
-      altura: String(altura.toFixed(2)),
-      largura: String(largura.toFixed(2)),
-      comprimento: String(comprimento.toFixed(2)),
+      peso: String(pesoClamped.toFixed(2)),
+      altura: String(alturaClamped.toFixed(2)),
+      largura: String(larguraClamped.toFixed(2)),
+      comprimento: String(comprimentoClamped.toFixed(2)),
       valor: String(valor.toFixed(2)),
     }))
   }, [selectedProductIds, selectedProducts, productQuantities])
@@ -324,6 +399,33 @@ export default function ShippingPage() {
 
       const data = await response.json()
       const options = data.options || []
+
+      // Logs de diagnóstico de regras de frete grátis aplicadas
+      try {
+        const appliedRules = Array.isArray(data.appliedRules) ? data.appliedRules : []
+        const debugList = freeShippingRules.map(rule => ({
+          id: rule.id,
+          rule_type: rule.rule_type,
+          condition_type: rule.condition_type,
+          condition_value: rule.condition_value,
+          active: rule.active,
+          applied: appliedRules.some(
+            (ar: any) =>
+              ar.ruleId === rule.id && String(ar.ruleType) === 'free_shipping'
+          ),
+        }))
+        // Log apenas no navegador (não afeta backend)
+        // eslint-disable-next-line no-console
+        console.log('[ShippingRulesDebug]', {
+          orderValue: body.order_value,
+          cep: body.cep_destino,
+          freeShippingRules: debugList,
+          appliedRules,
+          productionDaysAdded: data.productionDaysAdded,
+        })
+      } catch {
+        // Não falhar se algo der errado no log
+      }
       setShippingOptions(options)
       
       // Se não há opções mas há mensagem, mostrar como informação
@@ -584,7 +686,17 @@ export default function ShippingPage() {
                   type="number"
                   step="0.1"
                   value={formData.peso}
-                  onChange={(e) => setFormData({ ...formData, peso: e.target.value })}
+                  min={0}
+                  max={MAX_WEIGHT}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value.replace(',', '.'))
+                    if (isNaN(raw)) {
+                      setFormData({ ...formData, peso: '' })
+                      return
+                    }
+                    const clamped = Math.min(MAX_WEIGHT, Math.max(0, raw))
+                    setFormData({ ...formData, peso: String(clamped) })
+                  }}
                   placeholder="0.3"
                 />
               </div>
@@ -595,7 +707,17 @@ export default function ShippingPage() {
                   type="number"
                   step="0.1"
                   value={formData.altura}
-                  onChange={(e) => setFormData({ ...formData, altura: e.target.value })}
+                  min={0}
+                  max={MAX_HEIGHT}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value.replace(',', '.'))
+                    if (isNaN(raw)) {
+                      setFormData({ ...formData, altura: '' })
+                      return
+                    }
+                    const clamped = Math.min(MAX_HEIGHT, Math.max(0, raw))
+                    setFormData({ ...formData, altura: String(clamped) })
+                  }}
                   placeholder="10"
                 />
               </div>
@@ -606,7 +728,17 @@ export default function ShippingPage() {
                   type="number"
                   step="0.1"
                   value={formData.largura}
-                  onChange={(e) => setFormData({ ...formData, largura: e.target.value })}
+                  min={0}
+                  max={MAX_WIDTH}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value.replace(',', '.'))
+                    if (isNaN(raw)) {
+                      setFormData({ ...formData, largura: '' })
+                      return
+                    }
+                    const clamped = Math.min(MAX_WIDTH, Math.max(0, raw))
+                    setFormData({ ...formData, largura: String(clamped) })
+                  }}
                   placeholder="20"
                 />
               </div>
@@ -617,7 +749,17 @@ export default function ShippingPage() {
                   type="number"
                   step="0.1"
                   value={formData.comprimento}
-                  onChange={(e) => setFormData({ ...formData, comprimento: e.target.value })}
+                  min={0}
+                  max={MAX_LENGTH}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value.replace(',', '.'))
+                    if (isNaN(raw)) {
+                      setFormData({ ...formData, comprimento: '' })
+                      return
+                    }
+                    const clamped = Math.min(MAX_LENGTH, Math.max(0, raw))
+                    setFormData({ ...formData, comprimento: String(clamped) })
+                  }}
                   placeholder="30"
                 />
               </div>
@@ -670,6 +812,101 @@ export default function ShippingPage() {
               </Button>
             </div>
           </form>
+        </CardContent>
+      </Card>
+
+      {/* Card de Histórico de Cotações */}
+      <Card className="max-w-5xl">
+        <CardHeader>
+          <CardTitle>Histórico de Cotações</CardTitle>
+          <CardDescription>Últimas cotações realizadas nesta conta</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingHistory ? (
+            <div className="text-sm text-muted-foreground">Carregando histórico...</div>
+          ) : historyError ? (
+            <div className="text-sm text-destructive">{historyError}</div>
+          ) : quotes.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Nenhuma cotação registrada ainda.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th className="py-2 pr-2 text-left">Data</th>
+                    <th className="py-2 px-2 text-left">Destino</th>
+                    <th className="py-2 px-2 text-left">Valor Pedido</th>
+                    <th className="py-2 px-2 text-left">Frete Grátis</th>
+                    <th className="py-2 pl-2 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {quotes.map((quote) => (
+                    <tr key={quote.id} className="border-b last:border-b-0">
+                      <td className="py-2 pr-2 align-top whitespace-nowrap">
+                        {quote.created_at ? formatDateTime(quote.created_at) : '-'}
+                      </td>
+                      <td className="py-2 px-2 align-top">
+                        {quote.cep_destino
+                          ? `${maskCEP(String(quote.cep_destino))}${quote.destination_state ? ` (${quote.destination_state})` : ''}`
+                          : '-'}
+                      </td>
+                      <td className="py-2 px-2 align-top">
+                        {formatCurrency(Number(quote.order_value || 0))}
+                      </td>
+                      <td className="py-2 px-2 align-top">
+                        {quote.free_shipping_applied
+                          ? `Sim${quote.free_shipping_rule_id ? ` - Regra #${quote.free_shipping_rule_id}` : ''}`
+                          : 'Não'}
+                      </td>
+                      <td className="py-2 pl-2 align-top">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/shipping/quotes/${quote.id}`, {
+                                  credentials: 'include',
+                                })
+                                if (!res.ok) throw new Error('Erro ao carregar detalhes da cotação')
+                                const full = await res.json()
+                                setDetailsModal({ open: true, quote: full })
+                              } catch (e: any) {
+                                console.error(e)
+                              }
+                            }}
+                          >
+                            Ver detalhes
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/shipping/quotes/${quote.id}`, {
+                                  credentials: 'include',
+                                })
+                                if (!res.ok) throw new Error('Erro ao carregar cotação')
+                                const full = await res.json()
+                                setHistoryQuoteModal({ open: true, quote: full, refreshing: false })
+                              } catch (e: any) {
+                                console.error(e)
+                              }
+                            }}
+                          >
+                            Ver cotação
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -772,6 +1009,169 @@ export default function ShippingPage() {
               Compartilhar no WhatsApp
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Detalhes do Histórico */}
+      <Dialog open={detailsModal.open} onOpenChange={(open) => setDetailsModal(prev => ({ ...prev, open }))}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Detalhes da Cotação</DialogTitle>
+            <DialogDescription>Dados utilizados e resultado da cotação selecionada.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2 text-sm">
+            {!detailsModal.quote ? (
+              <p className="text-muted-foreground">Nenhuma cotação selecionada.</p>
+            ) : (
+              <>
+                <div>
+                  <p><span className="font-medium">Data:</span> {detailsModal.quote.created_at ? formatDateTime(detailsModal.quote.created_at) : '-'}</p>
+                  <p>
+                    <span className="font-medium">Destino:</span>{' '}
+                    {detailsModal.quote.cep_destino
+                      ? `${maskCEP(String(detailsModal.quote.cep_destino))}${detailsModal.quote.destination_state ? ` (${detailsModal.quote.destination_state})` : ''}`
+                      : '-'}
+                  </p>
+                  <p><span className="font-medium">Valor do pedido:</span> {formatCurrency(Number(detailsModal.quote.order_value || 0))}</p>
+                  <p><span className="font-medium">Ambiente:</span> {detailsModal.quote.environment || '-'}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-medium">Entrada</p>
+                  <pre className="text-xs bg-muted rounded-md p-2 overflow-x-auto">
+                    {JSON.stringify(detailsModal.quote.request_body || {}, null, 2)}
+                  </pre>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-medium">Regras de Frete</p>
+                  <p>
+                    Frete grátis:{' '}
+                    {detailsModal.quote.free_shipping_applied
+                      ? `Sim${detailsModal.quote.free_shipping_rule_id ? ` - Regra #${detailsModal.quote.free_shipping_rule_id}` : ''}`
+                      : 'Não'}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Cotação do Histórico */}
+      <Dialog open={historyQuoteModal.open} onOpenChange={(open) => setHistoryQuoteModal(prev => ({ ...prev, open }))}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle>Cotação Salva</DialogTitle>
+                <DialogDescription>
+                  Visualize as opções de frete salvas e atualize a cotação se necessário.
+                </DialogDescription>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={historyQuoteModal.refreshing || !historyQuoteModal.quote}
+                onClick={async () => {
+                  if (!historyQuoteModal.quote) return
+                  setHistoryQuoteModal(prev => ({ ...prev, refreshing: true }))
+                  try {
+                    const res = await fetch(`/api/shipping/quotes/${historyQuoteModal.quote.id}/refresh`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                    })
+                    if (!res.ok) throw new Error('Erro ao atualizar cotação')
+                    const updated = await res.json()
+                    setHistoryQuoteModal(prev => ({ ...prev, quote: updated, refreshing: false }))
+                    setQuotes(prev => prev.map(q => q.id === updated.id ? { ...q, ...updated } : q))
+                  } catch (e: any) {
+                    console.error(e)
+                    setHistoryQuoteModal(prev => ({ ...prev, refreshing: false }))
+                  }
+                }}
+              >
+                {historyQuoteModal.refreshing ? 'Atualizando...' : 'Atualizar cotação'}
+              </Button>
+            </div>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {(() => {
+              const quote = historyQuoteModal.quote
+              const options = quote?.options || []
+              if (!quote) {
+                return <p className="text-sm text-muted-foreground">Nenhuma cotação selecionada.</p>
+              }
+              if (!Array.isArray(options) || options.length === 0) {
+                return <p className="text-sm text-muted-foreground">Nenhuma opção de frete salva para esta cotação.</p>
+              }
+
+              const cheapestPrice = Math.min(...options.map((o: any) => parseFloat(o.price)))
+              const fastestTime = Math.min(...options.map((o: any) => o.delivery_range?.min ?? o.delivery_time))
+
+              return (
+                <div className="space-y-4">
+                  {options.map((option: any) => {
+                    const deliveryDate = calculateDeliveryDate(option.delivery_time)
+                    const deliveryDateFormatted = formatDeliveryDate(deliveryDate)
+                    const optionPrice = parseFloat(option.price)
+                    const optionTime = option.delivery_range?.min ?? option.delivery_time
+                    const isCheapest = optionPrice === cheapestPrice
+                    const isFastest = optionTime === fastestTime
+
+                    return (
+                      <div
+                        key={option.id}
+                        className="p-4 border rounded-lg hover:border-primary transition-colors"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <Truck className="h-5 w-5 text-primary" />
+                              <h3 className="font-semibold">{option.company?.name}</h3>
+                              <Badge variant="outline" className="text-xs">
+                                {option.name}
+                              </Badge>
+                              {isFastest && (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-800"
+                                >
+                                  <Zap className="h-3 w-3 mr-1" />
+                                  Mais Rápida
+                                </Badge>
+                              )}
+                              {isCheapest && (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800"
+                                >
+                                  <DollarSign className="h-3 w-3 mr-1" />
+                                  Mais Barata
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground mb-1">
+                              Entrega estimada em {deliveryDateFormatted} ({formatDeliveryTime(option.delivery_time)})
+                            </p>
+                          </div>
+                          <div className="ml-4 text-right">
+                            <p className="text-lg font-bold">
+                              {formatShippingPrice(option.price)}
+                            </p>
+                            {option.originalPrice !== undefined && parseFloat(option.price) === 0 && (
+                              <p className="text-xs text-muted-foreground line-through">
+                                {formatShippingPrice(option.originalPrice.toFixed(2))}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
