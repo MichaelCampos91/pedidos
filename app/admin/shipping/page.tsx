@@ -358,10 +358,9 @@ const MAX_LENGTH = 50 // cm
           valor: Number(p.base_price) || 100,
           quantity: productQuantities[p.id] ?? 1,
         }))
-        body.order_value = selectedProducts.reduce(
-          (sum, p) => sum + (Number(p.base_price) || 100) * (productQuantities[p.id] ?? 1),
-          0
-        )
+        // order_value sempre usa o valor do campo, mesmo quando há produtos selecionados
+        // Isso permite que o usuário edite manualmente o valor e a cotação respeite essa edição
+        body.order_value = parseFloat(formData.valor) || 0
       } else {
         // Modo legacy: enviar campos individuais
         body.peso = formData.peso
