@@ -5,10 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Truck, Search, Package, MessageCircle, Zap, DollarSign, X, Minus, Plus, Eraser } from "lucide-react"
+import { Loader2, Truck, Search, Package, MessageCircle, Zap, DollarSign, X, Minus, Plus, Eraser, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
 import { formatShippingPrice, formatDeliveryTime } from "@/lib/melhor-envio-utils"
 import { calculateDeliveryDate, formatDeliveryDate, generateWhatsAppShareLink } from "@/lib/shipping-utils"
-import { maskCEP, formatDateTime, formatCurrency } from "@/lib/utils"
+import { maskCEP, formatDateTime, formatCurrency, cn } from "@/lib/utils"
 import { EnvironmentBadge } from "@/components/integrations/EnvironmentBadge"
 import { productsApi } from "@/lib/api"
 import {
@@ -93,6 +93,15 @@ const [loadingHistory, setLoadingHistory] = useState(false)
 const [historyError, setHistoryError] = useState<string | null>(null)
 const [detailsModal, setDetailsModal] = useState<{ open: boolean; quote: any | null }>({ open: false, quote: null })
 const [historyQuoteModal, setHistoryQuoteModal] = useState<{ open: boolean; quote: any | null; refreshing: boolean }>({ open: false, quote: null, refreshing: false })
+const [quoteTimestamp, setQuoteTimestamp] = useState<Date | null>(null)
+const [pagination, setPagination] = useState({
+  current_page: 1,
+  per_page: 10,
+  total: 0,
+  last_page: 1,
+  from: 0,
+  to: 0,
+})
 
 // Limites máximos de negócio para cotação manual
 const MAX_WEIGHT = 20 // kg
@@ -133,10 +142,18 @@ const MAX_LENGTH = 50 // cm
     const loadHistory = async () => {
       setLoadingHistory(true)
       try {
-        const res = await fetch('/api/shipping/quotes?per_page=10', { credentials: 'include' })
+        const res = await fetch(`/api/shipping/quotes?page=${pagination.current_page}&per_page=${pagination.per_page}`, { credentials: 'include' })
         if (!res.ok) throw new Error('Erro ao carregar histórico de cotações')
         const data = await res.json()
         setQuotes(data.data || [])
+        setPagination({
+          current_page: data.current_page,
+          per_page: data.per_page,
+          total: data.total,
+          last_page: data.last_page,
+          from: data.from,
+          to: data.to,
+        })
         setHistoryError(null)
       } catch (e: any) {
         setHistoryError(e.message || 'Erro ao carregar histórico de cotações')
@@ -145,7 +162,7 @@ const MAX_LENGTH = 50 // cm
       }
     }
     loadHistory()
-  }, [])
+  }, [pagination.current_page])
 
   // Carregar regras de frete grátis ativas (para debug no console)
   useEffect(() => {
@@ -426,6 +443,7 @@ const MAX_LENGTH = 50 // cm
         // Não falhar se algo der errado no log
       }
       setShippingOptions(options)
+      setQuoteTimestamp(new Date()) // Armazenar timestamp da cotação atual
       
       // Se não há opções mas há mensagem, mostrar como informação
       if (options.length === 0 && data.message) {
@@ -463,6 +481,24 @@ const MAX_LENGTH = 50 // cm
     }))
     const shareLink = generateWhatsAppShareLink(optionsForShare, formData.cep_destino)
     window.open(shareLink, '_blank')
+  }
+
+  const handlePageChange = (page: number) => {
+    setPagination((prev) => ({ ...prev, current_page: page }))
+  }
+
+  const getPageNumbers = () => {
+    const pages = []
+    const maxVisible = 5
+    let start = Math.max(1, pagination.current_page - Math.floor(maxVisible / 2))
+    let end = Math.min(pagination.last_page, start + maxVisible - 1)
+    if (end - start + 1 < maxVisible) {
+      start = Math.max(1, end - maxVisible + 1)
+    }
+    for (let i = start; i <= end; i++) {
+      pages.push(i)
+    }
+    return pages
   }
 
   return (
@@ -820,7 +856,7 @@ const MAX_LENGTH = 50 // cm
           <CardTitle>Histórico de Cotações</CardTitle>
           <CardDescription>Últimas cotações realizadas nesta conta</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="max-h-[400px] overflow-y-auto">
           {loadingHistory ? (
             <div className="text-sm text-muted-foreground">Carregando histórico...</div>
           ) : historyError ? (
@@ -828,83 +864,154 @@ const MAX_LENGTH = 50 // cm
           ) : quotes.length === 0 ? (
             <div className="text-sm text-muted-foreground">Nenhuma cotação registrada ainda.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="border-b text-xs text-muted-foreground">
-                    <th className="py-2 pr-2 text-left">Data</th>
-                    <th className="py-2 px-2 text-left">Destino</th>
-                    <th className="py-2 px-2 text-left">Valor Pedido</th>
-                    <th className="py-2 px-2 text-left">Frete Grátis</th>
-                    <th className="py-2 pl-2 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quotes.map((quote) => (
-                    <tr key={quote.id} className="border-b last:border-b-0">
-                      <td className="py-2 pr-2 align-top whitespace-nowrap">
-                        {quote.created_at ? formatDateTime(quote.created_at) : '-'}
-                      </td>
-                      <td className="py-2 px-2 align-top">
-                        {quote.cep_destino
-                          ? `${maskCEP(String(quote.cep_destino))}${quote.destination_state ? ` (${quote.destination_state})` : ''}`
-                          : '-'}
-                      </td>
-                      <td className="py-2 px-2 align-top">
-                        {formatCurrency(Number(quote.order_value || 0))}
-                      </td>
-                      <td className="py-2 px-2 align-top">
-                        {quote.free_shipping_applied
-                          ? `Sim${quote.free_shipping_rule_id ? ` - Regra #${quote.free_shipping_rule_id}` : ''}`
-                          : 'Não'}
-                      </td>
-                      <td className="py-2 pl-2 align-top">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              try {
-                                const res = await fetch(`/api/shipping/quotes/${quote.id}`, {
-                                  credentials: 'include',
-                                })
-                                if (!res.ok) throw new Error('Erro ao carregar detalhes da cotação')
-                                const full = await res.json()
-                                setDetailsModal({ open: true, quote: full })
-                              } catch (e: any) {
-                                console.error(e)
-                              }
-                            }}
-                          >
-                            Ver detalhes
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              try {
-                                const res = await fetch(`/api/shipping/quotes/${quote.id}`, {
-                                  credentials: 'include',
-                                })
-                                if (!res.ok) throw new Error('Erro ao carregar cotação')
-                                const full = await res.json()
-                                setHistoryQuoteModal({ open: true, quote: full, refreshing: false })
-                              } catch (e: any) {
-                                console.error(e)
-                              }
-                            }}
-                          >
-                            Ver cotação
-                          </Button>
-                        </div>
-                      </td>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="py-2 pr-2 text-left">Data</th>
+                      <th className="py-2 px-2 text-left">Destino</th>
+                      <th className="py-2 px-2 text-left">Valor Pedido</th>
+                      <th className="py-2 px-2 text-left">Frete Grátis</th>
+                      <th className="py-2 px-2 text-left">Regra</th>
+                      <th className="py-2 pl-2 text-right">Ações</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {quotes.map((quote) => (
+                      <tr key={quote.id} className="border-b last:border-b-0">
+                        <td className="py-2 pr-2 align-top whitespace-nowrap">
+                          {quote.created_at ? formatDateTime(quote.created_at) : '-'}
+                        </td>
+                        <td className="py-2 px-2 align-top">
+                          {quote.cep_destino
+                            ? `${maskCEP(String(quote.cep_destino))}${quote.destination_state ? ` (${quote.destination_state})` : ''}`
+                            : '-'}
+                        </td>
+                        <td className="py-2 px-2 align-top">
+                          {formatCurrency(Number(quote.order_value || 0))}
+                        </td>
+                        <td className="py-2 px-2 align-top">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "inline-flex w-fit items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border",
+                              quote.free_shipping_applied
+                                ? "bg-blue-50 text-blue-800 border-blue-200"
+                                : "bg-red-50 text-red-800 border-red-200"
+                            )}
+                          >
+                            {quote.free_shipping_applied ? "Sim" : "Não"}
+                          </Badge>
+                        </td>
+                        <td className="py-2 px-2 align-top">
+                          {quote.free_shipping_rule_id ? (
+                            <Badge variant="outline" className="bg-white text-gray-700 border-gray-300 text-xs px-2 py-0.5">
+                              Regra #{quote.free_shipping_rule_id}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
+                        <td className="py-2 pl-2 align-top">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(`/api/shipping/quotes/${quote.id}`, {
+                                    credentials: 'include',
+                                  })
+                                  if (!res.ok) throw new Error('Erro ao carregar detalhes da cotação')
+                                  const full = await res.json()
+                                  setDetailsModal({ open: true, quote: full })
+                                } catch (e: any) {
+                                  console.error(e)
+                                }
+                              }}
+                            >
+                              Ver detalhes
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(`/api/shipping/quotes/${quote.id}`, {
+                                    credentials: 'include',
+                                  })
+                                  if (!res.ok) throw new Error('Erro ao carregar cotação')
+                                  const full = await res.json()
+                                  setHistoryQuoteModal({ open: true, quote: full, refreshing: false })
+                                } catch (e: any) {
+                                  console.error(e)
+                                }
+                              }}
+                            >
+                              Ver cotação
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {pagination.last_page > 1 && (
+                <div className="flex items-center justify-between p-4 border-t">
+                  <p className="text-sm text-muted-foreground">
+                    Mostrando {pagination.from} a {pagination.to} de {pagination.total} resultados
+                  </p>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(1)}
+                      disabled={pagination.current_page === 1}
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(pagination.current_page - 1)}
+                      disabled={pagination.current_page === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    {getPageNumbers().map((page) => (
+                      <Button
+                        key={page}
+                        variant={page === pagination.current_page ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(page)}
+                      >
+                        {page}
+                      </Button>
+                    ))}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(pagination.current_page + 1)}
+                      disabled={pagination.current_page === pagination.last_page}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(pagination.last_page)}
+                      disabled={pagination.current_page === pagination.last_page}
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -917,7 +1024,8 @@ const MAX_LENGTH = 50 // cm
               <div>
                 <DialogTitle>Opções de Frete</DialogTitle>
                 <DialogDescription>
-                  Modalidades disponíveis no ambiente {activeEnvironment === 'sandbox' ? 'Sandbox' : 'Produção'}
+                  Opções de frete disponíveis para o CEP: <strong>{maskCEP(formData.cep_destino)}</strong>.<br />
+                  Cotação realizada em {quoteTimestamp ? formatDateTime(quoteTimestamp) : '-'}.
                 </DialogDescription>
               </div>
               {activeEnvironment && <EnvironmentBadge environment={activeEnvironment} />}
@@ -1063,34 +1171,10 @@ const MAX_LENGTH = 50 // cm
               <div>
                 <DialogTitle>Cotação Salva</DialogTitle>
                 <DialogDescription>
-                  Visualize as opções de frete salvas e atualize a cotação se necessário.
+                  Opções de frete disponíveis para o CEP: <strong>{historyQuoteModal.quote?.cep_destino ? maskCEP(String(historyQuoteModal.quote.cep_destino)) : '-'}</strong>.<br />
+                  Cotação realizada em {historyQuoteModal.quote?.created_at ? formatDateTime(historyQuoteModal.quote.created_at) : '-'}.
                 </DialogDescription>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={historyQuoteModal.refreshing || !historyQuoteModal.quote}
-                onClick={async () => {
-                  if (!historyQuoteModal.quote) return
-                  setHistoryQuoteModal(prev => ({ ...prev, refreshing: true }))
-                  try {
-                    const res = await fetch(`/api/shipping/quotes/${historyQuoteModal.quote.id}/refresh`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                    })
-                    if (!res.ok) throw new Error('Erro ao atualizar cotação')
-                    const updated = await res.json()
-                    setHistoryQuoteModal(prev => ({ ...prev, quote: updated, refreshing: false }))
-                    setQuotes(prev => prev.map(q => q.id === updated.id ? { ...q, ...updated } : q))
-                  } catch (e: any) {
-                    console.error(e)
-                    setHistoryQuoteModal(prev => ({ ...prev, refreshing: false }))
-                  }
-                }}
-              >
-                {historyQuoteModal.refreshing ? 'Atualizando...' : 'Atualizar cotação'}
-              </Button>
             </div>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1171,6 +1255,33 @@ const MAX_LENGTH = 50 // cm
               )
             })()}
           </div>
+          <DialogFooter className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              disabled={historyQuoteModal.refreshing || !historyQuoteModal.quote}
+              onClick={async () => {
+                if (!historyQuoteModal.quote) return
+                setHistoryQuoteModal(prev => ({ ...prev, refreshing: true }))
+                try {
+                  const res = await fetch(`/api/shipping/quotes/${historyQuoteModal.quote.id}/refresh`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                  })
+                  if (!res.ok) throw new Error('Erro ao atualizar cotação')
+                  const updated = await res.json()
+                  setHistoryQuoteModal(prev => ({ ...prev, quote: updated, refreshing: false }))
+                  setQuotes(prev => prev.map(q => q.id === updated.id ? { ...q, ...updated } : q))
+                } catch (e: any) {
+                  console.error(e)
+                  setHistoryQuoteModal(prev => ({ ...prev, refreshing: false }))
+                }
+              }}
+            >
+              {historyQuoteModal.refreshing ? 'Atualizando...' : 'Atualizar cotação'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
