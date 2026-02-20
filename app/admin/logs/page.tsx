@@ -233,7 +233,7 @@ function PaymentLogDetails({ metadata }: { metadata: any }) {
       <div>
         <p className="text-sm text-muted-foreground mb-2">Não foi possível exibir os detalhes formatados:</p>
         <pre className="text-xs bg-background p-3 rounded border overflow-x-auto">
-          {formatMetadata(metadata)}
+          {typeof metadata === "object" && metadata !== null ? JSON.stringify(metadata, null, 2) : String(metadata)}
         </pre>
       </div>
     )
