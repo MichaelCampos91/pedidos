@@ -332,78 +332,75 @@ export default function LogsPage() {
                     const isError = log.level === "error"
 
                     return (
-                      <TableRow
-                        key={log.id}
-                        className={cn(
-                          isError && "bg-red-50 hover:bg-red-100",
-                          isExpanded && "bg-muted/50"
-                        )}
-                      >
-                        <TableCell className="font-mono text-xs">
-                          {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
-                        </TableCell>
-                        <TableCell>{getLevelBadge(log.level)}</TableCell>
-                        <TableCell>{getCategoryBadge(log.category)}</TableCell>
-                        <TableCell>
-                          <div className="max-w-md">
-                            <p className={cn("text-sm", isError && "font-semibold")}>
-                              {log.message}
-                            </p>
-                            {log.metadata && (
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {log.metadata.order_id && (
-                                  <span>Pedido: #{log.metadata.order_id} </span>
-                                )}
-                                {log.metadata.transaction_id && (
-                                  <span>Transação: {log.metadata.transaction_id.substring(0, 20)}... </span>
-                                )}
-                                {log.metadata.error_message && (
-                                  <span className="text-red-600">
-                                    Erro: {log.metadata.error_message}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {log.metadata && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => toggleExpand(log.id)}
-                            >
-                              {isExpanded ? (
-                                <ChevronUp className="h-4 w-4" />
-                              ) : (
-                                <ChevronDown className="h-4 w-4" />
-                              )}
-                            </Button>
+                      <>
+                        <TableRow
+                          key={log.id}
+                          className={cn(
+                            isError && "bg-red-50 hover:bg-red-100",
+                            isExpanded && "bg-muted/50"
                           )}
-                        </TableCell>
-                      </TableRow>
+                        >
+                          <TableCell className="font-mono text-xs">
+                            {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                          </TableCell>
+                          <TableCell>{getLevelBadge(log.level)}</TableCell>
+                          <TableCell>{getCategoryBadge(log.category)}</TableCell>
+                          <TableCell>
+                            <div className="max-w-md">
+                              <p className={cn("text-sm", isError && "font-semibold")}>
+                                {log.message}
+                              </p>
+                              {log.metadata && (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {log.metadata.order_id && (
+                                    <span>Pedido: #{log.metadata.order_id} </span>
+                                  )}
+                                  {log.metadata.transaction_id && (
+                                    <span>Transação: {log.metadata.transaction_id.substring(0, 20)}... </span>
+                                  )}
+                                  {log.metadata.error_message && (
+                                    <span className="text-red-600">
+                                      Erro: {log.metadata.error_message}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {log.metadata && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleExpand(log.id)}
+                              >
+                                {isExpanded ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        {/* Metadata expandido */}
+                        {isExpanded && log.metadata && (
+                          <TableRow key={`metadata-${log.id}`} className="bg-muted/30">
+                            <TableCell colSpan={5} className="p-4">
+                              <div className="space-y-2">
+                                <p className="text-sm font-semibold">Detalhes:</p>
+                                <pre className="text-xs bg-background p-3 rounded border overflow-x-auto">
+                                  {formatMetadata(log.metadata)}
+                                </pre>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
                     )
                   })}
                 </TableBody>
               </Table>
-
-              {/* Metadata expandido */}
-              {logs.map((log) => {
-                if (!expandedLogs.has(log.id) || !log.metadata) return null
-
-                return (
-                  <TableRow key={`metadata-${log.id}`} className="bg-muted/30">
-                    <TableCell colSpan={5} className="p-4">
-                      <div className="space-y-2">
-                        <p className="text-sm font-semibold">Detalhes:</p>
-                        <pre className="text-xs bg-background p-3 rounded border overflow-x-auto">
-                          {formatMetadata(log.metadata)}
-                        </pre>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
             </div>
           )}
         </CardContent>
