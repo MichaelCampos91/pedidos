@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       id?: string
       amount?: number
       charge?: { id?: string; status?: string; amount?: number; last_transaction?: { status?: string } }
-      charges?: Array<{ amount?: number }>
+      charges?: Array<{ id?: string; amount?: number; last_transaction?: { amount?: number } }>
     }
     const data = (body.data ?? body) as WebhookData
 
@@ -57,6 +57,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'order_id não encontrado' }, { status: 400 })
     }
 
+    // Capturar charge_id (ID da cobrança do Pagar.me)
+    // Pode vir em: data.id (order ID), data.charges[0].id (charge ID), ou data.charge.id
+    const chargeId = 
+      (Array.isArray(data.charges) && data.charges[0]?.id) 
+        ? String(data.charges[0].id)
+        : (data.charge as { id?: string })?.id
+          ? String((data.charge as { id: string }).id)
+          : data.id
+            ? String(data.id)
+            : null
+
     // Verificar status do pagamento
     const charge = (data.charge ?? data) as WebhookData['charge'] & { id?: string }
     const status = charge?.status ?? (charge as { last_transaction?: { status?: string } })?.last_transaction?.status
@@ -66,14 +77,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Status não encontrado' }, { status: 400 })
     }
 
-    // Buscar pagamento no banco
+    // Buscar pagamento no banco usando transaction_id ou order_id
+    const transactionId = data.id || charge.id || chargeId
     const paymentResult = await query(
       'SELECT * FROM payments WHERE pagarme_transaction_id = $1 OR order_id = $2 ORDER BY created_at DESC LIMIT 1',
-      [data.id || charge.id, orderId]
+      [transactionId, orderId]
     )
 
     if (paymentResult.rows.length === 0) {
-      await saveLog('warning', 'Pagamento não encontrado no webhook', { orderId, transactionId: data.id })
+      await saveLog('warning', 'Pagamento não encontrado no webhook', { orderId, transactionId, chargeId })
       return NextResponse.json({ error: 'Pagamento não encontrado' }, { status: 404 })
     }
 
@@ -89,16 +101,40 @@ export async function POST(request: NextRequest) {
       paymentStatus = 'pending'
     }
 
-    // Valor cobrado: Pagar.me envia em centavos (data.amount, data.charge.amount ou data.charges[0].amount)
+    // Valor cobrado: Pagar.me envia em centavos
+    // Buscar em múltiplos locais possíveis na resposta do webhook
     let amountReais: number | null = null
-    const rawAmount =
-      typeof data.amount === 'number'
-        ? data.amount
-        : typeof (data.charge as { amount?: number })?.amount === 'number'
-          ? (data.charge as { amount: number }).amount
-          : Array.isArray(data.charges) && data.charges[0] && typeof data.charges[0].amount === 'number'
-            ? data.charges[0].amount
-            : null
+    let rawAmount: number | null = null
+
+    // Tentar buscar em data.charges[0].last_transaction.amount (mais confiável)
+    if (Array.isArray(data.charges) && data.charges[0]?.last_transaction) {
+      const lastTransaction = data.charges[0].last_transaction as { amount?: number }
+      if (typeof lastTransaction.amount === 'number') {
+        rawAmount = lastTransaction.amount
+      }
+    }
+
+    // Fallback: buscar em data.charges[0].amount
+    if (rawAmount == null && Array.isArray(data.charges) && data.charges[0]) {
+      if (typeof data.charges[0].amount === 'number') {
+        rawAmount = data.charges[0].amount
+      }
+    }
+
+    // Fallback: buscar em data.charge.amount
+    if (rawAmount == null && data.charge) {
+      const chargeData = data.charge as { amount?: number }
+      if (typeof chargeData.amount === 'number') {
+        rawAmount = chargeData.amount
+      }
+    }
+
+    // Fallback: buscar em data.amount (order amount)
+    if (rawAmount == null && typeof data.amount === 'number') {
+      rawAmount = data.amount
+    }
+
+    // Converter centavos para reais
     if (rawAmount != null && rawAmount >= 0) {
       amountReais = Math.round(rawAmount) / 100
     }
@@ -134,10 +170,13 @@ export async function POST(request: NextRequest) {
       )
 
       await saveLog('info', 'Pagamento confirmado via webhook', {
-        orderId: payment.order_id,
-        paymentId: payment.id,
-        transactionId: data.id,
-      })
+        order_id: payment.order_id,
+        payment_id: payment.id,
+        transaction_id: transactionId,
+        charge_id: chargeId,
+        amount_charged: amountReais != null ? amountReais.toFixed(2) : null,
+        status: paymentStatus,
+      }, 'payment')
 
       try {
         await syncOrderToBling(Number(payment.order_id))

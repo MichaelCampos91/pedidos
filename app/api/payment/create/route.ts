@@ -363,6 +363,12 @@ export async function POST(request: NextRequest) {
     // Valor final cobrado (já recalculado no backend: PIX com desconto ou cartão com juros)
     const finalAmount = (amount / 100).toFixed(2)
 
+    // Extrair charge_id da resposta (pode estar em transaction.charges[0].id ou transaction.id)
+    const chargeId = 
+      (transaction as any)?.charges?.[0]?.id 
+        ? String((transaction as any).charges[0].id)
+        : transaction.id
+
     // Salvar pagamento no banco
     await query(
       `INSERT INTO payments (order_id, pagarme_transaction_id, method, installments, amount, status)
@@ -384,8 +390,10 @@ export async function POST(request: NextRequest) {
       {
         order_id,
         transaction_id: transaction.id,
+        charge_id: chargeId,
         payment_method,
         amount: finalAmount,
+        amount_charged: transaction.status === 'paid' ? finalAmount : null, // Só preencher se já foi aprovado
         status: transaction.status,
         installments: credit_card?.installments || 1,
         environment: detectedEnvironment,

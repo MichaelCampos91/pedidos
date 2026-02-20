@@ -166,20 +166,57 @@ export async function createPixTransaction(
   }
 
   // Preparar itens com código
-  const items = params.items && params.items.length > 0
-    ? params.items.map(item => ({
-        amount: Math.round(parseFloat(item.price.toString()) * 100 * parseInt(item.quantity.toString())),
-        description: item.title,
-        quantity: parseInt(item.quantity.toString()),
-        code: item.product_id ? `prod-${item.product_id}` : `item-${item.id}`,
-      }))
-    : [{
-        amount: params.amount,
-        description: 'Pedido',
-        quantity: 1,
-        code: `order-${params.metadata?.order_id || 'unknown'}`,
-      }]
+  // IMPORTANTE: Quando há items, o Pagar.me ignora o amount no nível raiz e usa apenas a soma dos items.
+  // Portanto, precisamos incluir o frete como um item adicional se houver diferença entre o total e a soma dos produtos.
+  let items: Array<{
+    amount: number
+    description: string
+    quantity: number
+    code: string
+  }> = []
 
+  if (params.items && params.items.length > 0) {
+    // Mapear items dos produtos
+    items = params.items.map(item => ({
+      amount: Math.round(parseFloat(item.price.toString()) * 100 * parseInt(item.quantity.toString())),
+      description: item.title,
+      quantity: parseInt(item.quantity.toString()),
+      code: item.product_id ? `prod-${item.product_id}` : `item-${item.id}`,
+    }))
+
+    // Calcular soma dos items dos produtos
+    const itemsTotal = items.reduce((sum, item) => sum + item.amount, 0)
+    const totalAmount = params.amount
+
+    // Se houver diferença entre o total e a soma dos items, adicionar frete como item
+    const difference = totalAmount - itemsTotal
+    if (difference > 0) {
+      // Adicionar frete como item adicional
+      items.push({
+        amount: difference,
+        description: 'Frete',
+        quantity: 1,
+        code: `shipping-${params.metadata?.order_id || 'unknown'}`,
+      })
+    } else if (difference < 0) {
+      // Se a diferença for negativa, há um problema de cálculo
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Pagar.me PIX] Diferença negativa entre total e items:', {
+          totalAmount,
+          itemsTotal,
+          difference,
+        })
+      }
+    }
+  } else {
+    // Sem items específicos, criar item único com o total
+    items = [{
+      amount: params.amount,
+      description: 'Pedido',
+      quantity: 1,
+      code: `order-${params.metadata?.order_id || 'unknown'}`,
+    }]
+  }
 
   // Preparar request body com customer explícito (garantindo que phone está presente)
   // IMPORTANTE: Pagar.me espera "phones" (plural) como objeto com mobile_phone e/ou home_phone
@@ -518,20 +555,57 @@ export async function createCreditCardTransaction(
     : undefined
 
   // Preparar itens com código
-  const items = params.items && params.items.length > 0
-    ? params.items.map(item => ({
-        amount: Math.round(parseFloat(item.price.toString()) * 100 * parseInt(item.quantity.toString())),
-        description: item.title,
-        quantity: parseInt(item.quantity.toString()),
-        code: item.product_id ? `prod-${item.product_id}` : `item-${item.id}`,
-      }))
-    : [{
-        amount: params.amount,
-        description: 'Pedido',
-        quantity: 1,
-        code: `order-${params.metadata?.order_id || 'unknown'}`,
-      }]
+  // IMPORTANTE: Quando há items, o Pagar.me ignora o amount no nível raiz e usa apenas a soma dos items.
+  // Portanto, precisamos incluir o frete como um item adicional se houver diferença entre o total e a soma dos produtos.
+  let items: Array<{
+    amount: number
+    description: string
+    quantity: number
+    code: string
+  }> = []
 
+  if (params.items && params.items.length > 0) {
+    // Mapear items dos produtos
+    items = params.items.map(item => ({
+      amount: Math.round(parseFloat(item.price.toString()) * 100 * parseInt(item.quantity.toString())),
+      description: item.title,
+      quantity: parseInt(item.quantity.toString()),
+      code: item.product_id ? `prod-${item.product_id}` : `item-${item.id}`,
+    }))
+
+    // Calcular soma dos items dos produtos
+    const itemsTotal = items.reduce((sum, item) => sum + item.amount, 0)
+    const totalAmount = params.amount
+
+    // Se houver diferença entre o total e a soma dos items, adicionar frete como item
+    const difference = totalAmount - itemsTotal
+    if (difference > 0) {
+      // Adicionar frete como item adicional
+      items.push({
+        amount: difference,
+        description: 'Frete',
+        quantity: 1,
+        code: `shipping-${params.metadata?.order_id || 'unknown'}`,
+      })
+    } else if (difference < 0) {
+      // Se a diferença for negativa, há um problema de cálculo
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Pagar.me Credit Card] Diferença negativa entre total e items:', {
+          totalAmount,
+          itemsTotal,
+          difference,
+        })
+      }
+    }
+  } else {
+    // Sem items específicos, criar item único com o total
+    items = [{
+      amount: params.amount,
+      description: 'Pedido',
+      quantity: 1,
+      code: `order-${params.metadata?.order_id || 'unknown'}`,
+    }]
+  }
 
   // Preparar request body com customer explícito (garantindo que phone está presente)
   // IMPORTANTE: Pagar.me espera "phones" (plural) como objeto com mobile_phone e/ou home_phone
