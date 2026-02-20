@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHmac } from 'crypto'
 import { query } from '@/lib/database'
-import { saveLog } from '@/lib/logger'
+import { saveLog, preparePaymentLogDataSafely } from '@/lib/logger'
 import { syncOrderToBling } from '@/lib/bling'
 
 export async function POST(request: NextRequest) {
@@ -169,19 +169,158 @@ export async function POST(request: NextRequest) {
         ['aguardando_producao', payment.order_id]
       )
 
-      await saveLog('info', 'Pagamento confirmado via webhook', {
-        order_id: payment.order_id,
-        payment_id: payment.id,
-        transaction_id: transactionId,
-        charge_id: chargeId,
-        amount_charged: amountReais != null ? amountReais.toFixed(2) : null,
-        status: paymentStatus,
-      }, 'payment')
+      // Preparar dados completos do log de forma segura
+      const logData = await preparePaymentLogDataSafely(async () => {
+        // Buscar dados completos do pedido e cliente
+        const orderResult = await query(
+          `SELECT o.*, c.name as client_name, c.email as client_email, c.cpf as client_cpf
+           FROM orders o
+           JOIN clients c ON o.client_id = c.id
+           WHERE o.id = $1`,
+          [payment.order_id]
+        )
+        const order = orderResult.rows[0] || null
+
+        // Buscar endereço de entrega se disponível
+        let shippingAddress = null
+        if (order?.shipping_address_id) {
+          try {
+            const addressResult = await query(
+              'SELECT * FROM client_addresses WHERE id = $1',
+              [order.shipping_address_id]
+            )
+            shippingAddress = addressResult.rows[0] || null
+          } catch (error) {
+            // Ignorar erro, shippingAddress permanece null
+          }
+        }
+
+        // Extrair dados do cartão se disponível no webhook
+        let cardData: any = null
+        try {
+          const lastTransaction = (Array.isArray(data.charges) && data.charges[0]?.last_transaction) ||
+                                 (data.charge as any)?.last_transaction
+          if (lastTransaction?.card) {
+            const card = lastTransaction.card
+            cardData = {
+              last_four_digits: card.last_four_digits || null,
+              holder_name: card.holder_name || null,
+              expiration_date: card.expiration_date || null,
+              brand: card.brand || null,
+            }
+          }
+        } catch (error) {
+          // Ignorar erro, cardData permanece null
+        }
+
+        // Extrair motivo de recusa/erro se disponível
+        let refusalReason: string | null = null
+        try {
+          const lastTransaction = (Array.isArray(data.charges) && data.charges[0]?.last_transaction) ||
+                                 (data.charge as any)?.last_transaction
+          if (lastTransaction) {
+            refusalReason = lastTransaction.acquirer_response_message || 
+                           lastTransaction.refusal_reason ||
+                           (lastTransaction.gateway_response?.errors?.[0]?.message) ||
+                           null
+          }
+        } catch (error) {
+          // Ignorar erro, refusalReason permanece null
+        }
+
+        // Preparar dados do cliente
+        const customerLogData = order ? {
+          name: order.client_name || null,
+          email: order.client_email || null,
+          document: order.client_cpf || null,
+          address: shippingAddress ? {
+            street: shippingAddress.street || null,
+            number: shippingAddress.number || null,
+            complement: shippingAddress.complement || null,
+            neighborhood: shippingAddress.neighborhood || null,
+            city: shippingAddress.city || null,
+            state: shippingAddress.state || null,
+            zip_code: shippingAddress.zip_code || shippingAddress.cep || null,
+          } : null,
+        } : null
+
+        // Buscar dados atualizados do pagamento
+        const updatedPaymentResult = await query(
+          'SELECT * FROM payments WHERE id = $1',
+          [payment.id]
+        )
+        const updatedPayment = updatedPaymentResult.rows[0] || payment
+
+        return {
+          order_id: payment.order_id,
+          payment_id: payment.id,
+          transaction_id: transactionId,
+          charge_id: chargeId,
+          status: paymentStatus,
+          refusal_reason: refusalReason,
+          customer: customerLogData,
+          payment: {
+            method: updatedPayment.method || null,
+            amount: updatedPayment.amount || null,
+            amount_charged: amountReais != null ? amountReais.toFixed(2) : (updatedPayment.amount || null),
+            amount_source: amountReais != null ? 'pagarme' : 'calculated',
+            installments: updatedPayment.installments || 1,
+            card: cardData,
+            billing_address: null, // Endereço de cobrança não está disponível no webhook
+          },
+          timestamps: {
+            created_at: updatedPayment.created_at ? new Date(updatedPayment.created_at).toISOString() : null,
+            paid_at: updatedPayment.paid_at ? new Date(updatedPayment.paid_at).toISOString() : null,
+          },
+        }
+      })
+
+      // Log de pagamento confirmado (com tratamento de erro para não afetar fluxo)
+      try {
+        await saveLog('info', 'Pagamento confirmado via webhook', logData, 'payment')
+      } catch (error) {
+        // Se até mesmo saveLog falhar, apenas logar no console
+        console.error('[Payment Webhook] Erro ao salvar log (não crítico):', error)
+        // Continuar fluxo normalmente
+      }
 
       try {
         await syncOrderToBling(Number(payment.order_id))
       } catch (_e) {
         // Falha no Bling não quebra o webhook; status fica pendente para reenvio manual
+      }
+    } else if (paymentStatus === 'failed' || paymentStatus === 'refused') {
+      // Também logar quando pagamento for recusado/falhou
+      const logData = await preparePaymentLogDataSafely(async () => {
+        // Extrair motivo de recusa/erro
+        let refusalReason: string | null = null
+        try {
+          const lastTransaction = (Array.isArray(data.charges) && data.charges[0]?.last_transaction) ||
+                                 (data.charge as any)?.last_transaction
+          if (lastTransaction) {
+            refusalReason = lastTransaction.acquirer_response_message || 
+                           lastTransaction.refusal_reason ||
+                           (lastTransaction.gateway_response?.errors?.[0]?.message) ||
+                           null
+          }
+        } catch (error) {
+          // Ignorar erro
+        }
+
+        return {
+          order_id: payment.order_id,
+          payment_id: payment.id,
+          transaction_id: transactionId,
+          charge_id: chargeId,
+          status: paymentStatus,
+          refusal_reason: refusalReason || 'Motivo não disponível',
+        }
+      })
+
+      try {
+        await saveLog('warning', `Pagamento ${paymentStatus === 'failed' ? 'falhou' : 'recusado'} via webhook`, logData, 'payment')
+      } catch (error) {
+        console.error('[Payment Webhook] Erro ao salvar log de falha (não crítico):', error)
       }
     }
 

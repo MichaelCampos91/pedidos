@@ -4,7 +4,7 @@ import { createPixTransaction, createCreditCardTransaction } from '@/lib/pagarme
 import { getActiveEnvironment } from '@/lib/settings'
 import { getToken } from '@/lib/integrations'
 import { calculatePixDiscount, calculateInstallmentTotal, getInstallmentRate, recalculateOrderTotal } from '@/lib/payment-rules'
-import { saveLog } from '@/lib/logger'
+import { saveLog, preparePaymentLogDataSafely } from '@/lib/logger'
 import { syncOrderToBling } from '@/lib/bling'
 import type { IntegrationEnvironment } from '@/lib/integrations-types'
 
@@ -369,10 +369,28 @@ export async function POST(request: NextRequest) {
         ? String((transaction as any).charges[0].id)
         : transaction.id
 
+    // Extrair valor cobrado diretamente do Pagar.me se disponível
+    let amountChargedFromPagarme: string | null = null
+    let amountSource: 'pagarme' | 'calculated' = 'calculated'
+    
+    try {
+      const chargeAmount = (transaction as any)?.charges?.[0]?.amount || 
+                          (transaction as any)?.charges?.[0]?.last_transaction?.amount ||
+                          (transaction as any)?.amount
+      if (chargeAmount && typeof chargeAmount === 'number') {
+        amountChargedFromPagarme = (chargeAmount / 100).toFixed(2)
+        amountSource = 'pagarme'
+      }
+    } catch (error) {
+      // Se falhar, usar valor calculado
+      console.warn('[Payment Create] Não foi possível extrair valor do Pagar.me:', error)
+    }
+
     // Salvar pagamento no banco
-    await query(
+    const paymentInsertResult = await query(
       `INSERT INTO payments (order_id, pagarme_transaction_id, method, installments, amount, status)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, created_at`,
       [
         order_id,
         transaction.id,
@@ -382,24 +400,110 @@ export async function POST(request: NextRequest) {
         transaction.status === 'paid' ? 'paid' : 'pending',
       ]
     )
+    const paymentId = paymentInsertResult.rows[0].id
+    const paymentCreatedAt = paymentInsertResult.rows[0].created_at
 
-    // Log de pagamento criado com sucesso
-    await saveLog(
-      'info',
-      `Pagamento criado com sucesso para pedido #${order_id}`,
-      {
+    // Preparar dados completos do log de forma segura
+    const logData = await preparePaymentLogDataSafely(async () => {
+      // Extrair dados do cartão se disponível na resposta
+      let cardData: any = null
+      try {
+        const lastTransaction = (transaction as any)?.charges?.[0]?.last_transaction
+        if (lastTransaction?.card) {
+          const card = lastTransaction.card
+          cardData = {
+            last_four_digits: card.last_four_digits || null,
+            holder_name: card.holder_name || credit_card?.holder_document ? customerData.name : null,
+            expiration_date: card.expiration_date || null,
+            brand: card.brand || null,
+          }
+        }
+      } catch (error) {
+        // Ignorar erro, cardData permanece null
+      }
+
+      // Extrair motivo de recusa/erro se disponível
+      let refusalReason: string | null = null
+      try {
+        const lastTransaction = (transaction as any)?.charges?.[0]?.last_transaction
+        if (lastTransaction) {
+          refusalReason = lastTransaction.acquirer_response_message || 
+                         lastTransaction.refusal_reason ||
+                         (lastTransaction.gateway_response?.errors?.[0]?.message) ||
+                         null
+        }
+      } catch (error) {
+        // Ignorar erro, refusalReason permanece null
+      }
+
+      // Preparar dados do cliente
+      const customerLogData = {
+        name: customerData.name,
+        email: customerData.email,
+        document: customerData.document,
+        address: shippingAddress ? {
+          street: shippingAddress.street || null,
+          number: shippingAddress.number || null,
+          complement: shippingAddress.complement || null,
+          neighborhood: shippingAddress.neighborhood || null,
+          city: shippingAddress.city || null,
+          state: shippingAddress.state || null,
+          zip_code: shippingAddress.zip_code || shippingAddress.cep || null,
+        } : null,
+      }
+
+      // Preparar endereço de cobrança se diferente do endereço de entrega
+      let billingAddressLog: any = null
+      if (billingData?.address) {
+        billingAddressLog = {
+          street: billingData.address.street || null,
+          number: billingData.address.number || null,
+          complement: billingData.address.complement || null,
+          neighborhood: billingData.address.neighborhood || null,
+          city: billingData.address.city || null,
+          state: billingData.address.state || null,
+          zip_code: billingData.address.zip_code || null,
+        }
+      }
+
+      return {
         order_id,
+        payment_id: paymentId,
         transaction_id: transaction.id,
         charge_id: chargeId,
-        payment_method,
-        amount: finalAmount,
-        amount_charged: transaction.status === 'paid' ? finalAmount : null, // Só preencher se já foi aprovado
         status: transaction.status,
-        installments: credit_card?.installments || 1,
+        refusal_reason: refusalReason,
+        customer: customerLogData,
+        payment: {
+          method: payment_method,
+          amount: finalAmount,
+          amount_charged: amountChargedFromPagarme || finalAmount,
+          amount_source: amountSource,
+          installments: credit_card?.installments || 1,
+          card: cardData,
+          billing_address: billingAddressLog,
+        },
+        timestamps: {
+          created_at: paymentCreatedAt ? new Date(paymentCreatedAt).toISOString() : new Date().toISOString(),
+          paid_at: transaction.status === 'paid' ? new Date().toISOString() : null,
+        },
         environment: detectedEnvironment,
-      },
-      'payment'
-    )
+      }
+    })
+
+    // Log de pagamento criado com sucesso (com tratamento de erro para não afetar fluxo)
+    try {
+      await saveLog(
+        'info',
+        `Pagamento criado com sucesso para pedido #${order_id}`,
+        logData,
+        'payment'
+      )
+    } catch (error) {
+      // Se até mesmo saveLog falhar, apenas logar no console
+      console.error('[Payment Create] Erro ao salvar log (não crítico):', error)
+      // Continuar fluxo normalmente
+    }
 
     // Se pagamento foi aprovado imediatamente, atualizar pedido
     if (transaction.status === 'paid') {

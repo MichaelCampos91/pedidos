@@ -36,6 +36,25 @@ function inferCategory(level: string, message: string): string {
   return 'system'
 }
 
+/**
+ * Função auxiliar para preparar dados de log de forma segura
+ * Garante que erros na preparação não afetem o fluxo principal
+ */
+export async function preparePaymentLogDataSafely(
+  prepareFn: () => Promise<any>
+): Promise<any> {
+  try {
+    return await prepareFn()
+  } catch (error: any) {
+    console.error('[Payment Log] Erro ao preparar dados do log:', error.message)
+    // Retornar objeto vazio ou parcial, nunca lançar exceção
+    return {
+      error: 'Não foi possível obter todas as informações do log',
+      error_message: error.message
+    }
+  }
+}
+
 export async function saveLog(
   level: string, 
   message: string, 

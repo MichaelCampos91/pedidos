@@ -53,6 +53,193 @@ const CATEGORY_LABELS: Record<string, string> = {
   bling: "Bling",
 }
 
+// Componente para renderizar detalhes de logs de pagamento
+function PaymentLogDetails({ metadata }: { metadata: any }) {
+  try {
+    const getStatusBadge = (status: string) => {
+      const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
+        paid: { bg: "bg-emerald-100 text-emerald-800", text: "text-emerald-800", label: "Pago" },
+        pending: { bg: "bg-amber-100 text-amber-800", text: "text-amber-800", label: "Pendente" },
+        failed: { bg: "bg-red-100 text-red-800", text: "text-red-800", label: "Falhou" },
+        refused: { bg: "bg-red-100 text-red-800", text: "text-red-800", label: "Recusado" },
+      }
+      const config = statusConfig[status] || { bg: "bg-gray-100 text-gray-800", text: "text-gray-800", label: status }
+      return (
+        <Badge className={cn("flex items-center gap-1", config.bg)}>
+          {config.label}
+        </Badge>
+      )
+    }
+
+    const formatAddress = (address: any) => {
+      if (!address) return "Não disponível"
+      const parts = [
+        address.street,
+        address.number,
+        address.complement,
+        address.neighborhood,
+        address.city,
+        address.state,
+        address.zip_code,
+      ].filter(Boolean)
+      return parts.join(", ") || "Não disponível"
+    }
+
+    return (
+      <div className="space-y-4">
+        {/* Situação e IDs */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-1">Situação</p>
+            {metadata.status ? getStatusBadge(metadata.status) : <span className="text-sm">Não disponível</span>}
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-1">IDs</p>
+            <div className="space-y-1 text-sm">
+              {metadata.transaction_id && (
+                <div>Transação: <span className="font-mono text-xs">{metadata.transaction_id}</span></div>
+              )}
+              {metadata.charge_id && (
+                <div>Cobrança: <span className="font-mono text-xs">{metadata.charge_id}</span></div>
+              )}
+              {metadata.payment_id && (
+                <div>Pagamento: <span className="font-mono text-xs">#{metadata.payment_id}</span></div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Dados do Cliente */}
+        {metadata.customer && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Dados do Cliente</p>
+            <div className="bg-muted/50 p-3 rounded space-y-1 text-sm">
+              {metadata.customer.name && <div><strong>Nome:</strong> {metadata.customer.name}</div>}
+              {metadata.customer.email && <div><strong>Email:</strong> {metadata.customer.email}</div>}
+              {metadata.customer.document && <div><strong>Documento:</strong> {metadata.customer.document}</div>}
+              {metadata.customer.address && (
+                <div>
+                  <strong>Endereço:</strong> {formatAddress(metadata.customer.address)}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Dados do Pagamento */}
+        {metadata.payment && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Dados do Pagamento</p>
+            <div className="bg-muted/50 p-3 rounded space-y-2 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                {metadata.payment.method && (
+                  <div><strong>Forma:</strong> {metadata.payment.method === 'credit_card' ? 'Cartão de Crédito' : metadata.payment.method === 'pix' ? 'PIX' : metadata.payment.method}</div>
+                )}
+                {metadata.payment.installments && (
+                  <div><strong>Parcelas:</strong> {metadata.payment.installments}x</div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {metadata.payment.amount && (
+                  <div>
+                    <strong>Valor:</strong> R$ {parseFloat(metadata.payment.amount).toFixed(2).replace('.', ',')}
+                  </div>
+                )}
+                {metadata.payment.amount_charged && (
+                  <div>
+                    <strong>Valor Cobrado:</strong> R$ {parseFloat(metadata.payment.amount_charged).toFixed(2).replace('.', ',')}
+                    {metadata.payment.amount_source && (
+                      <span className="text-xs text-muted-foreground ml-1">
+                        ({metadata.payment.amount_source === 'pagarme' ? 'do Pagar.me' : 'calculado'})
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Dados do Cartão */}
+              {metadata.payment.card && (
+                <div className="mt-2 pt-2 border-t">
+                  <p className="text-xs font-semibold mb-1">Cartão</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {metadata.payment.card.last_four_digits && (
+                      <div><strong>Final:</strong> ****{metadata.payment.card.last_four_digits}</div>
+                    )}
+                    {metadata.payment.card.brand && (
+                      <div><strong>Bandeira:</strong> {metadata.payment.card.brand}</div>
+                    )}
+                    {metadata.payment.card.holder_name && (
+                      <div><strong>Titular:</strong> {metadata.payment.card.holder_name}</div>
+                    )}
+                    {metadata.payment.card.expiration_date && (
+                      <div><strong>Validade:</strong> {metadata.payment.card.expiration_date}</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Endereço de Cobrança */}
+              {metadata.payment.billing_address && (
+                <div className="mt-2 pt-2 border-t">
+                  <p className="text-xs font-semibold mb-1">Endereço de Cobrança</p>
+                  <div>{formatAddress(metadata.payment.billing_address)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Timestamps */}
+        {metadata.timestamps && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Timestamps</p>
+            <div className="bg-muted/50 p-3 rounded space-y-1 text-sm">
+              {metadata.timestamps.created_at && (
+                <div>
+                  <strong>Criado em:</strong> {format(new Date(metadata.timestamps.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                </div>
+              )}
+              {metadata.timestamps.paid_at && (
+                <div>
+                  <strong>Pago em:</strong> {format(new Date(metadata.timestamps.paid_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Motivo de Recusa/Erro */}
+        {metadata.refusal_reason && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Motivo da Recusa/Erro</p>
+            <div className="bg-red-50 border border-red-200 p-3 rounded text-sm text-red-800">
+              {metadata.refusal_reason}
+            </div>
+          </div>
+        )}
+
+        {/* Fallback: JSON completo se houver outros campos */}
+        {metadata.error && (
+          <div className="bg-yellow-50 border border-yellow-200 p-3 rounded text-sm text-yellow-800">
+            <strong>Aviso:</strong> {metadata.error}
+            {metadata.error_message && <div className="mt-1 text-xs">{metadata.error_message}</div>}
+          </div>
+        )}
+      </div>
+    )
+  } catch (error) {
+    // Fallback para JSON formatado se houver erro na renderização
+    return (
+      <div>
+        <p className="text-sm text-muted-foreground mb-2">Não foi possível exibir os detalhes formatados:</p>
+        <pre className="text-xs bg-background p-3 rounded border overflow-x-auto">
+          {formatMetadata(metadata)}
+        </pre>
+      </div>
+    )
+  }
+}
+
 export default function LogsPage() {
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -387,12 +574,16 @@ export default function LogsPage() {
                         {isExpanded && log.metadata && (
                           <TableRow key={`metadata-${log.id}`} className="bg-muted/30">
                             <TableCell colSpan={5} className="p-4">
-                              <div className="space-y-2">
-                                <p className="text-sm font-semibold">Detalhes:</p>
-                                <pre className="text-xs bg-background p-3 rounded border overflow-x-auto">
-                                  {formatMetadata(log.metadata)}
-                                </pre>
-                              </div>
+                              {log.category === 'payment' ? (
+                                <PaymentLogDetails metadata={log.metadata} />
+                              ) : (
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold">Detalhes:</p>
+                                  <pre className="text-xs bg-background p-3 rounded border overflow-x-auto">
+                                    {formatMetadata(log.metadata)}
+                                  </pre>
+                                </div>
+                              )}
                             </TableCell>
                           </TableRow>
                         )}
