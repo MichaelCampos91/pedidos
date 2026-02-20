@@ -1,5 +1,6 @@
 import { getTokenWithFallback } from './integrations'
 import type { IntegrationEnvironment } from './integrations-types'
+import { saveLog } from './logger'
 
 // URLs base para sandbox e produção
 const PAGARME_BASE_URLS = {
@@ -202,12 +203,31 @@ export async function createPixTransaction(
       })
     } else if (difference < 0) {
       // Se a diferença for negativa, há um problema de cálculo
+      const errorMessage = `Diferença negativa entre total e items: total=${totalAmount}, items=${itemsTotal}, difference=${difference}`
+      
+      // Logar erro mesmo em produção
+      try {
+        await saveLog(
+          'error',
+          'Erro de cálculo: diferença negativa entre valor total e soma dos items (PIX)',
+          {
+            order_id: params.metadata?.order_id || null,
+            total_amount: totalAmount,
+            items_total: itemsTotal,
+            difference: difference,
+            payment_method: 'pix',
+            environment: environment,
+          },
+          'payment'
+        )
+      } catch (logError) {
+        // Se falhar ao salvar log, pelo menos logar no console
+        console.error('[Pagar.me PIX]', errorMessage)
+      }
+      
+      // Em desenvolvimento, também logar warning no console
       if (process.env.NODE_ENV === 'development') {
-        console.warn('[Pagar.me PIX] Diferença negativa entre total e items:', {
-          totalAmount,
-          itemsTotal,
-          difference,
-        })
+        console.warn('[Pagar.me PIX]', errorMessage)
       }
     }
   } else {
@@ -581,24 +601,57 @@ export async function createCreditCardTransaction(
     const itemsTotal = items.reduce((sum, item) => sum + (item.amount * item.quantity), 0)
     const totalAmount = params.amount
 
-    // Se houver diferença entre o total e a soma dos items, adicionar frete como item
+    // Se houver diferença entre o total e a soma dos items, adicionar frete ou juros como item
     const difference = totalAmount - itemsTotal
     if (difference > 0) {
-      // Adicionar frete como item adicional
-      items.push({
-        amount: difference,
-        description: 'Frete',
-        quantity: 1,
-        code: `shipping-${params.metadata?.order_id || 'unknown'}`,
-      })
+      // Verificar se é parcelamento com juros
+      const isInstallmentWithInterest = params.credit_card?.installments && params.credit_card.installments > 1
+      
+      if (isInstallmentWithInterest) {
+        // Adicionar juros como item separado
+        items.push({
+          amount: difference,
+          description: `Juros de Parcelamento (${params.credit_card.installments}x)`,
+          quantity: 1,
+          code: `interest-${params.metadata?.order_id || 'unknown'}`,
+        })
+      } else {
+        // Adicionar frete como item adicional (comportamento atual)
+        items.push({
+          amount: difference,
+          description: 'Frete',
+          quantity: 1,
+          code: `shipping-${params.metadata?.order_id || 'unknown'}`,
+        })
+      }
     } else if (difference < 0) {
       // Se a diferença for negativa, há um problema de cálculo
+      const errorMessage = `Diferença negativa entre total e items: total=${totalAmount}, items=${itemsTotal}, difference=${difference}`
+      
+      // Logar erro mesmo em produção
+      try {
+        await saveLog(
+          'error',
+          'Erro de cálculo: diferença negativa entre valor total e soma dos items (Cartão)',
+          {
+            order_id: params.metadata?.order_id || null,
+            total_amount: totalAmount,
+            items_total: itemsTotal,
+            difference: difference,
+            payment_method: 'credit_card',
+            installments: params.credit_card?.installments || 1,
+            environment: environment,
+          },
+          'payment'
+        )
+      } catch (logError) {
+        // Se falhar ao salvar log, pelo menos logar no console
+        console.error('[Pagar.me Credit Card]', errorMessage)
+      }
+      
+      // Em desenvolvimento, também logar warning no console
       if (process.env.NODE_ENV === 'development') {
-        console.warn('[Pagar.me Credit Card] Diferença negativa entre total e items:', {
-          totalAmount,
-          itemsTotal,
-          difference,
-        })
+        console.warn('[Pagar.me Credit Card]', errorMessage)
       }
     }
   } else {

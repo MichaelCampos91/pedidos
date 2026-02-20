@@ -438,27 +438,7 @@ O webhook atualiza:
 
 ### Problemas Críticos Encontrados
 
-#### 1. Juros de Parcelamento Não Aparecem como Item Separado
-
-**Problema**: Quando há parcelamento com juros, o valor total aumenta, mas os juros não são adicionados como item separado no Pagar.me. Isso pode causar inconsistência entre o valor calculado e o valor cobrado.
-
-**Localização**: `app/api/payment/create/route.ts` linha 291-307
-
-**Impacto**: Médio - O valor total está correto, mas não há transparência sobre o valor dos juros.
-
-**Sugestão**: Adicionar juros como item separado quando houver diferença entre `amount` e soma dos items (incluindo frete).
-
-#### 2. Validação de Diferença Negativa Apenas em Desenvolvimento
-
-**Problema**: Quando há diferença negativa entre `params.amount` e soma dos items, apenas um warning é logado em desenvolvimento. Em produção, isso passa despercebido.
-
-**Localização**: `lib/pagarme.ts` linhas 203-211 (PIX) e 592-600 (Cartão)
-
-**Impacto**: Alto - Pode indicar erro de cálculo que não é detectado em produção.
-
-**Sugestão**: Adicionar log de erro mesmo em produção e alertar o administrador.
-
-#### 3. Falta de Validação de Soma dos Items
+#### 1. Falta de Validação de Soma dos Items
 
 **Problema**: Não há validação explícita garantindo que a soma dos items (incluindo frete) seja exatamente igual ao `params.amount` antes de enviar ao Pagar.me.
 
