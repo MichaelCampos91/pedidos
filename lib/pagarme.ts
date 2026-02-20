@@ -177,15 +177,17 @@ export async function createPixTransaction(
 
   if (params.items && params.items.length > 0) {
     // Mapear items dos produtos
+    // IMPORTANTE: O Pagar.me espera amount como valor UNITÁRIO em centavos e multiplica automaticamente por quantity
     items = params.items.map(item => ({
-      amount: Math.round(parseFloat(item.price.toString()) * 100 * parseInt(item.quantity.toString())),
+      amount: Math.round(parseFloat(item.price.toString()) * 100), // Valor unitário apenas, sem multiplicar por quantity
       description: item.title,
       quantity: parseInt(item.quantity.toString()),
       code: item.product_id ? `prod-${item.product_id}` : `item-${item.id}`,
     }))
 
     // Calcular soma dos items dos produtos
-    const itemsTotal = items.reduce((sum, item) => sum + item.amount, 0)
+    // Como amount agora é unitário, precisamos multiplicar por quantity para obter o total
+    const itemsTotal = items.reduce((sum, item) => sum + (item.amount * item.quantity), 0)
     const totalAmount = params.amount
 
     // Se houver diferença entre o total e a soma dos items, adicionar frete como item
@@ -566,15 +568,17 @@ export async function createCreditCardTransaction(
 
   if (params.items && params.items.length > 0) {
     // Mapear items dos produtos
+    // IMPORTANTE: O Pagar.me espera amount como valor UNITÁRIO em centavos e multiplica automaticamente por quantity
     items = params.items.map(item => ({
-      amount: Math.round(parseFloat(item.price.toString()) * 100 * parseInt(item.quantity.toString())),
+      amount: Math.round(parseFloat(item.price.toString()) * 100), // Valor unitário apenas, sem multiplicar por quantity
       description: item.title,
       quantity: parseInt(item.quantity.toString()),
       code: item.product_id ? `prod-${item.product_id}` : `item-${item.id}`,
     }))
 
     // Calcular soma dos items dos produtos
-    const itemsTotal = items.reduce((sum, item) => sum + item.amount, 0)
+    // Como amount agora é unitário, precisamos multiplicar por quantity para obter o total
+    const itemsTotal = items.reduce((sum, item) => sum + (item.amount * item.quantity), 0)
     const totalAmount = params.amount
 
     // Se houver diferença entre o total e a soma dos items, adicionar frete como item
