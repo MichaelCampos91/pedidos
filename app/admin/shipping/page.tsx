@@ -21,7 +21,14 @@ import {
 } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { IntegrationEnvironment } from "@/lib/integrations-types"
+
+const BRAZILIAN_STATES = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA',
+  'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN',
+  'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+]
 
 interface ShippingOption {
   id: number
@@ -73,12 +80,14 @@ export default function ShippingPage() {
   const [loadingEnv, setLoadingEnv] = useState(true)
   const [formData, setFormData] = useState({
     cep_destino: '',
+    estado_uf: '',
     peso: '0.3',
     altura: '10',
     largura: '20',
     comprimento: '30',
     valor: '100',
   })
+  const [destinationStateUnresolved, setDestinationStateUnresolved] = useState(false)
   const [shippingOptions, setShippingOptions] = useState<ShippingOption[]>([])
   const [error, setError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
@@ -336,12 +345,14 @@ const MAX_LENGTH = 50 // cm
   const handleClearForm = () => {
     setFormData({
       cep_destino: '',
+      estado_uf: '',
       peso: '0.3',
       altura: '10',
       largura: '20',
       comprimento: '30',
       valor: '100',
     })
+    setDestinationStateUnresolved(false)
     setSelectedProductIds(new Set())
     setProductQuantities({})
     setProductSearch('')
@@ -355,6 +366,7 @@ const MAX_LENGTH = 50 // cm
     e.preventDefault()
     setLoading(true)
     setError(null)
+    setDestinationStateUnresolved(false)
     setShippingOptions([])
 
     try {
@@ -362,6 +374,9 @@ const MAX_LENGTH = 50 // cm
       // Caso contrário, usar dados manuais do formulário (modo legacy)
       const body: any = {
         cep_destino: formData.cep_destino,
+      }
+      if (formData.estado_uf?.trim()) {
+        body.destination_state = formData.estado_uf.trim().toUpperCase().substring(0, 2)
       }
 
       if (selectedProductIds.size > 0) {
@@ -415,6 +430,7 @@ const MAX_LENGTH = 50 // cm
 
       const data = await response.json()
       const options = data.options || []
+      setDestinationStateUnresolved(Boolean(data.destination_state_unresolved))
 
       // Logs de diagnóstico de regras de frete grátis aplicadas
       try {
@@ -712,8 +728,8 @@ const MAX_LENGTH = 50 // cm
               </div>
             </div>
 
-            {/* Segunda linha: Peso, Altura, Largura, Comprimento */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* Segunda linha: Peso, Altura, Largura, Comprimento, Estado (UF) */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="peso">Peso (kg)</Label>
                 <Input
@@ -798,6 +814,23 @@ const MAX_LENGTH = 50 // cm
                   placeholder="30"
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="estado_uf">Estado (UF)</Label>
+                <Select
+                  value={formData.estado_uf || undefined}
+                  onValueChange={(v) => setFormData({ ...formData, estado_uf: v || '' })}
+                >
+                  <SelectTrigger id="estado_uf" className="w-full">
+                    <SelectValue placeholder="Opcional" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BRAZILIAN_STATES.map((uf) => (
+                      <SelectItem key={uf} value={uf}>{uf}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">Preencha se o CEP não identificar</p>
+              </div>
             </div>
 
             {error && (
@@ -813,6 +846,12 @@ const MAX_LENGTH = 50 // cm
                     Esta mensagem veio do sistema.
                   </div>
                 )}
+              </div>
+            )}
+
+            {destinationStateUnresolved && (
+              <div className="p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 text-sm">
+                O estado do CEP não pôde ser identificado (serviço de consulta indisponível ou CEP não encontrado). As regras de frete grátis por estado podem não ter sido aplicadas. Você pode informar o <strong>Estado (UF)</strong> manualmente acima e refazer a cotação.
               </div>
             )}
 

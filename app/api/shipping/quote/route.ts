@@ -93,6 +93,28 @@ async function getCepOrigem(environment: IntegrationEnvironment): Promise<string
   return process.env[envKey] || process.env.MELHOR_ENVIO_CEP_ORIGEM || '16010000'
 }
 
+const VIACEP_TIMEOUT_MS = 8000
+
+/** Resolve UF do CEP via ViaCEP com timeout. Retorna undefined em falha ou CEP não encontrado. */
+async function fetchUfFromViaCep(cleanCep: string): Promise<string | undefined> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), VIACEP_TIMEOUT_MS)
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`, { signal: controller.signal })
+    clearTimeout(timeoutId)
+    if (!res.ok) return undefined
+    const data = await res.json()
+    if (data && !data.erro && data.uf) return String(data.uf).toUpperCase().substring(0, 2)
+    return undefined
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[Shipping Quote] ViaCEP falhou ao obter UF:', err instanceof Error ? err.message : err)
+    }
+    return undefined
+  }
+}
+
 export async function POST(request: NextRequest) {
   // Determinar environment no início para estar disponível no catch
   let environment: IntegrationEnvironment = 'production'
@@ -232,8 +254,20 @@ export async function POST(request: NextRequest) {
       }]
     }
 
-    // Verificar cache (apenas quando regras são aplicadas)
-    const cacheKey = generateCacheKey(cleanCepDestino, productsList, environment)
+    // Resolver estado (UF) antes do cache quando regras são aplicadas
+    let resolvedDestinationState: string | undefined =
+      destination_state != null && String(destination_state).trim() !== ''
+        ? String(destination_state).trim().toUpperCase().substring(0, 2)
+        : undefined
+    let destinationStateUnresolved = false
+    if (applyRules && !resolvedDestinationState && cleanCepDestino.length === 8) {
+      resolvedDestinationState = await fetchUfFromViaCep(cleanCepDestino)
+      destinationStateUnresolved = !resolvedDestinationState
+    } else if (applyRules && !resolvedDestinationState) {
+      destinationStateUnresolved = true
+    }
+
+    const cacheKey = generateCacheKey(cleanCepDestino, productsList, environment, applyRules ? resolvedDestinationState : undefined)
     const cachedOptions = applyRules ? getCachedQuote(cacheKey) : null
 
     if (cachedOptions) {
@@ -242,6 +276,8 @@ export async function POST(request: NextRequest) {
         success: true,
         options: cachedOptions,
         cached: true,
+        destination_state: resolvedDestinationState ?? null,
+        destination_state_unresolved: destinationStateUnresolved,
       })
     }
 
@@ -327,29 +363,11 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Aplicar regras de frete
+    // Aplicar regras de frete (estado já resolvido antes do cache)
     try {
       const orderValue = order_value || (produtos && produtos.length > 0
         ? produtos.reduce((sum: number, p: any) => sum + (parseFloat(p.valor || p.insurance_value || 0) * parseInt(p.quantidade || p.quantity || 1)), 0)
         : parseFloat(valor || 0))
-
-      // Resolver estado de destino a partir do CEP quando não enviado (ex.: tela de cotação admin)
-      let resolvedDestinationState: string | undefined = destination_state != null && String(destination_state).trim() !== '' ? String(destination_state).trim().toUpperCase().substring(0, 2) : undefined
-      if (applyRules && !resolvedDestinationState && cleanCepDestino.length === 8) {
-        try {
-          const viaCepRes = await fetch(`https://viacep.com.br/ws/${cleanCepDestino}/json/`)
-          if (viaCepRes.ok) {
-            const viaCepData = await viaCepRes.json()
-            if (viaCepData && !viaCepData.erro && viaCepData.uf) {
-              resolvedDestinationState = String(viaCepData.uf).toUpperCase().substring(0, 2)
-            }
-          }
-        } catch (viaCepErr) {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('[Shipping Quote] ViaCEP falhou ao obter UF para regras:', viaCepErr)
-          }
-        }
-      }
 
       if (process.env.NODE_ENV === 'development') {
         console.log('[Shipping Quote][ApplyRules]', {
@@ -470,6 +488,8 @@ export async function POST(request: NextRequest) {
         cached: false,
         productionDaysAdded: result.productionDaysAdded,
         appliedRules: result.appliedRules,
+        destination_state: resolvedDestinationState ?? null,
+        destination_state_unresolved: destinationStateUnresolved,
       })
     } catch (rulesError: any) {
       // Se houver erro ao aplicar regras, retornar opções originais
@@ -482,6 +502,8 @@ export async function POST(request: NextRequest) {
         success: true,
         options: validOptions,
         cached: false,
+        destination_state: resolvedDestinationState ?? null,
+        destination_state_unresolved: destinationStateUnresolved,
       })
     }
   } catch (error: any) {

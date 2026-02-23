@@ -14,18 +14,20 @@ const cache = new Map<string, CacheEntry>()
 const DEFAULT_TTL = 5 * 60 * 1000
 
 /**
- * Gera chave de cache baseada em CEP destino, produtos e ambiente
+ * Gera chave de cache baseada em CEP destino, produtos, ambiente e estado (UF).
+ * O estado evita reutilizar cache quando a UF não foi obtida (ex.: falha ViaCEP).
  */
 export function generateCacheKey(
   cepDestino: string,
   products: Array<{ id: string; width: number; height: number; length: number; weight: number; insurance_value: number; quantity: number }>,
-  environment: IntegrationEnvironment
+  environment: IntegrationEnvironment,
+  destinationState?: string | null
 ): string {
   const productsHash = products
     .map(p => `${p.id}:${p.width}x${p.height}x${p.length}:${p.weight}:${p.insurance_value}:${p.quantity}`)
     .join('|')
-  
-  return `shipping:${environment}:${cepDestino}:${Buffer.from(productsHash).toString('base64').substring(0, 32)}`
+  const stateSuffix = destinationState != null && destinationState !== '' ? `:${String(destinationState).toUpperCase().substring(0, 2)}` : ''
+  return `shipping:${environment}:${cepDestino}:${Buffer.from(productsHash).toString('base64').substring(0, 32)}${stateSuffix}`
 }
 
 /**
