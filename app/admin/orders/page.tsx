@@ -443,8 +443,8 @@ export default function OrdersPage() {
                 <TableRow>
                   <TableHead>ID</TableHead>
                   <TableHead>Cliente</TableHead>
-                  <TableHead>Status Envio</TableHead>
-                  <TableHead>Status Pagamento</TableHead>
+                  <TableHead>Envio</TableHead>
+                  <TableHead>Pagamento</TableHead>
                   <TableHead>Total</TableHead>
                   <TableHead>Tags</TableHead>
                   <TableHead>Bling</TableHead>
@@ -489,7 +489,7 @@ export default function OrdersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="space-y-1">
+                      <div className="flex flex-col items-start gap-1">
                         {(() => {
                           const config =
                             ORDER_STATUS_CONFIG[order.status] || {
@@ -510,6 +510,20 @@ export default function OrdersPage() {
                             </Badge>
                           )
                         })()}
+                        {order.shipping_method && (
+                          <Badge
+                            variant="outline"
+                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-amber-50 text-amber-800 border-amber-200"
+                          >
+                            <Truck className="h-3 w-3" />
+                            <span>
+                              {order.shipping_method}
+                              {order.shipping_company_name
+                                ? ` - ${order.shipping_company_name}`
+                                : ""}
+                            </span>
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -556,25 +570,11 @@ export default function OrdersPage() {
                     <TableCell>
                       <div className="space-y-1">
                         <div className="font-medium">
-                          Total: <span className="font-bold">{formatCurrency(parseFloat(order.total))}</span>
+                          <span className="font-bold">{formatCurrency(parseFloat(order.total))}</span>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           Frete: <span className="font-bold">{formatCurrency(parseFloat(order.total_shipping || 0))}</span>
                         </div>
-                        {order.shipping_method && (
-                          <Badge
-                            variant="outline"
-                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0 rounded-full bg-amber-50 text-amber-800 border-amber-200"
-                          >
-                            <Truck className="h-3 w-3" />
-                            <span>
-                              {order.shipping_method}
-                              {order.shipping_company_name
-                                ? ` - ${order.shipping_company_name}`
-                                : ""}
-                            </span>
-                          </Badge>
-                        )}
                       </div>
                     </TableCell>
                     <TableCell>
