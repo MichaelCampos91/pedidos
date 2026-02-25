@@ -397,7 +397,15 @@ export async function POST(request: NextRequest) {
         payment_method,
         credit_card?.installments || 1,
         finalAmount,
-        transaction.status === 'paid' ? 'paid' : 'pending',
+        // Mapear status inicial de forma mais precisa:
+        // - 'paid' quando aprovado imediatamente
+        // - 'failed' quando o gateway já retornou falha
+        // - 'pending' para qualquer outro caso (aguarda webhook/polling)
+        transaction.status === 'paid'
+          ? 'paid'
+          : transaction.status === 'failed' || transaction.status === 'refused'
+          ? 'failed'
+          : 'pending',
       ]
     )
     const paymentId = paymentInsertResult.rows[0].id
@@ -482,6 +490,18 @@ export async function POST(request: NextRequest) {
           installments: credit_card?.installments || 1,
           card: cardData,
           billing_address: billingAddressLog,
+          backend_totals: {
+            items_total: itemsTotal.toFixed(2),
+            shipping_total: totalShipping.toFixed(2),
+            backend_total: backendTotal.toFixed(2),
+            charge_base_value: chargeBaseValue.toFixed(2),
+          },
+          pix_discount: payment_method === 'pix'
+            ? {
+                applied_cents: pixDiscountApplied,
+                applied_reais: (pixDiscountApplied / 100).toFixed(2),
+              }
+            : null,
         },
         timestamps: {
           created_at: paymentCreatedAt ? new Date(paymentCreatedAt).toISOString() : new Date().toISOString(),

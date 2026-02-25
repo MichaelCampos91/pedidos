@@ -127,9 +127,12 @@ export default function CheckoutPage() {
   }
 
   const handlePaymentSuccess = (transaction: any) => {
-    setPaymentStatus(transaction.status === 'paid' ? 'paid' : transaction.status === 'failed' ? 'failed' : 'pending')
-    markCheckoutCompleted(orderId)
-    setCurrentStep(3)
+    // Somente considerar checkout concluído quando o pagamento estiver efetivamente aprovado
+    if (transaction?.status === 'paid') {
+      setPaymentStatus('paid')
+      markCheckoutCompleted(orderId)
+      setCurrentStep(3)
+    }
   }
 
   const handleRequestChange = () => {
@@ -447,15 +450,20 @@ export default function CheckoutPage() {
                     document: order.client_cpf,
                     phone: order.client_whatsapp,
                   }}
-                  shippingAddress={selectedAddress ? {
-                    street: selectedAddress.street,
-                    number: selectedAddress.number,
-                    complement: selectedAddress.complement,
-                    neighborhood: selectedAddress.neighborhood,
-                    city: selectedAddress.city,
-                    state: selectedAddress.state,
-                    zip_code: selectedAddress.cep,
-                  } : undefined}
+                  shippingAddress={
+                    selectedAddress
+                      ? {
+                          street: selectedAddress.street,
+                          number: selectedAddress.number,
+                          complement: selectedAddress.complement,
+                          neighborhood: selectedAddress.neighborhood,
+                          city: selectedAddress.city,
+                          state: selectedAddress.state,
+                          zip_code: selectedAddress.cep,
+                        }
+                      : undefined
+                  }
+                  checkoutToken={searchParams.get('token') || undefined}
                   onSuccess={handlePaymentSuccess}
                 />
               </CardContent>

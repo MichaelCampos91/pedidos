@@ -47,10 +47,21 @@ interface PaymentFormProps {
     state: string
     zip_code: string
   }
+  /** Identificador opcional do link de checkout (por exemplo, token da URL) para isolar estado de PIX por link */
+  checkoutToken?: string
   onSuccess: (transaction: any) => void
 }
 
-export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, customer, shippingAddress, onSuccess }: PaymentFormProps) {
+export function PaymentForm({
+  orderId,
+  total,
+  totalItems,
+  totalShipping = 0,
+  customer,
+  shippingAddress,
+  checkoutToken,
+  onSuccess,
+}: PaymentFormProps) {
   const [paymentMethod, setPaymentMethod] = useState<'pix' | 'credit_card' | null>(null)
   const [loading, setLoading] = useState(false)
   const [pixData, setPixData] = useState<any>(null)
@@ -231,37 +242,50 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
   // Detectar ambiente: localhost = sandbox, produção = production
   const [activeEnvironment, setActiveEnvironment] = useState<'sandbox' | 'production'>('production')
 
-  // Carregar desconto PIX e taxas de parcelamento
+  // Carregar desconto PIX (via preview alinhado ao backend) e taxas de parcelamento
   useEffect(() => {
     const loadPaymentSettings = async () => {
       try {
-        // Buscar desconto PIX
-        const pixResponse = await fetch('/api/settings/payment', {
-          credentials: 'include',
-        })
-        if (pixResponse.ok) {
-          const pixData = await pixResponse.json()
-          const pixSetting = pixData.paymentSettings?.find(
-            (s: any) => s.payment_method === 'pix' && s.setting_type === 'discount' && s.active
-          )
-          
-          if (pixSetting && pixSetting.discount_value) {
-            const discountValue = parseFloat(pixSetting.discount_value)
-            let discount = 0
-            if (pixSetting.discount_type === 'percentage') {
-              discount = (totalItems * discountValue) / 100
-            } else {
-              discount = discountValue
+        // Buscar preview de pagamento alinhado ao backend (desconto PIX e totais)
+        try {
+          const previewResponse = await fetch(`/api/payment/preview?order_id=${orderId}`)
+          if (previewResponse.ok) {
+            const previewData = await previewResponse.json()
+            if (previewData.success && previewData.pix) {
+              const discount =
+                typeof previewData.pix.discount === 'number'
+                  ? previewData.pix.discount
+                  : parseFloat(previewData.pix.discount || '0') || 0
+              const finalPixTotal =
+                typeof previewData.pix.final_total === 'number'
+                  ? previewData.pix.final_total
+                  : parseFloat(previewData.pix.final_total || '0') || 0
+
+              if (discount > 0 && finalPixTotal > 0) {
+                setPixDiscount({
+                  discount,
+                  finalValue: finalPixTotal,
+                })
+              } else {
+                setPixDiscount(null)
+              }
             }
-            setPixDiscount({
-              discount,
-              finalValue: Math.max(0, totalItems - discount) + totalShipping,
-            })
+          }
+        } catch (previewError) {
+          // Falha na pré-visualização não bloqueia o fluxo; apenas não mostraremos desconto PIX calculado pelo backend
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('[PaymentForm] Erro ao carregar preview de pagamento:', previewError)
           }
         }
 
         // Buscar taxas de parcelamento (endpoint público para checkout sem login)
-        let calculatedRates: Array<{ installments: number; rate: number; totalWithInterest: number; installmentValue: number; hasInterest: boolean }> = []
+        let calculatedRates: Array<{
+          installments: number
+          rate: number
+          totalWithInterest: number
+          installmentValue: number
+          hasInterest: boolean
+        }> = []
         try {
           const ratesResponse = await fetch(`/api/checkout/installment-rates?environment=${activeEnvironment}`, {
             credentials: 'include',
@@ -320,7 +344,7 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
     }
 
     loadPaymentSettings()
-  }, [total, totalItems, totalShipping, activeEnvironment])
+  }, [orderId, total, activeEnvironment])
 
   // Buscar ambiente ativo ao montar componente
   useEffect(() => {
@@ -411,6 +435,25 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
       
       if (data.success && data.status) {
         if (data.status === 'paid') {
+          // Confirmar pagamento no backend (atualizar pedido, logs e Bling) antes de refletir na UI
+          try {
+            const confirmResponse = await fetch('/api/payment/confirm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                transaction_id: pixTransactionId,
+              }),
+            })
+            if (!confirmResponse.ok && process.env.NODE_ENV === 'development') {
+              const confirmError = await confirmResponse.json().catch(() => ({}))
+              console.error('[PaymentForm] Erro ao confirmar pagamento PIX no backend:', confirmError)
+            }
+          } catch (confirmError) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[PaymentForm] Falha ao chamar /api/payment/confirm (continua com UI):', confirmError)
+            }
+          }
+
           setPaymentStatus('paid')
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current)
@@ -422,7 +465,8 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
           }
           // Limpar localStorage
           if (typeof window !== 'undefined') {
-            localStorage.removeItem(`pix_countdown_${orderId}_${pixTransactionId}`)
+            const tokenPart = checkoutToken ? `${checkoutToken}_` : ''
+            localStorage.removeItem(`pix_countdown_${orderId}_${tokenPart}${pixTransactionId}`)
           }
           onSuccess(data.transaction)
         } else if (data.status === 'failed') {
@@ -441,7 +485,7 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
     } finally {
       setIsChecking(false)
     }
-  }, [pixTransactionId, orderId, onSuccess])
+  }, [pixTransactionId, orderId, checkoutToken, activeEnvironment, onSuccess])
 
   // Obter public key quando o método de pagamento for cartão (opcional - pode ser buscada no momento do pagamento)
   useEffect(() => {
@@ -471,9 +515,11 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
   useEffect(() => {
     if (typeof window === 'undefined' || pixData) return
 
-    // Tentar encontrar qualquer QR code salvo para este pedido
+    // Tentar encontrar qualquer QR code salvo para este pedido e (opcionalmente) para este link/token
     const keys = Object.keys(localStorage)
-    const pixKey = keys.find(key => key.startsWith(`pix_countdown_${orderId}_`))
+    const tokenPart = checkoutToken ? `${checkoutToken}_` : ''
+    const prefix = `pix_countdown_${orderId}_${tokenPart}`
+    const pixKey = keys.find(key => key.startsWith(prefix))
     
     if (pixKey) {
       try {
@@ -494,7 +540,7 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
             setCountdown(remaining)
             setPaymentStatus('pending')
           } else {
-            // Expirou, limpar
+            // Expirou ou dados inválidos, limpar
             localStorage.removeItem(pixKey)
             setPaymentStatus('expired')
           }
@@ -504,13 +550,14 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
         localStorage.removeItem(pixKey)
       }
     }
-  }, [orderId, pixData])
+  }, [orderId, checkoutToken, pixData])
 
   // Recuperar cronômetro quando pixTransactionId muda
   useEffect(() => {
     if (!pixTransactionId || typeof window === 'undefined') return
 
-    const storageKey = `pix_countdown_${orderId}_${pixTransactionId}`
+    const tokenPart = checkoutToken ? `${checkoutToken}_` : ''
+    const storageKey = `pix_countdown_${orderId}_${tokenPart}${pixTransactionId}`
     const saved = localStorage.getItem(storageKey)
     
     if (saved) {
@@ -534,7 +581,7 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
       // Se não há dados salvos mas temos transactionId, resetar countdown
       setCountdown(600)
     }
-  }, [pixTransactionId, orderId])
+  }, [pixTransactionId, orderId, checkoutToken])
 
   // Cronômetro regressivo
   useEffect(() => {
@@ -546,7 +593,8 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
       setCountdown((prev) => {
         if (prev <= 1) {
           setPaymentStatus('expired')
-          const storageKey = `pix_countdown_${orderId}_${pixTransactionId}`
+          const tokenPart = checkoutToken ? `${checkoutToken}_` : ''
+          const storageKey = `pix_countdown_${orderId}_${tokenPart}${pixTransactionId}`
           localStorage.removeItem(storageKey)
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current)
@@ -600,9 +648,6 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
         document: customer.document,
         phone: customer.phone,
       }
-      
-      const finalAmount = pixDiscount && pixDiscount.discount > 0 ? pixDiscount.finalValue : total
-
       const response = await fetch('/api/payment/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -668,15 +713,19 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
 
       // Salvar timestamp e dados no localStorage para persistência
       if (typeof window !== 'undefined') {
-        const storageKey = `pix_countdown_${orderId}_${transactionId}`
-        const expiresAt = Date.now() + (10 * 60 * 1000) // 10 minutos
-        localStorage.setItem(storageKey, JSON.stringify({
-          timestamp: Date.now(),
-          expiresAt,
-          transactionId,
-          pix_qr_code: data.transaction.pix_qr_code,
-          pix_expiration_date: data.transaction.pix_expiration_date,
-        }))
+        const tokenPart = checkoutToken ? `${checkoutToken}_` : ''
+        const storageKey = `pix_countdown_${orderId}_${tokenPart}${transactionId}`
+        const expiresAt = Date.now() + 10 * 60 * 1000 // 10 minutos
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            timestamp: Date.now(),
+            expiresAt,
+            transactionId,
+            pix_qr_code: data.transaction.pix_qr_code,
+            pix_expiration_date: data.transaction.pix_expiration_date,
+          })
+        )
       }
 
       // Não chamar onSuccess imediatamente - aguardar confirmação via polling
@@ -847,7 +896,19 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
       }
 
       const data = await response.json()
-      onSuccess(data.transaction)
+
+      // Só considerar sucesso completo quando o Pagar.me retornar status pago
+      if (data.transaction?.status === 'paid') {
+        onSuccess(data.transaction)
+      } else {
+        // Pagamentos recusados ou pendentes não devem marcar o checkout como concluído
+        const status = data.transaction?.status || 'desconhecido'
+        if (status === 'failed' || status === 'refused') {
+          toast.error('Pagamento recusado pelo cartão. Verifique os dados ou tente outro cartão.')
+        } else {
+          toast.error('Não foi possível confirmar a aprovação do pagamento. Tente novamente ou utilize outra forma de pagamento.')
+        }
+      }
     } catch (error: any) {
       if (process.env.NODE_ENV === 'development') {
         console.error('[PaymentForm Credit Card] Erro:', error.message)
@@ -980,13 +1041,41 @@ export function PaymentForm({ orderId, total, totalItems, totalShipping = 0, cus
                 <p className="text-muted-foreground mb-4">
                   Não foi possível processar seu pagamento. Por favor, tente novamente ou entre em contato conosco.
                 </p>
-                <Button
-                  onClick={() => openWhatsApp("Olá, preciso de ajuda com o pagamento do pedido.")}
-                  variant="default"
-                >
-                  <MessageCircle className="h-4 w-4 mr-2" />
-                  Fale Conosco
-                </Button>
+                <div className="flex flex-col sm:flex-row justify-center gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      // Resetar estado para permitir nova tentativa
+                      if (pollingIntervalRef.current) {
+                        clearInterval(pollingIntervalRef.current)
+                        pollingIntervalRef.current = null
+                      }
+                      if (countdownIntervalRef.current) {
+                        clearInterval(countdownIntervalRef.current)
+                        countdownIntervalRef.current = null
+                      }
+                      if (typeof window !== 'undefined' && pixTransactionId) {
+                        const tokenPart = checkoutToken ? `${checkoutToken}_` : ''
+                        const storageKey = `pix_countdown_${orderId}_${tokenPart}${pixTransactionId}`
+                        localStorage.removeItem(storageKey)
+                      }
+                      setPixData(null)
+                      setPixTransactionId(null)
+                      setPaymentStatus('pending')
+                      setCountdown(600)
+                      setPaymentMethod(null)
+                    }}
+                  >
+                    Tentar novamente
+                  </Button>
+                  <Button
+                    onClick={() => openWhatsApp("Olá, preciso de ajuda com o pagamento do pedido.")}
+                    variant="default"
+                  >
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    Fale Conosco
+                  </Button>
+                </div>
               </>
             )}
 

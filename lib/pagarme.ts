@@ -191,16 +191,27 @@ export async function createPixTransaction(
     const itemsTotal = items.reduce((sum, item) => sum + (item.amount * item.quantity), 0)
     const totalAmount = params.amount
 
-    // Se houver diferença entre o total e a soma dos items, adicionar frete como item
+    // Se houver diferença entre o total e a soma dos items, adicionar frete/desconto como item
     const difference = totalAmount - itemsTotal
     if (difference > 0) {
-      // Adicionar frete como item adicional
+      // Adicionar diferença positiva como item adicional (normalmente frete menos desconto PIX já aplicado no amount total)
       items.push({
         amount: difference,
-        description: 'Frete',
+        description: 'Frete / ajustes de valor',
         quantity: 1,
-        code: `shipping-${params.metadata?.order_id || 'unknown'}`,
+        code: `adjustment-${params.metadata?.order_id || 'unknown'}`,
       })
+
+      // Logar em desenvolvimento para facilitar auditoria de arredondamentos/descontos
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Pagar.me PIX] Diferença positiva entre total e items (frete/desconto):', {
+          order_id: params.metadata?.order_id || null,
+          total_amount: totalAmount,
+          items_total: itemsTotal,
+          difference,
+          environment,
+        })
+      }
     } else if (difference < 0) {
       // Se a diferença for negativa, há um problema de cálculo
       const errorMessage = `Diferença negativa entre total e items: total=${totalAmount}, items=${itemsTotal}, difference=${difference}`
