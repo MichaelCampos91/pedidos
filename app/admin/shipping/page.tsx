@@ -1125,7 +1125,7 @@ const MAX_LENGTH = 50 // cm
                             </span>
                           )}
                         </p>
-                        <p className="text-sm font-medium text-primary">
+                        <p className="text-sm font-medium text-primary hidden">
                           Entrega estimada: {deliveryDateFormatted}
                         </p>
                       </div>
