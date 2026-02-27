@@ -54,9 +54,10 @@ export async function POST(request: NextRequest) {
     for (const svc of services) {
       const { id, name, company_id, company_name } = normalizeService(svc)
       await query(
-        `INSERT INTO shipping_modalities (id, environment, name, company_id, company_name, active, updated_at)
-         VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
+        `INSERT INTO shipping_modalities (id, environment, provider, name, company_id, company_name, active, updated_at)
+         VALUES ($1, $2, 'melhor_envio', $3, $4, $5, true, CURRENT_TIMESTAMP)
          ON CONFLICT (id, environment) DO UPDATE SET
+           provider = EXCLUDED.provider,
            name = EXCLUDED.name,
            company_id = EXCLUDED.company_id,
            company_name = EXCLUDED.company_name,
@@ -65,8 +66,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Garantir a existência das modalidades fixas do Contrato Correios (PAC e SEDEX)
+    const correiosModalities = [
+      { id: 9001, name: 'PAC', company_id: null, company_name: 'Correios' },
+      { id: 9002, name: 'SEDEX', company_id: null, company_name: 'Correios' },
+    ]
+
+    for (const svc of correiosModalities) {
+      await query(
+        `INSERT INTO shipping_modalities (id, environment, provider, name, company_id, company_name, active, updated_at)
+         VALUES ($1, $2, 'correios_contrato', $3, $4, $5, true, CURRENT_TIMESTAMP)
+         ON CONFLICT (id, environment) DO UPDATE SET
+           provider = EXCLUDED.provider,
+           name = EXCLUDED.name,
+           company_id = EXCLUDED.company_id,
+           company_name = EXCLUDED.company_name,
+           updated_at = CURRENT_TIMESTAMP`,
+        [svc.id, environment, svc.name, svc.company_id, svc.company_name]
+      )
+    }
+
     const result = await query(
-      `SELECT id, environment, name, company_id, company_name, active, created_at, updated_at
+      `SELECT id, environment, provider, name, company_id, company_name, active, created_at, updated_at
        FROM shipping_modalities WHERE environment = $1 ORDER BY company_name ASC NULLS LAST, name ASC`,
       [environment]
     )

@@ -24,6 +24,21 @@ export interface ShippingOption {
   }
   packages: number
   originalPrice?: number  // Preço original antes do frete grátis
+  /** Origem da opção de frete (ex.: 'correios_contrato') */
+  source?: string
+}
+
+function getCompanyLabel(option: ShippingOption, showSource: boolean): string {
+  if (!showSource) return option.company?.name ?? ''
+  if (option.company?.name === 'Correios' && option.source === 'correios_contrato') return 'Correios (Contrato)'
+  if (option.company?.name === 'Correios') return 'Correios (Melhor Envio)'
+  return option.company?.name ?? ''
+}
+
+function getSourceSuffix(option: ShippingOption): string | null {
+  if (option.company?.name !== 'Correios') return null
+  if (option.source === 'correios_contrato') return 'Contrato'
+  return 'Melhor Envio'
 }
 
 interface ShippingSelectorProps {
@@ -48,6 +63,8 @@ interface ShippingSelectorProps {
   className?: string
   orderValue?: number
   destinationState?: string
+  /** Exibe badge de origem (ex.: Contrato) para opções do contrato Correios; usar apenas no admin */
+  showSourceBadge?: boolean
 }
 
 export function ShippingSelector({
@@ -64,6 +81,7 @@ export function ShippingSelector({
   className = '',
   orderValue,
   destinationState,
+  showSourceBadge = false,
 }: ShippingSelectorProps) {
   const [loading, setLoading] = useState(false)
   const [options, setOptions] = useState<ShippingOption[]>([])
@@ -223,18 +241,27 @@ export function ShippingSelector({
         return (
           <div
             key={option.id}
-            className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+          className={`relative overflow-visible p-4 border rounded-lg cursor-pointer transition-colors ${
               isSelected
                 ? "border-primary bg-primary/5"
                 : "hover:border-primary/50"
             }`}
             onClick={() => onSelect(option)}
           >
+          {showSourceBadge && getSourceSuffix(option) && (
+            <span className="absolute -top-2 left-5 text-[10px] rounded bg-gray-100 text-gray-700 border-0 px-1.5 py-0.5 dark:bg-gray-800 dark:text-gray-300">
+              {getSourceSuffix(option)}
+            </span>
+          )}
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <Truck className="h-5 w-5 text-primary" />
-                  <h3 className="font-semibold">{option.company.name}</h3>
+                <h3 className="font-semibold">
+                  {showSourceBadge && getSourceSuffix(option)
+                    ? option.company.name
+                    : getCompanyLabel(option, showSourceBadge)}
+                </h3>
                   <Badge variant="outline" className="text-xs">
                     {option.name}
                   </Badge>

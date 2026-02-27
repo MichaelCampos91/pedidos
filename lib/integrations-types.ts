@@ -1,7 +1,7 @@
 // Tipos para integrações que podem ser usados no cliente
 // (sem importar código do servidor)
 
-export type IntegrationProvider = 'melhor_envio' | 'pagarme' | 'bling'
+export type IntegrationProvider = 'melhor_envio' | 'pagarme' | 'bling' | 'correios_contrato'
 export type IntegrationEnvironment = 'sandbox' | 'production'
 export type TokenType = 'bearer' | 'basic' | 'api_key'
 export type ValidationStatus = 'valid' | 'invalid' | 'error' | 'pending'

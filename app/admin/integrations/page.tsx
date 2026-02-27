@@ -10,11 +10,12 @@ import type { IntegrationProvider, IntegrationEnvironment, IntegrationToken } fr
 
 const PROVIDERS: { value: IntegrationProvider; label: string; icon?: React.ReactNode }[] = [
   { value: 'melhor_envio', label: 'Melhor Envio', icon: <Truck className="h-5 w-5" /> },
+  { value: 'correios_contrato', label: 'Contrato Correios', icon: <Truck className="h-5 w-5" /> },
   { value: 'pagarme', label: 'Pagar.me', icon: <CreditCard className="h-5 w-5" /> },
   { value: 'bling', label: 'Bling', icon: <Package className="h-5 w-5" /> },
 ]
 
-type IntegrationTab = 'pagarme' | 'melhor_envio' | 'bling'
+type IntegrationTab = 'pagarme' | 'melhor_envio' | 'correios_contrato' | 'bling'
 
 export default function IntegrationsPage() {
   const [activeTab, setActiveTab] = useState<IntegrationTab>('pagarme')
@@ -222,6 +223,10 @@ export default function IntegrationsPage() {
             <Truck className="h-4 w-4" />
             Melhor Envio
           </TabsTrigger>
+          <TabsTrigger value="correios_contrato" className="flex items-center gap-2">
+            <Truck className="h-4 w-4" />
+            Contrato Correios
+          </TabsTrigger>
           <TabsTrigger value="bling" className="flex items-center gap-2">
             <Package className="h-4 w-4" />
             Bling
@@ -252,6 +257,24 @@ export default function IntegrationsPage() {
             providerLabel="Melhor Envio"
             sandboxToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'sandbox')}
             productionToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'production')}
+            onEdit={handleEditToken}
+            onDelete={handleDeleteToken}
+            onValidate={handleValidateToken}
+            onAdd={handleAddToken}
+            onSave={handleSaveToken}
+            onTokensUpdated={handleTokensUpdated}
+            isValidating={validating}
+            isSaving={saving}
+            icon={<Truck className="h-5 w-5" />}
+          />
+        </TabsContent>
+
+        <TabsContent value="correios_contrato" className="space-y-4 mt-6">
+          <IntegrationCard
+            provider="correios_contrato"
+            providerLabel="Contrato Correios"
+            sandboxToken={getTokensForProvider('correios_contrato').find(t => t.environment === 'sandbox')}
+            productionToken={getTokensForProvider('correios_contrato').find(t => t.environment === 'production')}
             onEdit={handleEditToken}
             onDelete={handleDeleteToken}
             onValidate={handleValidateToken}

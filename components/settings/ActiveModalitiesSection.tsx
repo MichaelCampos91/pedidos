@@ -12,12 +12,23 @@ import type { IntegrationEnvironment } from "@/lib/integrations-types"
 interface Modality {
   id: number
   environment: string
+  provider?: 'melhor_envio' | 'correios_contrato' | string | null
   name: string | null
   company_id: number | null
   company_name: string | null
   active: boolean
   created_at?: string
   updated_at?: string
+}
+
+function getCompanyDisplayName(
+  companyName: string | null,
+  _name: string | null,
+  provider?: string | null
+): string {
+  if (companyName === 'Correios' && provider === 'correios_contrato') return 'Correios (Contrato)'
+  if (companyName === 'Correios' && (provider === 'melhor_envio' || !provider)) return 'Correios (Melhor Envio)'
+  return companyName || 'Transportadora'
 }
 
 export function ActiveModalitiesSection() {
@@ -159,7 +170,7 @@ export function ActiveModalitiesSection() {
       <CardContent className="space-y-3">
         {modalities.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4">
-            Nenhuma modalidade carregada. Clique em &quot;Sincronizar&quot; para buscar as modalidades do Melhor Envio.
+            Nenhuma modalidade carregada. Clique em &quot;Sincronizar&quot; para buscar modalidades de frete.
           </p>
         ) : (
           <div className="space-y-2 max-h-[300px] overflow-y-auto">
@@ -171,7 +182,7 @@ export function ActiveModalitiesSection() {
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <Truck className="h-5 w-5 text-primary shrink-0" />
                   <h3 className="font-semibold truncate">
-                    {mod.company_name || 'Transportadora'}
+                    {getCompanyDisplayName(mod.company_name, mod.name, mod.provider)}
                   </h3>
                   <Badge variant="outline" className="text-xs shrink-0">
                     {mod.name || `#${mod.id}`}

@@ -5,6 +5,7 @@ import { getToken, updateTokenValidation, type IntegrationProvider, type Integra
 import { validateToken as validateMelhorEnvio } from '@/lib/melhor-envio'
 import { validateToken as validatePagarme } from '@/lib/pagarme'
 import { validateToken as validateBling } from '@/lib/bling'
+import { validateToken as validateCorreiosContrato } from '@/lib/correios-contrato'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -51,15 +52,19 @@ export async function POST(
       case 'melhor_envio':
         validationResult = await validateMelhorEnvio(env)
         break
-      
+
       case 'pagarme':
         validationResult = await validatePagarme(token.token_value, env)
         break
-      
+
       case 'bling':
         validationResult = await validateBling(token.token_value)
         break
-      
+
+      case 'correios_contrato':
+        validationResult = await validateCorreiosContrato(env)
+        break
+
       default:
         return NextResponse.json(
           { error: '[Sistema] Provider não suportado' },

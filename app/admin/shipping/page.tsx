@@ -45,6 +45,21 @@ interface ShippingOption {
     max: number
   }
   packages: number
+  /** Origem da opção (ex.: 'correios_contrato'); ausente = Melhor Envio */
+  source?: string
+}
+
+function getCompanyLabel(option: { company?: { name?: string }; source?: string }): string {
+  if (option.company?.name === 'Correios' && option.source === 'correios_contrato') return 'Correios (Contrato)'
+  if (option.company?.name === 'Correios') return 'Correios (Melhor Envio)'
+  return option.company?.name ?? ''
+}
+
+/** Retorna o sufixo de origem para exibir em badge acima do título (apenas Correios). */
+function getSourceSuffix(option: { company?: { name?: string }; source?: string }): string | null {
+  if (option.company?.name !== 'Correios') return null
+  if (option.source === 'correios_contrato') return 'Contrato'
+  return 'Melhor Envio'
 }
 
 interface Product {
@@ -490,7 +505,7 @@ const MAX_LENGTH = 50 // cm
     // Converter ShippingOption para ShippingOptionForShare
     const optionsForShare = shippingOptions.map(option => ({
       name: option.name,
-      company: { name: option.company.name },
+      company: { name: getCompanyLabel(option) },
       price: formatShippingPrice(option.price), // Formatar preço
       delivery_time: option.delivery_time,
       delivery_range: option.delivery_range,
@@ -1073,28 +1088,35 @@ const MAX_LENGTH = 50 // cm
 
           <div className="space-y-4 py-4">
             {(() => {
-              // Calcular opções mais rápida e mais barata
+              // Calcular opções mais rápida e mais barata (apenas uma de cada)
               const cheapestPrice = Math.min(...shippingOptions.map(o => parseFloat(o.price)))
               const fastestTime = Math.min(...shippingOptions.map(o => o.delivery_range?.min ?? o.delivery_time))
-              
-              return shippingOptions.map((option) => {
+              const indexOfCheapest = shippingOptions.findIndex(o => parseFloat(o.price) === cheapestPrice)
+              const indexOfFastest = shippingOptions.findIndex(o => (o.delivery_range?.min ?? o.delivery_time) === fastestTime)
+
+              return shippingOptions.map((option, index) => {
                 const deliveryDate = calculateDeliveryDate(option.delivery_time)
                 const deliveryDateFormatted = formatDeliveryDate(deliveryDate)
                 const optionPrice = parseFloat(option.price)
                 const optionTime = option.delivery_range?.min ?? option.delivery_time
-                const isCheapest = optionPrice === cheapestPrice
-                const isFastest = optionTime === fastestTime
+                const isCheapest = index === indexOfCheapest
+                const isFastest = index === indexOfFastest
                 
                 return (
                   <div
                     key={option.id}
-                    className="p-4 border rounded-lg hover:border-primary transition-colors"
+                    className="relative overflow-visible p-4 border rounded-lg hover:border-primary transition-colors"
                   >
+                    {getSourceSuffix(option) && (
+                      <span className="absolute -top-2 left-5 text-[10px] rounded bg-gray-100 text-gray-700 border-0 px-1.5 py-0.5 dark:bg-gray-800 dark:text-gray-300">
+                        {getSourceSuffix(option)}
+                      </span>
+                    )}
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2 flex-wrap">
                           <Truck className="h-5 w-5 text-primary" />
-                          <h3 className="font-semibold">{option.company.name}</h3>
+                          <h3 className="font-semibold">{getSourceSuffix(option) ? (option.company?.name ?? '') : getCompanyLabel(option)}</h3>
                           <Badge variant="outline" className="text-xs">
                             {option.name}
                           </Badge>
@@ -1229,27 +1251,34 @@ const MAX_LENGTH = 50 // cm
 
               const cheapestPrice = Math.min(...options.map((o: any) => parseFloat(o.price)))
               const fastestTime = Math.min(...options.map((o: any) => o.delivery_range?.min ?? o.delivery_time))
+              const indexOfCheapest = options.findIndex((o: any) => parseFloat(o.price) === cheapestPrice)
+              const indexOfFastest = options.findIndex((o: any) => (o.delivery_range?.min ?? o.delivery_time) === fastestTime)
 
               return (
                 <div className="space-y-4">
-                  {options.map((option: any) => {
+                  {options.map((option: any, index: number) => {
                     const deliveryDate = calculateDeliveryDate(option.delivery_time)
                     const deliveryDateFormatted = formatDeliveryDate(deliveryDate)
                     const optionPrice = parseFloat(option.price)
                     const optionTime = option.delivery_range?.min ?? option.delivery_time
-                    const isCheapest = optionPrice === cheapestPrice
-                    const isFastest = optionTime === fastestTime
+                    const isCheapest = index === indexOfCheapest
+                    const isFastest = index === indexOfFastest
 
                     return (
                       <div
                         key={option.id}
-                        className="p-4 border rounded-lg hover:border-primary transition-colors"
+                        className="relative overflow-visible p-4 border rounded-lg hover:border-primary transition-colors"
                       >
+                        {getSourceSuffix(option) && (
+                          <span className="absolute -top-2 left-5 text-[10px] rounded bg-gray-100 text-gray-700 border-0 px-1.5 py-0.5 dark:bg-gray-800 dark:text-gray-300">
+                            {getSourceSuffix(option)}
+                          </span>
+                        )}
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                               <Truck className="h-5 w-5 text-primary" />
-                              <h3 className="font-semibold">{option.company?.name}</h3>
+                              <h3 className="font-semibold">{getSourceSuffix(option) ? (option.company?.name ?? '') : getCompanyLabel(option)}</h3>
                               <Badge variant="outline" className="text-xs">
                                 {option.name}
                               </Badge>

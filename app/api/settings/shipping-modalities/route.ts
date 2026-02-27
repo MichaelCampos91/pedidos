@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     const environment = await resolveEnvironment(request)
 
     const result = await query(
-      `SELECT id, environment, name, company_id, company_name, active, created_at, updated_at
+      `SELECT id, environment, provider, name, company_id, company_name, active, created_at, updated_at
        FROM shipping_modalities
        WHERE environment = $1
        ORDER BY company_name ASC NULLS LAST, name ASC`,
@@ -79,7 +79,7 @@ export async function PATCH(request: NextRequest) {
     )
 
     const result = await query(
-      `SELECT id, environment, name, company_id, company_name, active, created_at, updated_at
+      `SELECT id, environment, provider, name, company_id, company_name, active, created_at, updated_at
        FROM shipping_modalities WHERE id = $1 AND environment = $2`,
       [id, environment]
     )

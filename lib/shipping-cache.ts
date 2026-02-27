@@ -1,4 +1,4 @@
-import type { ShippingOption } from './melhor-envio'
+import type { ShippingOption } from './shipping-rules'
 import type { IntegrationEnvironment } from './integrations-types'
 
 interface CacheEntry {

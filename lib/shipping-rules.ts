@@ -29,6 +29,8 @@ export interface ShippingOption {
   }
   packages: number
   originalPrice?: number  // Preço original antes do frete grátis
+  /** Origem da opção de frete (ex.: 'correios_contrato') */
+  source?: string
 }
 
 export interface ApplyRulesParams {

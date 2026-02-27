@@ -78,9 +78,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!['melhor_envio', 'pagarme', 'bling'].includes(provider)) {
+    if (!['melhor_envio', 'pagarme', 'bling', 'correios_contrato'].includes(provider)) {
       return NextResponse.json(
-        { error: '[Sistema] Provider inválido. Use: melhor_envio, pagarme ou bling' },
+        { error: '[Sistema] Provider inválido. Use: melhor_envio, pagarme, bling ou correios_contrato' },
         { status: 400 }
       )
     }

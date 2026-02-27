@@ -209,6 +209,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
           delivery_time: order.shipping_delivery_time || 0,
           delivery_range: shippingData.delivery_range,
           packages: shippingData.packages || 1,
+          originalPrice: shippingData.originalPrice,
+          source: shippingData.source,
         })
         previousAddressRef.current = order.shipping_address_id
       }
@@ -443,6 +445,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
           packages: selectedShipping.packages,
           originalPrice: selectedShipping.originalPrice, // Preço original antes do frete grátis
           freeShippingSelected: shippingTotal === 0, // true quando o vendedor escolheu a opção com frete grátis
+          source: selectedShipping.source,
+          provider: selectedShipping.source === 'correios_contrato' ? 'correios_contrato' : 'melhor_envio',
         }
       } else {
         orderData.total_shipping = 0
@@ -942,8 +946,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                           produtos={physicalProductsForQuote}
                           orderValue={itemsTotal}
                           destinationState={selectedAddress?.state}
-                          // environment removido - componente busca automaticamente ou API usa padrão
                           onSelect={handleShippingSelect}
+                          showSourceBadge={true}
                         />
                       )}
                     </>

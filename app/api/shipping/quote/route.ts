@@ -3,9 +3,10 @@ import { cookies } from 'next/headers'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { query } from '@/lib/database'
 import { calculateShipping } from '@/lib/melhor-envio'
+import { calculateCorreiosShipping } from '@/lib/correios-contrato'
 import { getToken, updateTokenValidation, type IntegrationEnvironment } from '@/lib/integrations'
 import { generateCacheKey, getCachedQuote, setCachedQuote, cleanupExpiredCache } from '@/lib/shipping-cache'
-import { applyShippingRules, getProductionDays, addProductionDaysToOptions } from '@/lib/shipping-rules'
+import { applyShippingRules, getProductionDays, addProductionDaysToOptions, type ShippingOption } from '@/lib/shipping-rules'
 import { createHash } from 'crypto'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
@@ -294,15 +295,49 @@ export async function POST(request: NextRequest) {
       products: productsList,
     }, environment)
 
+    let allOptions: ShippingOption[] = shippingOptions || []
+
+    // Verificar se existem modalidades ativas do Contrato Correios antes de chamar a API
+    let hasActiveCorreiosContract = false
+    try {
+      const correiosActiveResult = await query(
+        'SELECT 1 FROM shipping_modalities WHERE environment = $1 AND active = true AND provider = $2 LIMIT 1',
+        [environment, 'correios_contrato']
+      )
+      hasActiveCorreiosContract = correiosActiveResult.rows.length > 0
+    } catch (err) {
+      console.warn('[Shipping Quote] Erro ao verificar modalidades ativas do Contrato Correios:', err)
+    }
+
+    // Chamar contrato Correios (PAC/SEDEX) apenas se houver modalidades ativas configuradas
+    if (hasActiveCorreiosContract) {
+      try {
+        const correiosOptions = await calculateCorreiosShipping(
+          {
+            from: { postal_code: cleanCepOrigem },
+            to: { postal_code: cleanCepDestino },
+            products: productsList,
+          },
+          environment
+        )
+
+        if (Array.isArray(correiosOptions) && correiosOptions.length > 0) {
+          allOptions = [...allOptions, ...correiosOptions]
+        }
+      } catch (correiosError) {
+        console.warn('[Shipping Quote] Erro ao calcular frete com Contrato Correios, seguindo apenas com Melhor Envio:', correiosError)
+      }
+    }
+
     // Filtrar opções com preço inválido ou undefined
-    let validOptions = (shippingOptions || []).filter(option => {
+    let validOptions = (allOptions || []).filter(option => {
       if (!option || !option.price) return false
       const price = parseFloat(option.price)
       return !isNaN(price) && isFinite(price) && price > 0
     })
 
     console.log('[Shipping Quote] Opções filtradas', {
-      total: shippingOptions?.length || 0,
+      total: allOptions?.length || 0,
       validas: validOptions.length,
       invalidas: (shippingOptions?.length || 0) - validOptions.length,
     })
@@ -311,12 +346,42 @@ export async function POST(request: NextRequest) {
     const validCountBeforeModalities = validOptions.length
     try {
       const activeModalitiesResult = await query(
-        'SELECT id FROM shipping_modalities WHERE environment = $1 AND active = true',
+        'SELECT id, provider FROM shipping_modalities WHERE environment = $1 AND active = true',
         [environment]
       )
       if (activeModalitiesResult.rows.length > 0) {
-        const activeIds = new Set(activeModalitiesResult.rows.map((r: { id: number }) => Number(r.id)))
-        validOptions = validOptions.filter(opt => activeIds.has(Number(opt.id)))
+        const activeRows = activeModalitiesResult.rows as Array<{ id: number; provider?: string | null }>
+        const activeIdsCorreios = new Set(
+          activeRows
+            .filter((r) => (r.provider || 'melhor_envio') === 'correios_contrato')
+            .map((r) => Number(r.id))
+        )
+        const activeIdsMelhorEnvio = new Set(
+          activeRows
+            .filter((r) => !r.provider || r.provider === 'melhor_envio')
+            .map((r) => Number(r.id))
+        )
+
+        validOptions = validOptions.filter(opt => {
+          const idNum = Number((opt as any).id)
+          const source = (opt as any).source as string | undefined
+
+          // Opções do contrato Correios respeitam apenas modalidades com provider = 'correios_contrato'
+          if (source === 'correios_contrato') {
+            if (activeIdsCorreios.size === 0) {
+              // Nenhuma modalidade Correios ativa registrada: não aplicar filtro para não bloquear
+              return true
+            }
+            return activeIdsCorreios.has(idNum)
+          }
+
+          // Demais opções (Melhor Envio) usam apenas modalidades padrão
+          if (activeIdsMelhorEnvio.size === 0) {
+            // Nenhuma modalidade Melhor Envio ativa registrada: manter comportamento atual (não filtrar)
+            return true
+          }
+          return activeIdsMelhorEnvio.has(idNum)
+        })
       }
     } catch (modErr) {
       console.warn('[Shipping Quote] Erro ao filtrar modalidades ativas, retornando todas:', modErr)

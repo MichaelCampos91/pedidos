@@ -1114,16 +1114,18 @@ ALTER SEQUENCE public.products_id_seq OWNED BY public.products.id;
 -- TOC entry 247 (class 1259 OID 17866)
 -- Name: shipping_modalities; Type: TABLE; Schema: public; Owner: dbmasteruser
 -- 
--- Tabela: Modalidades de frete disponíveis (Melhor Envio)
+-- Tabela: Modalidades de frete disponíveis (frete)
 -- 
--- Armazena as modalidades de frete disponíveis sincronizadas do Melhor Envio.
+-- Armazena as modalidades de frete disponíveis sincronizadas do Melhor Envio
+-- e de outros provedores (ex.: contrato direto com Correios).
 -- Usado para filtrar e habilitar/desabilitar modalidades específicas no sistema.
 -- 
 -- Campos importantes:
 --   - environment: ambiente ('sandbox' ou 'production')
+--   - provider: provedor da modalidade ('melhor_envio', 'correios_contrato', ...)
 --   - name: nome da modalidade (ex: "PAC", "SEDEX", "Jadlog")
---   - company_id: ID da empresa no Melhor Envio
---   - company_name: nome da empresa transportadora
+--   - company_id: ID da empresa na origem (ex.: Melhor Envio)
+--   - company_name: nome da empresa transportadora (ex.: Correios, Jadlog)
 --   - active: se false, modalidade não é oferecida no checkout
 -- 
 -- Regras de negócio:
@@ -1141,6 +1143,7 @@ ALTER SEQUENCE public.products_id_seq OWNED BY public.products.id;
 CREATE TABLE public.shipping_modalities (
     id bigint NOT NULL,
     environment character varying(20) NOT NULL,
+    provider character varying(50) DEFAULT 'melhor_envio'::character varying,
     name character varying(255),
     company_id bigint,
     company_name character varying(255),

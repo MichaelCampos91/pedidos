@@ -474,6 +474,18 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Extrair source de shipping_option_data para auditoria de frete
+      let shippingOptionSource: string | null = null
+      try {
+        const sod = order.shipping_option_data
+        if (sod) {
+          const parsed = typeof sod === 'string' ? JSON.parse(sod) : sod
+          shippingOptionSource = parsed?.source ?? null
+        }
+      } catch {
+        // Ignorar erro de parse
+      }
+
       return {
         order_id,
         payment_id: paymentId,
@@ -502,6 +514,13 @@ export async function POST(request: NextRequest) {
                 applied_reais: (pixDiscountApplied / 100).toFixed(2),
               }
             : null,
+        },
+        shipping: {
+          shipping_method: order.shipping_method ?? null,
+          shipping_company_name: order.shipping_company_name ?? null,
+          shipping_option_id: order.shipping_option_id ?? null,
+          shipping_option_data_source: shippingOptionSource,
+          total_shipping: totalShipping.toFixed(2),
         },
         timestamps: {
           created_at: paymentCreatedAt ? new Date(paymentCreatedAt).toISOString() : new Date().toISOString(),
