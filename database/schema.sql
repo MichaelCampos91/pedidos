@@ -517,15 +517,17 @@ ALTER SEQUENCE public.installment_rates_id_seq OWNED BY public.installment_rates
 -- Tokens são validados periodicamente e podem expirar.
 -- 
 -- Campos importantes:
---   - provider: provedor da integração ('bling', 'melhor_envio', 'pagarme')
+--   - provider: provedor da integração ('bling', 'melhor_envio', 'pagarme', 'correios_contrato', ...)
 --   - environment: ambiente ('sandbox' ou 'production')
 --   - token_value: valor do token (criptografado ou armazenado com segurança)
 --   - token_type: tipo do token ('bearer', 'oauth2', 'api_key')
---   - additional_data: dados adicionais em JSON (refresh_token, scope, etc.)
+--   - additional_data: dados adicionais em JSON (refresh_token, scope, credenciais, etc.)
 --   - is_active: se false, token não deve ser usado
 --   - last_validated_at: última vez que o token foi validado
 --   - last_validation_status: resultado da validação ('valid', 'invalid', 'expired')
 --   - last_validation_error: mensagem de erro se validação falhou
+--   - last_renewed_at: última vez que o token foi renovado automaticamente (ex.: Contrato Correios)
+--   - last_renewal_error: mensagem de erro se a renovação falhou
 --   - expires_at: data de expiração do token (NULL se não expira)
 -- 
 -- Regras de negócio:
@@ -551,6 +553,8 @@ CREATE TABLE public.integration_tokens (
     last_validated_at timestamp without time zone,
     last_validation_status character varying(20),
     last_validation_error text,
+    last_renewed_at timestamp without time zone,
+    last_renewal_error text,
     expires_at timestamp without time zone,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP

@@ -30,17 +30,23 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
   const isMelhorEnvio = provider === 'melhor_envio'
   const isPagarme = provider === 'pagarme'
   const isBling = provider === 'bling'
+  const isCorreiosContrato = provider === 'correios_contrato'
 
   const [formData, setFormData] = useState({
     environment: (token?.environment || 'production') as IntegrationEnvironment,
-    token_value: token?.token_value && !token.token_value.startsWith('****') 
-      ? token.token_value 
-      : '',
+    token_value:
+      token?.token_value && !token.token_value.startsWith('****') ? token.token_value : '',
     cep_origem: token?.additional_data?.cep_origem || '',
     public_key: token?.additional_data?.public_key || '', // Para Pagar.me
     // Bling OAuth
     client_id: token?.additional_data?.client_id || '',
     client_secret: token?.additional_data?.client_secret || '',
+    // Contrato Correios
+    username: token?.additional_data?.username || '',
+    password: '',
+    cartao_numero: token?.additional_data?.cartao_numero || token?.additional_data?.numero || '',
+    contrato: token?.additional_data?.contrato || '',
+    dr: token?.additional_data?.dr ? String(token.additional_data.dr) : '',
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -60,19 +66,52 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
       return
     }
 
-    // Validação: token é obrigatório (Melhor Envio e Pagar.me)
-    if (!formData.token_value) {
+    // Validação: token é obrigatório (Melhor Envio e Pagar.me).
+    // Para Contrato Correios, o token é opcional (pode ser gerado automaticamente).
+    if (!formData.token_value && !isCorreiosContrato) {
       toast.warning(isPagarme ? 'Secret Key é obrigatória' : 'Token é obrigatório')
       return
     }
 
-    await onSave({
+    const payload: {
+      provider: IntegrationProvider
+      environment: IntegrationEnvironment
+      token_value?: string
+      cep_origem?: string
+      public_key?: string
+      additional_data?: Record<string, any>
+    } = {
       provider,
       environment: formData.environment,
-      token_value: formData.token_value,
+      token_value: formData.token_value || undefined,
       cep_origem: isMelhorEnvio && formData.cep_origem ? formData.cep_origem : undefined,
       public_key: isPagarme && formData.public_key ? formData.public_key : undefined,
-    })
+    }
+
+    if (isCorreiosContrato) {
+      const existingAdditional = token?.additional_data || {}
+      const username = formData.username.trim()
+      const password = formData.password.trim()
+      const cartaoNumero = formData.cartao_numero.trim()
+      const contrato = formData.contrato.trim()
+      const dr = formData.dr.trim()
+
+      if (!username || !cartaoNumero) {
+        toast.warning('Usuário e número do cartão de postagem são obrigatórios para o Contrato Correios')
+        return
+      }
+
+      payload.additional_data = {
+        ...existingAdditional,
+        username,
+        ...(password ? { password } : {}),
+        cartao_numero: cartaoNumero,
+        contrato: contrato || existingAdditional.contrato,
+        dr: dr ? Number(dr) : existingAdditional.dr,
+      }
+    }
+
+    await onSave(payload)
   }
 
   return (
@@ -94,16 +133,25 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="environment">Ambiente</Label>
-            <select
-              id="environment"
-              value={formData.environment}
-              onChange={(e) => setFormData({ ...formData, environment: e.target.value as IntegrationEnvironment })}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              disabled={!!token}
-            >
-              <option value="sandbox">Sandbox</option>
-              <option value="production">Produção</option>
-            </select>
+            {isCorreiosContrato ? (
+              <Input id="environment" value="Produção" disabled className="w-full" />
+            ) : (
+              <select
+                id="environment"
+                value={formData.environment}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    environment: e.target.value as IntegrationEnvironment,
+                  })
+                }
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                disabled={!!token}
+              >
+                <option value="sandbox">Sandbox</option>
+                <option value="production">Produção</option>
+              </select>
+            )}
           </div>
 
           {isBling && (
@@ -139,7 +187,7 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
             </>
           )}
 
-          {!isBling && (
+          {!isBling && !isCorreiosContrato && (
             <div className="space-y-2">
               <Label htmlFor="token_value">
                 {isPagarme ? 'Secret Key *' : 'Token *'}
@@ -170,6 +218,93 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
                 Tipo de token: Bearer (definido automaticamente)
               </p>
             </div>
+          )}
+
+          {isCorreiosContrato && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Usuário / idCorreios *</Label>
+                  <Input
+                    id="username"
+                    type="text"
+                    value={formData.username}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                    placeholder="Usuário do Meu Correios"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Código de acesso às APIs *</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="Senha/código de acesso às APIs"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Essa senha é gerenciada em &quot;Gestão de acesso a API&apos;s&quot; no CWS. Deixe em
+                    branco para manter a atual.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="cartao_numero">Número do cartão de postagem *</Label>
+                  <Input
+                    id="cartao_numero"
+                    type="text"
+                    value={formData.cartao_numero}
+                    onChange={(e) =>
+                      setFormData({ ...formData, cartao_numero: e.target.value.replace(/\\s/g, '') })
+                    }
+                    placeholder="Ex.: 0078555280"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contrato">Número do contrato</Label>
+                  <Input
+                    id="contrato"
+                    type="text"
+                    value={formData.contrato}
+                    onChange={(e) =>
+                      setFormData({ ...formData, contrato: e.target.value.replace(/\\s/g, '') })
+                    }
+                    placeholder="Ex.: 9912655956"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dr">DR / Superintendência</Label>
+                  <Input
+                    id="dr"
+                    type="text"
+                    value={formData.dr}
+                    onChange={(e) =>
+                      setFormData({ ...formData, dr: e.target.value.replace(/\\D/g, '') })
+                    }
+                    placeholder="Ex.: 74"
+                    maxLength={3}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2 border rounded-md p-3 bg-muted/20">
+                <Label htmlFor="token_value_correios">Token atual (JWT) – opcional</Label>
+                <Input
+                  id="token_value_correios"
+                  type="password"
+                  value={formData.token_value}
+                  onChange={(e) => setFormData({ ...formData, token_value: e.target.value })}
+                  placeholder="Opcional: cole um token manualmente, ou deixe vazio para o sistema gerar automaticamente"
+                />
+                <p className="text-xs text-muted-foreground">
+                  O sistema usará as credenciais acima para gerar e renovar o token automaticamente pela
+                  API Token dos Correios. Esse campo é útil apenas se você precisar colar um token
+                  temporário manualmente.
+                </p>
+              </div>
+            </>
           )}
 
           {isMelhorEnvio && (

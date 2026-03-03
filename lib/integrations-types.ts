@@ -31,6 +31,8 @@ export interface IntegrationToken {
   last_validated_at?: Date | string
   last_validation_status?: ValidationStatus
   last_validation_error?: string
+   last_renewed_at?: Date | string
+   last_renewal_error?: string
   expires_at?: Date | string
   created_at: Date | string
   updated_at: Date | string

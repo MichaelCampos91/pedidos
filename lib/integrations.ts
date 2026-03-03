@@ -223,6 +223,28 @@ export async function updateTokenValidation(
 }
 
 /**
+ * Atualiza metadados de renovação de um token (ex.: Contrato Correios).
+ * - Em caso de sucesso de renovação: chamar com error = undefined para marcar last_renewed_at e limpar erro.
+ * - Em caso de falha: chamar com error preenchido para registrar last_renewal_error.
+ */
+export async function updateTokenRenewal(
+  id: number,
+  error?: string
+): Promise<void> {
+  await query(
+    `UPDATE integration_tokens
+     SET last_renewed_at = CASE 
+           WHEN $1::text IS NULL THEN CURRENT_TIMESTAMP 
+           ELSE last_renewed_at 
+         END,
+         last_renewal_error = $1,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2`,
+    [error || null, id]
+  )
+}
+
+/**
  * Desativa um token
  */
 export async function deactivateToken(

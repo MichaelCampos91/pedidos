@@ -233,61 +233,106 @@ export default function IntegrationsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pagarme" className="space-y-4 mt-6">
-          <IntegrationCard
-            provider="pagarme"
-            providerLabel="Pagar.me"
-            sandboxToken={getTokensForProvider('pagarme').find(t => t.environment === 'sandbox')}
-            productionToken={getTokensForProvider('pagarme').find(t => t.environment === 'production')}
-            onEdit={handleEditToken}
-            onDelete={handleDeleteToken}
-            onValidate={handleValidateToken}
-            onAdd={handleAddToken}
-            onSave={handleSaveToken}
-            onTokensUpdated={handleTokensUpdated}
-            isValidating={validating}
-            isSaving={saving}
-            icon={<CreditCard className="h-5 w-5" />}
-          />
+        <TabsContent value="pagarme" className="mt-6 relative">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5" />
+                Pagar.me
+              </CardTitle>
+              <CardDescription>
+                Configure as chaves de API do Pagar.me para processar pagamentos via cartão de crédito e PIX.
+                <br/>Defina os tokens por ambiente (Sandbox e Produção) e valide-os antes de usar no checkout.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-1 gap-6 items-start">
+              <IntegrationCard
+                provider="pagarme"
+                providerLabel="Pagar.me"
+                sandboxToken={getTokensForProvider('pagarme').find(t => t.environment === 'sandbox')}
+                productionToken={getTokensForProvider('pagarme').find(t => t.environment === 'production')}
+                onEdit={handleEditToken}
+                onDelete={handleDeleteToken}
+                onValidate={handleValidateToken}
+                onAdd={handleAddToken}
+                onSave={handleSaveToken}
+                onTokensUpdated={handleTokensUpdated}
+                isValidating={validating}
+                isSaving={saving}
+                icon={<CreditCard className="h-5 w-5" />}
+                asSection
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
-        <TabsContent value="melhor_envio" className="space-y-4 mt-6">
-          <IntegrationCard
-            provider="melhor_envio"
-            providerLabel="Melhor Envio"
-            sandboxToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'sandbox')}
-            productionToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'production')}
-            onEdit={handleEditToken}
-            onDelete={handleDeleteToken}
-            onValidate={handleValidateToken}
-            onAdd={handleAddToken}
-            onSave={handleSaveToken}
-            onTokensUpdated={handleTokensUpdated}
-            isValidating={validating}
-            isSaving={saving}
-            icon={<Truck className="h-5 w-5" />}
-          />
+        <TabsContent value="melhor_envio" className="mt-6 relative">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                Melhor Envio
+              </CardTitle>
+              <CardDescription>
+                Configure o token do Melhor Envio para cotar fretes com transportadoras parceiras.
+                <br/>Use ambientes Sandbox e Produção para testar e operar o cálculo de frete com segurança.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-1 gap-6 items-start">
+              <IntegrationCard
+                provider="melhor_envio"
+                providerLabel="Melhor Envio"
+                sandboxToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'sandbox')}
+                productionToken={getTokensForProvider('melhor_envio').find(t => t.environment === 'production')}
+                onEdit={handleEditToken}
+                onDelete={handleDeleteToken}
+                onValidate={handleValidateToken}
+                onAdd={handleAddToken}
+                onSave={handleSaveToken}
+                onTokensUpdated={handleTokensUpdated}
+                isValidating={validating}
+                isSaving={saving}
+                icon={<Truck className="h-5 w-5" />}
+                asSection
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
-        <TabsContent value="correios_contrato" className="space-y-4 mt-6">
-          <IntegrationCard
-            provider="correios_contrato"
-            providerLabel="Contrato Correios"
-            sandboxToken={getTokensForProvider('correios_contrato').find(t => t.environment === 'sandbox')}
-            productionToken={getTokensForProvider('correios_contrato').find(t => t.environment === 'production')}
-            onEdit={handleEditToken}
-            onDelete={handleDeleteToken}
-            onValidate={handleValidateToken}
-            onAdd={handleAddToken}
-            onSave={handleSaveToken}
-            onTokensUpdated={handleTokensUpdated}
-            isValidating={validating}
-            isSaving={saving}
-            icon={<Truck className="h-5 w-5" />}
-          />
+        <TabsContent value="correios_contrato" className="mt-6 relative">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                Contrato Correios
+              </CardTitle>
+              <CardDescription>
+                Configure o acesso ao Contrato Correios para cotar fretes via PAC e SEDEX diretamente com os Correios.
+                <br/>Use as credenciais do CWS para que o sistema gere e renove automaticamente o token de acesso.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-[minmax(0,420px)] gap-6 items-start">
+              <IntegrationCard
+                provider="correios_contrato"
+                providerLabel="Contrato Correios"
+                productionToken={getTokensForProvider('correios_contrato').find(t => t.environment === 'production')}
+                onEdit={handleEditToken}
+                onDelete={handleDeleteToken}
+                onValidate={handleValidateToken}
+                onAdd={handleAddToken}
+                onSave={handleSaveToken}
+                onTokensUpdated={handleTokensUpdated}
+                isValidating={validating}
+                isSaving={saving}
+                icon={<Truck className="h-5 w-5" />}
+                asSection
+                singleEnvironment="production"
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
-        <TabsContent value="bling" className="mt-6">
+        <TabsContent value="bling" className="mt-6 relative">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

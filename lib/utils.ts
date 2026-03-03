@@ -18,12 +18,16 @@ export function formatPhone(phone: string): string {
 
 export function formatDate(date: string | Date): string {
   const d = new Date(date)
-  return d.toLocaleDateString('pt-BR')
+  return d.toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+  })
 }
 
 export function formatDateTime(date: string | Date): string {
   const d = new Date(date)
-  return d.toLocaleString('pt-BR')
+  return d.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+  })
 }
 
 export function formatCPF(cpf: string | null | undefined): string {

@@ -1,4 +1,4 @@
-import { getToken, type IntegrationEnvironment } from './integrations'
+import { getToken, updateTokenRenewal, upsertToken, type IntegrationEnvironment, type IntegrationToken } from './integrations'
 import type { ShippingOption } from './shipping-rules'
 
 const CORREIOS_PRECO_BASES: Record<IntegrationEnvironment, string> = {
@@ -9,6 +9,11 @@ const CORREIOS_PRECO_BASES: Record<IntegrationEnvironment, string> = {
 const CORREIOS_PRAZO_BASES: Record<IntegrationEnvironment, string> = {
   sandbox: 'https://apihom.correios.com.br/prazo/v1',
   production: 'https://api.correios.com.br/prazo/v1',
+}
+
+const CORREIOS_TOKEN_BASES: Record<IntegrationEnvironment, string> = {
+  sandbox: 'https://apihom.correios.com.br/token/v1',
+  production: 'https://api.correios.com.br/token/v1',
 }
 
 export interface CorreiosQuoteParams {
@@ -63,19 +68,149 @@ function getPrazoBaseUrl(environment: IntegrationEnvironment): string {
   return CORREIOS_PRAZO_BASES[environment] || CORREIOS_PRAZO_BASES.production
 }
 
-async function getCorreiosAuthToken(environment: IntegrationEnvironment): Promise<string> {
-  const token = await getToken('correios_contrato', environment)
+/**
+ * Gera um novo token de contrato Correios usando a API Token (/autentica/cartaopostagem)
+ * e persiste no banco, atualizando metadados de expiração e renovação.
+ */
+export async function renewCorreiosToken(
+  environment: IntegrationEnvironment
+): Promise<IntegrationToken> {
+  const existing = await getToken('correios_contrato', environment)
 
-  if (!token || !token.token_value) {
-    throw new Error('[Correios] Token de contrato não configurado para este ambiente.')
+  const additional = existing?.additional_data || {}
+  const username = String(additional.username || '').trim()
+  const password = String(additional.password || '').trim()
+  const cartaoNumero = String(additional.cartao_numero || additional.numero || '').trim()
+  const contrato = String(additional.contrato || '').trim()
+  const dr = additional.dr != null ? Number(additional.dr) : undefined
+
+  if (!username || !password || !cartaoNumero) {
+    throw new Error(
+      '[Correios] Credenciais incompletas para renovar o token. Preencha usuário, código de acesso e cartão de postagem nas configurações de integrações.'
+    )
   }
 
-  const raw = token.token_value.trim()
+  const basic = Buffer.from(`${username}:${password}`).toString('base64')
+  const url = `${CORREIOS_TOKEN_BASES[environment] || CORREIOS_TOKEN_BASES.production}/autentica/cartaopostagem`
+
+  const body: any = {
+    numero: cartaoNumero,
+  }
+  if (contrato) {
+    body.contrato = contrato
+  }
+  if (!Number.isNaN(dr as number) && dr != null) {
+    body.dr = dr
+  }
+
+  let responseJson: any
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+
+    const text = await response.text()
+    try {
+      responseJson = text ? JSON.parse(text) : {}
+    } catch {
+      throw new Error('[Correios] Resposta inválida da API de Token dos Correios.')
+    }
+
+    if (!response.ok) {
+      const msg =
+        (responseJson && Array.isArray(responseJson.msgs) && responseJson.msgs[0]) ||
+        responseJson?.message ||
+        `Erro ${response.status} ao gerar token dos Correios.`
+      throw new Error(`[Correios] ${msg}`)
+    }
+  } catch (error: any) {
+    const message = error?.message || 'Erro ao gerar token dos Correios.'
+    if (existing?.id) {
+      await updateTokenRenewal(existing.id, message)
+    }
+    throw new Error(message)
+  }
+
+  const tokenValue: string | undefined = responseJson?.token
+  if (!tokenValue || typeof tokenValue !== 'string') {
+    const msg = '[Correios] Resposta da API de Token não contém campo \"token\".'
+    if (existing?.id) {
+      await updateTokenRenewal(existing.id, msg)
+    }
+    throw new Error(msg)
+  }
+
+  // Converter expiraEm para Date (se presente)
+  let expiresAt: Date | undefined
+  if (responseJson?.expiraEm) {
+    // expiraEm já vem em ISO com timezone na maioria dos casos; fallback simples se não
+    const expira = new Date(responseJson.expiraEm)
+    if (!isNaN(expira.getTime())) {
+      expiresAt = expira
+    }
+  }
+
+  const mergedAdditional = {
+    ...additional,
+    username,
+    password,
+    cartao_numero: cartaoNumero,
+    contrato: contrato || undefined,
+    dr: dr != null && !Number.isNaN(dr) ? dr : undefined,
+  }
+
+  const saved = await upsertToken(
+    'correios_contrato',
+    environment,
+    tokenValue.trim().replace(/^Bearer\\s+/i, ''),
+    'bearer',
+    mergedAdditional,
+    expiresAt
+  )
+
+  await updateTokenRenewal(saved.id)
+
+  return saved
+}
+
+/**
+ * Retorna um token de contrato Correios válido, tentando renovação automática
+ * quando não houver token ou quando estiver expirado.
+ */
+export async function getValidCorreiosToken(
+  environment: IntegrationEnvironment
+): Promise<string> {
+  const now = new Date()
+  let token = await getToken('correios_contrato', environment)
+
+  const rawCurrent = token?.token_value?.trim() || ''
+  const looksLikeJwt = rawCurrent.includes('.')
+
+  const needsRenewal =
+    !rawCurrent ||
+    !looksLikeJwt ||
+    (token?.expires_at ? new Date(token.expires_at) <= now : false)
+
+  if (needsRenewal) {
+    token = await renewCorreiosToken(environment)
+  }
+
+  if (!token) {
+    throw new Error('[Correios] Token de contrato não encontrado após tentativa de renovação.')
+  }
+
+  const raw = token.token_value?.trim()
   if (!raw) {
-    throw new Error('[Correios] Token de contrato está vazio.')
+    throw new Error('[Correios] Token de contrato está vazio após tentativa de renovação.')
   }
 
-  return raw.replace(/^Bearer\s+/i, '')
+  return raw.replace(/^Bearer\\s+/i, '')
 }
 
 function normalizeCep(value: string): string {
@@ -145,7 +280,7 @@ export async function calculateCorreiosShipping(
   }
 
   const { totalWeightGrams, maxLength, maxWidth, maxHeight } = aggregateProducts(params.products)
-  const token = await getCorreiosAuthToken(environment)
+  const token = await getValidCorreiosToken(environment)
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,

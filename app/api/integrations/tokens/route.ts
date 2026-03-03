@@ -60,6 +60,8 @@ export async function POST(request: NextRequest) {
       additional_data?.client_secret &&
       (token_value === undefined || token_value === null || String(token_value).trim() === '' || String(token_value).trim() === '__oauth_pending__')
 
+    const isCorreiosContrato = provider === 'correios_contrato'
+
     if (isBlingOAuthConfig) {
       // Validar que client_id e client_secret estão presentes (já garantido acima)
       const clientId = String(additional_data.client_id).trim()
@@ -70,8 +72,8 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
-    } else if (!token_value) {
-      // NOTA: Para outros providers, token_value é obrigatório
+    } else if (!token_value && !isCorreiosContrato) {
+      // NOTA: Para outros providers (exceto Correios Contrato), token_value é obrigatório
       return NextResponse.json(
         { error: '[Sistema] token_value é obrigatório' },
         { status: 400 }
@@ -105,7 +107,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Limpar o token (remover espaços e "Bearer " se presente). Bling OAuth config usa placeholder,
+    // Limpar o token (remover espaços e \"Bearer \" se presente). Bling OAuth config usa placeholder,
     // mas ao editar preservamos o access_token existente se já houver um token real.
     let cleanTokenValue: string
     if (isBlingOAuthConfig) {
@@ -114,12 +116,16 @@ export async function POST(request: NextRequest) {
         existingBling.token_value !== '__oauth_pending__' &&
         !existingBling.token_value.includes('****')
       cleanTokenValue = hasRealToken ? existingBling!.token_value : '__oauth_pending__'
+    } else if (isCorreiosContrato && (!token_value || String(token_value).trim() === '')) {
+      // Para Contrato Correios, permitir salvar apenas credenciais. Usamos um placeholder interno;
+      // o backend fará a renovação automática via API Token antes de usar em produção.
+      cleanTokenValue = '__correios_placeholder__'
     } else {
       cleanTokenValue = String(token_value).trim().replace(/^Bearer\s+/i, '')
     }
 
     // Validação adicional de tamanho mínimo (não aplicar para Bling OAuth placeholder)
-    if (!isBlingOAuthConfig && cleanTokenValue.length < 20) {
+    if (!isBlingOAuthConfig && !(isCorreiosContrato && cleanTokenValue === '__correios_placeholder__') && cleanTokenValue.length < 20) {
       console.warn('[Integrations] Token muito curto', {
         provider,
         environment,

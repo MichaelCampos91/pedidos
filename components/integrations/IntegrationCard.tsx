@@ -74,9 +74,11 @@ export function IntegrationCard({
   const [activeEnvironment, setActiveEnvironment] = useState<IntegrationEnvironment | null>(null)
   const [loadingActiveEnv, setLoadingActiveEnv] = useState(true)
   const [connectingBling, setConnectingBling] = useState(false)
+  const [renewingCorreios, setRenewingCorreios] = useState(false)
 
   const saving = externalSaving || internalSaving
   const isBling = provider === 'bling'
+  const isCorreiosContrato = provider === 'correios_contrato'
 
   const hasAnyToken = !!sandboxToken || !!productionToken
   const hasBothTokens = !!sandboxToken && !!productionToken
@@ -221,6 +223,30 @@ export function IntegrationCard({
     }
   }
 
+  const handleRenewCorreios = async () => {
+    setRenewingCorreios(true)
+    try {
+      const response = await fetch('/api/integrations/tokens/renew/correios_contrato', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ environment: 'production' }),
+        credentials: 'include',
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Erro ao renovar token do Contrato Correios')
+      }
+      toast.success('Token do Contrato Correios renovado com sucesso.')
+      if (onTokensUpdated) {
+        await onTokensUpdated()
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao renovar token do Contrato Correios')
+    } finally {
+      setRenewingCorreios(false)
+    }
+  }
+
   const TokenRow = ({ 
     token, 
     environment 
@@ -285,7 +311,7 @@ export function IntegrationCard({
           <div className="flex items-center gap-1">
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               onClick={() => onValidate(token)}
               disabled={isCurrentlyValidating}
               className="h-8 px-2"
@@ -363,6 +389,20 @@ export function IntegrationCard({
               <span>Token não testado ainda</span>
             </div>
           )}
+
+          {isCorreiosContrato && (
+            <div className="space-y-0.5 mt-2 text-xs text-muted-foreground">
+              {token.last_renewed_at && (
+                <p>Última renovação: {formatDateTime(new Date(token.last_renewed_at))}</p>
+              )}
+              {token.expires_at && (
+                <p>Expira em: {formatDateTime(new Date(token.expires_at))}</p>
+              )}
+              {token.last_renewal_error && (
+                <p className="text-destructive mt-1">{token.last_renewal_error}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     )
@@ -413,7 +453,29 @@ export function IntegrationCard({
             )}
           </Button>
         )}
-        {hasAnyToken && !loadingActiveEnv && (
+        {isCorreiosContrato && (
+          <Button
+            onClick={handleRenewCorreios}
+            disabled={renewingCorreios || saving}
+            size="sm"
+            className="shrink-0"
+          >
+            {renewingCorreios ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Renovando...
+              </>
+            ) : (
+              <>
+                <Link2 className="h-4 w-4 mr-2" />
+                Gerar token agora
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+      {!loadingActiveEnv && (
+        <div className="absolute top-5 right-5 flex items-center gap-2">
           <Select
             value={currentActiveEnv}
             onValueChange={(value) => handleEnvironmentChange(value as IntegrationEnvironment)}
@@ -430,18 +492,18 @@ export function IntegrationCard({
               ))}
             </SelectContent>
           </Select>
-        )}
-        {hasAnyToken && (
           <div className="flex items-center gap-1.5">
-            {sandboxToken?.last_validation_status === 'valid' && (
-              <div className="h-2 w-2 rounded-full bg-green-500" title="Sandbox válido" />
-            )}
-            {productionToken?.last_validation_status === 'valid' && (
-              <div className="h-2 w-2 rounded-full bg-green-500" title="Produção válido" />
-            )}
+            {currentActiveEnv === 'sandbox' &&
+              sandboxToken?.last_validation_status === 'valid' && (
+                <div className="h-2 w-2 rounded-full bg-green-500" title="Sandbox válido" />
+              )}
+            {currentActiveEnv === 'production' &&
+              productionToken?.last_validation_status === 'valid' && (
+                <div className="h-2 w-2 rounded-full bg-green-500" title="Produção válido" />
+              )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 
