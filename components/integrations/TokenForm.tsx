@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, X } from "lucide-react"
+import { Loader2, Save, X, Eye, EyeOff } from "lucide-react"
 import type { IntegrationProvider, IntegrationEnvironment, IntegrationToken } from "@/lib/integrations-types"
 import { toast } from "@/lib/toast"
 
@@ -31,6 +31,9 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
   const isPagarme = provider === 'pagarme'
   const isBling = provider === 'bling'
   const isCorreiosContrato = provider === 'correios_contrato'
+
+  const [showPassword, setShowPassword] = useState(false)
+  const [showToken, setShowToken] = useState(false)
 
   const [formData, setFormData] = useState({
     environment: (token?.environment || 'production') as IntegrationEnvironment,
@@ -118,7 +121,9 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
     <Card>
       <CardHeader>
         <CardTitle>
-          {token ? 'Editar' : 'Adicionar'} Token - {provider.replace('_', ' ').toUpperCase()}
+          {isCorreiosContrato
+            ? `${token ? 'Editar' : 'Adicionar'} Token - Contrato Correios`
+            : `${token ? 'Editar' : 'Adicionar'} Token - ${provider.replace('_', ' ').toUpperCase()}`}
         </CardTitle>
         <CardDescription>
           {isBling
@@ -222,8 +227,8 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
 
           {isCorreiosContrato && (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                <div className="space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+                <div className="space-y-2 md:col-span-1">
                   <Label htmlFor="username">Usuário / idCorreios *</Label>
                   <Input
                     id="username"
@@ -233,15 +238,25 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
                     placeholder="Usuário do Meu Correios"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Código de acesso às APIs *</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="Senha/código de acesso às APIs"
-                  />
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="password">Código de Acesso API *</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      placeholder="Senha/código de acesso às APIs"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     Essa senha é gerenciada em &quot;Gestão de acesso a API&apos;s&quot; no CWS. Deixe em
                     branco para manter a atual.
@@ -249,9 +264,9 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                <div className="space-y-2">
-                  <Label htmlFor="cartao_numero">Número do cartão de postagem *</Label>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mt-4">
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="cartao_numero">Cartão de Postagem *</Label>
                   <Input
                     id="cartao_numero"
                     type="text"
@@ -262,8 +277,8 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
                     placeholder="Ex.: 0078555280"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contrato">Número do contrato</Label>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="contrato">Número do Contrato</Label>
                   <Input
                     id="contrato"
                     type="text"
@@ -274,8 +289,8 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
                     placeholder="Ex.: 9912655956"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="dr">DR / Superintendência</Label>
+                <div className="space-y-2 md:col-span-1">
+                  <Label htmlFor="dr">DR</Label>
                   <Input
                     id="dr"
                     type="text"
@@ -290,14 +305,38 @@ export function TokenForm({ provider, token, onSave, onCancel, isSaving = false 
               </div>
 
               <div className="mt-4 space-y-2 border rounded-md p-3 bg-muted/20">
-                <Label htmlFor="token_value_correios">Token atual (JWT) – opcional</Label>
-                <Input
-                  id="token_value_correios"
-                  type="password"
-                  value={formData.token_value}
-                  onChange={(e) => setFormData({ ...formData, token_value: e.target.value })}
-                  placeholder="Opcional: cole um token manualmente, ou deixe vazio para o sistema gerar automaticamente"
-                />
+                <Label htmlFor="token_value_correios">Token Atual (JWT) – opcional</Label>
+                <div className="flex items-start gap-2">
+                  {showToken ? (
+                    <textarea
+                      id="token_value_correios"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      rows={4}
+                      value={formData.token_value}
+                      onChange={(e) =>
+                        setFormData({ ...formData, token_value: e.target.value })
+                      }
+                      placeholder="Opcional: cole um token manualmente, ou deixe vazio para o sistema gerar automaticamente"
+                    />
+                  ) : (
+                    <textarea
+                      id="token_value_correios"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-muted-foreground"
+                      rows={4}
+                      value={formData.token_value ? '********' : ''}
+                      readOnly
+                    />
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="mt-1"
+                    onClick={() => setShowToken((prev) => !prev)}
+                  >
+                    {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
                 <p className="text-xs text-muted-foreground">
                   O sistema usará as credenciais acima para gerar e renovar o token automaticamente pela
                   API Token dos Correios. Esse campo é útil apenas se você precisar colar um token
