@@ -62,7 +62,7 @@ export default function OrdersPage() {
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all")
   const [startDate, setStartDate] = useState<Date | undefined>(() => {
     const date = new Date()
-    date.setDate(date.getDate() - 6) // 7 dias atrás (hoje + 6 dias anteriores)
+    date.setDate(date.getDate() - 29) // 30 dias atrás (hoje + 29 dias anteriores)
     return date
   })
   const [endDate, setEndDate] = useState<Date | undefined>(() => new Date())
