@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
 
     if (search) {
       const searchTerm = `%${search}%`
-      whereClause += ` AND (o.id::text LIKE $${paramIndex} OR c.name LIKE $${paramIndex + 1} OR c.cpf LIKE $${paramIndex + 2})`
+      whereClause += ` AND (o.id::text ILIKE $${paramIndex} OR c.name ILIKE $${paramIndex + 1} OR c.cpf ILIKE $${paramIndex + 2})`
       params.push(searchTerm, searchTerm, searchTerm)
       paramIndex += 3
     }
