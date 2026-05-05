@@ -282,6 +282,7 @@ export default function OrdersPage() {
     const installments = order.installments
     if (method === "pix_manual") return "Pix Manual"
     if (method === "pix") return "Pix"
+    if (method === "credit_card_manual") return "Cartão de Crédito (Manual)"
     if (method === "credit_card") {
       if (installments === 1) return "Cartão à vista"
       return `Cartão em ${installments}x`

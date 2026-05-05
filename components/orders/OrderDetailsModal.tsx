@@ -123,6 +123,7 @@ export function OrderDetailsModal({
     let methodLabel = ""
     if (method === "pix_manual") methodLabel = "Pix Manual"
     else if (method === "pix") methodLabel = "Pix"
+    else if (method === "credit_card_manual") methodLabel = "Cartão de Crédito (Manual)"
     else if (method === "credit_card") {
       methodLabel = installments === 1 ? "Cartão de Crédito à vista" : `Cartão de Crédito em ${installments}x`
     } else {

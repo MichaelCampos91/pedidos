@@ -3,6 +3,11 @@ import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { saveLog } from '@/lib/logger'
+import { calculatePixDiscount } from '@/lib/payment-rules'
+import { syncOrderToBling } from '@/lib/bling'
+
+const ALLOWED_MANUAL_PAYMENT_METHODS = ['pix_manual', 'credit_card_manual'] as const
+type ManualPaymentMethod = typeof ALLOWED_MANUAL_PAYMENT_METHODS[number]
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -163,7 +168,7 @@ export async function POST(request: NextRequest) {
   try {
     const cookieStore = cookies()
     const cookieToken = cookieStore.get('auth_token')?.value
-    await requireAuth(request, cookieToken)
+    const user = await requireAuth(request, cookieToken)
 
     const body = await request.json()
     const { 
@@ -177,7 +182,9 @@ export async function POST(request: NextRequest) {
       shipping_option_data,
       total_items,
       total_shipping,
-      total
+      total,
+      mark_as_paid,
+      payment_method,
     } = body
 
     if (!client_id || !items || items.length === 0) {
@@ -187,25 +194,52 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Calcular totais se não fornecidos. total_shipping vem apenas do frontend (opção selecionada pelo vendedor); não recalcular com regras de frete grátis.
-    const calculatedTotalItems = total_items || items.reduce((sum: number, item: any) => {
+    // Validar pagamento manual ao criar
+    const isMarkAsPaid = mark_as_paid === true
+    if (isMarkAsPaid && !ALLOWED_MANUAL_PAYMENT_METHODS.includes(payment_method)) {
+      return NextResponse.json(
+        { error: 'Forma de pagamento inválida' },
+        { status: 400 }
+      )
+    }
+    const manualMethod: ManualPaymentMethod | null = isMarkAsPaid ? (payment_method as ManualPaymentMethod) : null
+
+    // Calcular totais (servidor é a fonte de verdade quando há mark_as_paid).
+    // total_shipping vem do frontend (opção selecionada pelo vendedor; 0 quando Retirada/digital).
+    const itemsTotal = items.reduce((sum: number, item: any) => {
       return sum + (parseFloat(item.price) * parseInt(item.quantity))
     }, 0)
-    const calculatedShipping = total_shipping ?? 0
-    const calculatedTotal = total || (calculatedTotalItems + calculatedShipping)
+    const calculatedTotalItems = total_items != null ? Number(total_items) : itemsTotal
+    const calculatedShipping = Number(total_shipping ?? 0)
+
+    // Aplicar desconto PIX apenas sobre os itens (sem frete) quando pago via Pix Manual
+    let pixDiscount = 0
+    let finalItemsTotal = calculatedTotalItems
+    if (isMarkAsPaid && manualMethod === 'pix_manual') {
+      const discountResult = await calculatePixDiscount(calculatedTotalItems)
+      pixDiscount = discountResult.discount
+      finalItemsTotal = discountResult.finalValue
+    }
+
+    const calculatedTotal = isMarkAsPaid
+      ? finalItemsTotal + calculatedShipping
+      : (total != null ? Number(total) : (calculatedTotalItems + calculatedShipping))
+
+    const initialStatus = isMarkAsPaid ? 'aguardando_producao' : 'aguardando_pagamento'
 
     // Criar pedido
     const orderResult = await query(
       `INSERT INTO orders (
         client_id, status, total_items, total_shipping, total, 
         shipping_address_id, shipping_method, shipping_option_id, 
-        shipping_company_name, shipping_delivery_time, shipping_option_data
+        shipping_company_name, shipping_delivery_time, shipping_option_data,
+        paid_at
       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, ${isMarkAsPaid ? 'CURRENT_TIMESTAMP' : 'NULL'})
        RETURNING id`,
       [
         client_id, 
-        'aguardando_pagamento', 
+        initialStatus, 
         calculatedTotalItems, 
         calculatedShipping,
         calculatedTotal,
@@ -236,10 +270,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Pagamento manual ao criar: registra payment, history e dispara sync com Bling (best-effort).
+    if (isMarkAsPaid && manualMethod) {
+      try {
+        await query(
+          `INSERT INTO payments (order_id, method, installments, amount, status, paid_at)
+           VALUES ($1, $2, $3, $4, 'paid', CURRENT_TIMESTAMP)`,
+          [orderId, manualMethod, 1, calculatedTotal]
+        )
+
+        await query(
+          `INSERT INTO order_history (order_id, field_changed, old_value, new_value, changed_by)
+           VALUES ($1, 'status', 'aguardando_pagamento', 'aguardando_producao', $2)`,
+          [orderId, user.id]
+        )
+
+        // Sincronização com Bling não bloqueia o sucesso da criação
+        try {
+          await syncOrderToBling(orderId)
+        } catch (_e) {
+          // Falha no Bling: pedido permanece com bling_sync_status pendente para reenvio manual
+        }
+      } catch (paymentError: any) {
+        // Em caso de erro ao registrar o pagamento, registrar log mas não falhar a criação do pedido
+        await saveLog(
+          'error',
+          `Falha ao registrar pagamento manual do pedido #${orderId}`,
+          { order_id: orderId, error: paymentError?.message },
+          'payment'
+        )
+      }
+    }
+
     // Log de pedido criado
     await saveLog(
       'info',
-      `Pedido #${orderId} criado`,
+      isMarkAsPaid
+        ? `Pedido #${orderId} criado e marcado como pago manualmente`
+        : `Pedido #${orderId} criado`,
       {
         order_id: orderId,
         client_id,
@@ -247,12 +315,20 @@ export async function POST(request: NextRequest) {
         total_shipping: calculatedShipping,
         total: calculatedTotal,
         items_count: items.length,
+        mark_as_paid: isMarkAsPaid,
+        payment_method: manualMethod,
+        pix_discount: pixDiscount,
+        created_by: user.id,
       },
       'order'
     )
 
     return NextResponse.json({ success: true, id: orderId })
   } catch (error: any) {
+    if (error?.message === 'Token não fornecido' || error?.message === 'Token inválido ou expirado') {
+      return authErrorResponse(error.message, 401)
+    }
+    console.error('Erro ao criar pedido:', error)
     return NextResponse.json(
       { error: 'Erro ao criar pedido' },
       { status: 500 }

@@ -50,6 +50,7 @@ const PAYMENT_METHOD_COLORS: Record<string, string> = {
   pix: "#10b981",
   pix_manual: "#10b981",
   credit_card: "#3b82f6",
+  credit_card_manual: "#3b82f6",
   default: "#6b7280"
 }
 
@@ -88,19 +89,20 @@ type FilterType = 'period' | 'this_year' | 'this_month' | 'last_month' | 'last_n
 function getPaymentMethodLabel(method: string): string {
   if (method === "pix_manual") return "Pix Manual"
   if (method === "pix") return "Pix"
+  if (method === "credit_card_manual") return "Cartão (Manual)"
   if (method === "credit_card") return "Cartão"
   return method || "Outro"
 }
 
 function getPaymentMethodIcon(method: string) {
   if (method === "pix_manual" || method === "pix") return Smartphone
-  if (method === "credit_card") return CreditCard
+  if (method === "credit_card" || method === "credit_card_manual") return CreditCard
   return Banknote
 }
 
 function getPaymentMethodColor(method: string): string {
   if (method === "pix_manual" || method === "pix") return "text-emerald-600 bg-emerald-50 border-emerald-200"
-  if (method === "credit_card") return "text-blue-600 bg-blue-50 border-blue-200"
+  if (method === "credit_card" || method === "credit_card_manual") return "text-blue-600 bg-blue-50 border-blue-200"
   return "text-muted-foreground bg-muted border-muted"
 }
 

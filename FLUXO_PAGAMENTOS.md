@@ -14,12 +14,15 @@
 
 ## Visão Geral
 
-O sistema de pagamentos é responsável por processar pagamentos de pedidos através da integração com o Pagar.me. Suporta dois métodos principais: **PIX** e **Cartão de Crédito**, com suporte a parcelamento e descontos configuráveis.
+O sistema de pagamentos é responsável por processar pagamentos de pedidos através da integração com o Pagar.me. Suporta dois métodos principais via gateway: **PIX** e **Cartão de Crédito**, com suporte a parcelamento e descontos configuráveis. Também há **pagamentos manuais** registrados pelo admin (sem passar pelo gateway), úteis quando o cliente paga por outro canal: **Pix Manual** (`pix_manual`) e **Cartão de Crédito Manual** (`credit_card_manual`).
 
 ### Componentes Principais
 
-- **Frontend**: `components/checkout/PaymentForm.tsx` - Interface do checkout
-- **Backend API**: `app/api/payment/create/route.ts` - Criação de pagamentos
+- **Frontend (checkout público)**: `components/checkout/PaymentForm.tsx` - Interface do checkout
+- **Frontend (admin)**: `components/orders/OrderModal.tsx` - Criação de pedidos no admin com opção de "Marcar como Pago" e "Retirada"
+- **Backend API (criação)**: `app/api/orders/route.ts` - Criação de pedidos (suporta `mark_as_paid` e `payment_method`)
+- **Backend API (gateway)**: `app/api/payment/create/route.ts` - Criação de pagamentos via Pagar.me
+- **Backend API (aprovação manual em pedido existente)**: `app/api/orders/[id]/approve-payment/route.ts`
 - **Webhook**: `app/api/payment/webhook/route.ts` - Confirmação de pagamentos
 - **Integração Pagar.me**: `lib/pagarme.ts` - Funções de comunicação com API
 - **Regras de Pagamento**: `lib/payment-rules.ts` - Cálculo de descontos e juros
@@ -35,10 +38,11 @@ Armazena os pedidos do sistema. Campos relevantes para pagamento:
 
 - `id`: ID único do pedido
 - `status`: Status atual (`aguardando_pagamento`, `aguardando_producao`, etc.)
-- `total_items`: Soma dos valores dos produtos (sem frete)
-- `total_shipping`: Valor do frete selecionado pelo vendedor
-- `total`: Valor total do pedido (`total_items + total_shipping`)
-- `paid_at`: Timestamp de quando o pedido foi pago
+- `total_items`: Soma dos valores dos produtos (sem frete; sem desconto)
+- `total_shipping`: Valor do frete selecionado pelo vendedor (0 quando "Retirada" ou pedido só-digital)
+- `total`: Valor total do pedido (`total_items + total_shipping`; já com desconto Pix aplicado quando o pedido é criado pago via Pix Manual)
+- `shipping_method`: Método de envio escolhido. Para retirada na loja, persiste o literal `"Retirada"` e os demais campos de frete (`shipping_option_id`, `shipping_company_name`, `shipping_delivery_time`, `shipping_option_data`) ficam `NULL`
+- `paid_at`: Timestamp de quando o pedido foi pago (preenchido também na criação quando `mark_as_paid` é usado)
 - `payment_link_token`: Token do link de pagamento (se gerado)
 - `payment_link_expires_at`: Data de expiração do link
 
@@ -50,14 +54,18 @@ Registra todos os pagamentos realizados. Um pedido pode ter múltiplos pagamento
 
 - `id`: ID único do pagamento
 - `order_id`: ID do pedido (FK para `orders`)
-- `pagarme_transaction_id`: ID da transação no Pagar.me
-- `method`: Método de pagamento (`pix`, `credit_card`, `pix_manual`)
-- `installments`: Quantidade de parcelas (1 = à vista)
-- `amount`: Valor realmente cobrado (atualizado pelo webhook)
+- `pagarme_transaction_id`: ID da transação no Pagar.me (NULL para pagamentos manuais)
+- `method`: Método de pagamento. Valores possíveis:
+  - `pix` — PIX via Pagar.me
+  - `credit_card` — Cartão de crédito via Pagar.me
+  - `pix_manual` — PIX recebido fora do gateway, registrado pelo admin
+  - `credit_card_manual` — Cartão de crédito recebido fora do gateway (ex.: máquina física), registrado pelo admin
+- `installments`: Quantidade de parcelas (1 = à vista; sempre 1 para os métodos manuais)
+- `amount`: Valor realmente cobrado (atualizado pelo webhook nos pagamentos via gateway; igual ao `total` final do pedido para pagamentos manuais)
 - `status`: Status do pagamento (`pending`, `paid`, `failed`)
-- `paid_at`: Timestamp de confirmação do pagamento
+- `paid_at`: Timestamp de confirmação do pagamento (preenchido na criação quando manual)
 
-**Importante**: O campo `amount` é inicialmente salvo com o valor calculado, mas é **atualizado pelo webhook** com o valor real cobrado pelo Pagar.me.
+**Importante**: O campo `amount` para pagamentos via gateway é inicialmente salvo com o valor calculado e **atualizado pelo webhook** com o valor real cobrado pelo Pagar.me. Para pagamentos manuais o `amount` já é gravado com o `total` final do pedido (que pode incluir desconto Pix).
 
 ### Tabela `order_items`
 
@@ -291,6 +299,55 @@ flowchart TD
 
 Pagar.me calcula: `(5000 × 2) + (3000 × 3) + (2000 × 1) = 21000` centavos = R$ 210,00
 
+### Cenário 5: Criação de Pedido Já Pago (Manual) pelo Admin
+
+**Situação**: Admin cria um pedido em `admin/orders` para um cliente que já pagou por fora do sistema (ex.: PIX direto na conta bancária ou cartão na máquina física). O pedido deve nascer já como pago, sem passar pelo Pagar.me.
+
+**Onde**: `components/orders/OrderModal.tsx` (Step 4 - Revisão), card "Pedido Pago" (visível apenas em criação, `isNew`).
+
+**Fluxo**:
+
+1. **No frontend (admin)**
+   - Switch "Marcar pedido como Pago" (padrão off).
+   - Quando ativado, exibe um RadioGroup obrigatório: **Pix Manual** ou **Cartão de Crédito**.
+   - Se selecionar **Pix Manual** e houver desconto Pix configurado em `admin/settings`, o Resumo Financeiro mostra a linha "Desconto PIX" (apenas sobre os itens, não sobre o frete) e o novo total. O cálculo final exibido é apenas um preview — o valor gravado é recalculado no servidor.
+   - O botão "Confirmar e Salvar Pedido" fica desabilitado enquanto o switch estiver ativo sem método selecionado.
+   - O payload omite `total` quando `mark_as_paid = true` (servidor recalcula).
+
+2. **No backend (`POST /api/orders`)**
+   - Valida `payment_method` ∈ {`pix_manual`, `credit_card_manual`} quando `mark_as_paid = true`.
+   - Recalcula `itemsTotal` a partir dos itens (fonte de verdade).
+   - Se `payment_method === 'pix_manual'`, aplica `calculatePixDiscount(itemsTotal)` e usa `finalItems + shipping` como `total`. Para cartão manual, não há desconto: `total = itemsTotal + shipping`.
+   - Insere o pedido com `status = 'aguardando_producao'` e `paid_at = CURRENT_TIMESTAMP`.
+   - Insere `payments (method, installments=1, amount=total final, status='paid', paid_at=now)`.
+   - Insere `order_history` registrando a mudança implícita `aguardando_pagamento → aguardando_producao` (com `changed_by = user.id`).
+   - Tenta `syncOrderToBling(orderId)` em modo best-effort (falha não bloqueia a criação; pedido permanece com `bling_sync_status='pending'` para reenvio manual).
+   - Registra log enriquecido com `mark_as_paid`, `payment_method`, `pix_discount`, `created_by`.
+
+**Regras importantes**:
+- Disponível **apenas na criação** do pedido. A edição não exibe o card e mantém o fluxo de aprovação manual existente em `POST /api/orders/[id]/approve-payment`.
+- O `total_items` é gravado **sem** desconto (auditoria); o desconto se reflete somente em `orders.total` e em `payments.amount`.
+- Se houver falha ao registrar o `payment` ou `order_history`, é gerado log de erro mas a criação do pedido **não falha** — o admin pode aprovar o pagamento manualmente depois.
+
+### Cenário 6: Pedido com Frete "Retirada" (sem entrega)
+
+**Situação**: Admin cria um pedido em que o cliente irá retirar pessoalmente. Não há cobrança de frete.
+
+**Onde**: `components/orders/OrderModal.tsx` (Step 3 - Endereço e Frete), botão "Marcar como Retirada (sem frete)" abaixo do `ShippingSelector`.
+
+**Fluxo**:
+
+1. **No frontend**
+   - Após selecionar o endereço, o admin pode clicar em "Cotar Frete" (fluxo padrão) **ou** em "Marcar como Retirada (sem frete)".
+   - Ao escolher Retirada: `isPickup = true` e `selectedShipping = null`. O card de frete passa a exibir "Retirada — Sem entrega via transportadora", com botão "Voltar para cotação de frete".
+   - Mudanças posteriores em itens ou endereço **resetam** o estado de Retirada (mesmo padrão do `selectedShipping`), exibindo o aviso amarelo de revisão.
+
+2. **No backend (`POST /api/orders`)**
+   - Recebe `shipping_method = "Retirada"` e `total_shipping = 0`.
+   - Demais campos de frete (`shipping_option_id`, `shipping_company_name`, `shipping_delivery_time`, `shipping_option_data`) são gravados como `NULL`.
+
+**Compatibilidade com integrações**: O Bling não consome `shipping_method`, apenas `total_shipping` e o endereço de entrega — portanto não há impacto na sincronização. Filtros e dashboards que mostram `shipping_method` exibem o literal `"Retirada"` naturalmente.
+
 ---
 
 ## Regras de Negócio
@@ -332,6 +389,22 @@ Pagar.me calcula: `(5000 × 2) + (3000 × 3) + (2000 × 1) = 21000` centavos = R
 - `quantity` é a quantidade
 - Pagar.me multiplica automaticamente: `totalItem = amount × quantity`
 - Frete é adicionado como item separado quando há diferença entre total e soma dos produtos
+
+### Regra 7: Pagamento Manual na Criação do Pedido
+
+- Disponível apenas na **criação** do pedido em `admin/orders` (não na edição).
+- Métodos aceitos: `pix_manual` e `credit_card_manual`. Outros valores fazem o backend retornar `400`.
+- Quando ativo, o servidor é a **fonte de verdade** do `total`: o frontend não envia `total` e o backend recalcula (segurança contra manipulação).
+- O desconto Pix configurado em `admin/settings` é aplicado **apenas** quando `payment_method = 'pix_manual'`, sobre `total_items` (sem frete), via `calculatePixDiscount` (mesma função usada no checkout público).
+- O pedido é criado com `status = 'aguardando_producao'`, `paid_at = now()`, e o `payment` correspondente nasce com `status = 'paid'`, `installments = 1` e `amount = total final`.
+- A sincronização com Bling (`syncOrderToBling`) é disparada em modo best-effort após o registro — falhas não interrompem a criação.
+
+### Regra 8: Frete "Retirada"
+
+- Disponível na criação/edição do pedido, no Step 3 (Frete), apenas quando há itens físicos.
+- Persiste `shipping_method = 'Retirada'` (literal), `total_shipping = 0` e os demais campos de frete como `NULL`.
+- Mutações em itens ou endereço resetam o estado de Retirada para forçar nova decisão (mesmo padrão de invalidação do `selectedShipping`).
+- Aceito normalmente pelo Bling, dashboards e relatórios — exibido como badge de texto "Retirada".
 
 ---
 

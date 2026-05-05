@@ -94,10 +94,12 @@ Página inicial do sistema que exibe métricas e estatísticas importantes:
 ### Gestão de Pedidos
 Permite criar, visualizar e gerenciar pedidos:
 - Criação de novos pedidos com seleção de cliente e produtos
+- Modalidade de frete **"Retirada"** (zera o frete) como alternativa à cotação automática
+- **Marcar pedido como Pago** já na criação (via Pix Manual ou Cartão de Crédito Manual), com aplicação automática do desconto Pix configurado quando aplicável
 - Visualização detalhada de cada pedido
 - Atualização de status (aguardando pagamento, em produção, enviado, etc.)
 - Geração de links de pagamento
-- Aprovação manual de pagamentos
+- Aprovação manual de pagamentos em pedidos existentes
 - Cancelamento de pedidos
 - Sincronização automática com Bling quando o pedido é pago
 

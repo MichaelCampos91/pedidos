@@ -15,7 +15,9 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Save, Plus, Trash2, MessageCircle, Truck, User, Package, MapPin, ArrowLeft, ArrowRight, AlertCircle, Edit, CheckCircle2, FileText } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Loader2, Save, Plus, Trash2, MessageCircle, Truck, User, Package, MapPin, ArrowLeft, ArrowRight, AlertCircle, Edit, CheckCircle2, FileText, Store, Wallet } from "lucide-react"
 import { ordersApi, clientsApi, productsApi } from "@/lib/api"
 import { formatCurrency, formatCPF, formatPhone } from "@/lib/utils"
 import { ShippingSelector, type ShippingOption } from "@/components/shipping/ShippingSelector"
@@ -45,6 +47,28 @@ const STEPS = [
   { id: 4, name: "Revisão", description: "Revise o pedido", icon: FileText },
 ]
 
+type PaymentMethodOption = '' | 'pix_manual' | 'credit_card_manual'
+
+interface PixDiscountConfig {
+  active: boolean
+  discount_type: 'percentage' | 'fixed' | null
+  discount_value: number | null
+}
+
+// Espelha lib/payment-rules.ts:calculatePixDiscount para preview na UI.
+// O cálculo final, gravado no banco, é feito no servidor (fonte de verdade).
+function calcPixDiscountUI(itemsTotal: number, cfg: PixDiscountConfig | null): { discount: number; finalItems: number } {
+  if (!cfg || !cfg.active || !cfg.discount_type || cfg.discount_value == null) {
+    return { discount: 0, finalItems: itemsTotal }
+  }
+  const v = Number(cfg.discount_value)
+  if (!Number.isFinite(v) || v <= 0) {
+    return { discount: 0, finalItems: itemsTotal }
+  }
+  const discount = cfg.discount_type === 'percentage' ? (itemsTotal * v) / 100 : v
+  return { discount, finalItems: Math.max(0, itemsTotal - discount) }
+}
+
 interface OrderModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -67,6 +91,10 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
   const [showNewAddressForm, setShowNewAddressForm] = useState(false)
   const [showAddressSelector, setShowAddressSelector] = useState(false)
   const [freteClearedWarning, setFreteClearedWarning] = useState(false)
+  const [isPickup, setIsPickup] = useState(false)
+  const [markAsPaid, setMarkAsPaid] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodOption>('')
+  const [pixDiscountConfig, setPixDiscountConfig] = useState<PixDiscountConfig | null>(null)
   const previousItemsRef = useRef<string>('')
   const previousAddressRef = useRef<number | null>(null)
   
@@ -100,6 +128,37 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     fetchActiveEnvironment()
   }, [])
 
+  // Buscar configuração de desconto PIX para preview na UI
+  useEffect(() => {
+    const fetchPixDiscount = async () => {
+      try {
+        const response = await fetch('/api/settings/payment', {
+          credentials: 'include',
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        const settings: any[] = Array.isArray(data?.paymentSettings) ? data.paymentSettings : []
+        const pix = settings.find(
+          (s) => s.payment_method === 'pix' && s.setting_type === 'discount' && s.active === true
+        )
+        if (pix) {
+          setPixDiscountConfig({
+            active: true,
+            discount_type: pix.discount_type ?? null,
+            discount_value: pix.discount_value != null ? Number(pix.discount_value) : null,
+          })
+        } else {
+          setPixDiscountConfig(null)
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Erro ao buscar configuração de desconto PIX:', error)
+        }
+      }
+    }
+    fetchPixDiscount()
+  }, [])
+
   useEffect(() => {
     if (open) {
       loadProducts()
@@ -117,14 +176,16 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     const itemsKey = JSON.stringify(formData.items.map(i => ({ id: i.product_id, qty: i.quantity })))
     const addressId = formData.shipping_address_id ? parseInt(formData.shipping_address_id) : null
 
-    // Se frete estava selecionado e itens ou endereço mudaram
-    if (selectedShipping) {
+    // Se frete (cotado ou retirada) estava definido e itens ou endereço mudaram
+    if (selectedShipping || isPickup) {
       if (previousItemsRef.current && previousItemsRef.current !== itemsKey) {
         setSelectedShipping(null)
+        setIsPickup(false)
         setFreteClearedWarning(true)
         setTimeout(() => setFreteClearedWarning(false), 5000)
       } else if (previousAddressRef.current !== null && previousAddressRef.current !== addressId) {
         setSelectedShipping(null)
+        setIsPickup(false)
         setFreteClearedWarning(true)
         setTimeout(() => setFreteClearedWarning(false), 5000)
       }
@@ -132,7 +193,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
 
     previousItemsRef.current = itemsKey
     previousAddressRef.current = addressId
-  }, [formData.items, formData.shipping_address_id, selectedShipping])
+  }, [formData.items, formData.shipping_address_id, selectedShipping, isPickup])
 
   const resetForm = () => {
     setFormData({
@@ -148,6 +209,9 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     setShowNewAddressForm(false)
     setShowAddressSelector(false)
     setFreteClearedWarning(false)
+    setIsPickup(false)
+    setMarkAsPaid(false)
+    setPaymentMethod('')
     previousItemsRef.current = ''
     previousAddressRef.current = null
   }
@@ -168,6 +232,10 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
 
     try {
       setLoadingData(true)
+      // Garantir que controles de criação não vazem para o modo edição
+      setIsPickup(false)
+      setMarkAsPaid(false)
+      setPaymentMethod('')
       const order = await ordersApi.get(orderId)
       
       // Load client
@@ -322,7 +390,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
     const itemsTotal = formData.items.reduce((sum, item) => {
       return sum + (parseFloat(item.price || 0) * parseInt(item.quantity || 1))
     }, 0)
-    const shippingTotal = selectedShipping ? parseFloat(selectedShipping.price) : 0
+    const shippingTotal = isPickup ? 0 : (selectedShipping ? parseFloat(selectedShipping.price) : 0)
     return itemsTotal + shippingTotal
   }
 
@@ -350,8 +418,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
       toast.warning('Selecione um endereço de entrega')
       return
     }
-    if (currentStep === 3 && hasPhysicalItems && !selectedShipping) {
-      toast.warning('Selecione uma modalidade de frete')
+    if (currentStep === 3 && hasPhysicalItems && !selectedShipping && !isPickup) {
+      toast.warning('Selecione uma modalidade de frete ou marque como Retirada')
       return
     }
 
@@ -405,8 +473,12 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
       toast.warning('Selecione um endereço de entrega antes de salvar o pedido')
       return
     }
-    if (hasPhysicalItems && !selectedShipping) {
-      toast.warning('Selecione uma modalidade de frete antes de salvar o pedido')
+    if (hasPhysicalItems && !selectedShipping && !isPickup) {
+      toast.warning('Selecione uma modalidade de frete ou marque como Retirada antes de salvar o pedido')
+      return
+    }
+    if (isNew && markAsPaid && !paymentMethod) {
+      toast.warning('Selecione uma forma de pagamento')
       return
     }
 
@@ -417,7 +489,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         return sum + (parseFloat(item.price || 0) * parseInt(item.quantity || 1))
       }, 0)
       // total_shipping deve vir somente da opção selecionada (0 = frete grátis; > 0 = modalidade paga)
-      const shippingTotal = selectedShipping ? parseFloat(selectedShipping.price) : 0
+      // Quando isPickup, frete é sempre 0 (retirada não cobra frete).
+      const shippingTotal = isPickup ? 0 : (selectedShipping ? parseFloat(selectedShipping.price) : 0)
 
       const orderData: any = {
         client_id: parseInt(formData.client_id),
@@ -430,11 +503,19 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         })),
         shipping_address_id: formData.shipping_address_id ? parseInt(formData.shipping_address_id) : null,
         total_items: itemsTotal,
-        total: itemsTotal + shippingTotal,
+      }
+
+      // Quando o pedido for marcado como pago, o servidor é a fonte de verdade do total
+      // (recalcula com desconto Pix, evita manipulação no client). Não envia 'total'.
+      if (!(isNew && markAsPaid)) {
+        orderData.total = itemsTotal + shippingTotal
       }
 
       // Add shipping data only when there are physical items and user selected a shipping option
-      if (hasPhysicalItems && selectedShipping) {
+      if (hasPhysicalItems && isPickup) {
+        orderData.shipping_method = 'Retirada'
+        orderData.total_shipping = 0
+      } else if (hasPhysicalItems && selectedShipping) {
         orderData.shipping_method = selectedShipping.name
         orderData.shipping_option_id = selectedShipping.id.toString()
         orderData.shipping_company_name = selectedShipping.company.name
@@ -450,6 +531,12 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
         }
       } else {
         orderData.total_shipping = 0
+      }
+
+      // Pagamento manual ao criar o pedido (apenas em modo de criação)
+      if (isNew && markAsPaid && paymentMethod) {
+        orderData.mark_as_paid = true
+        orderData.payment_method = paymentMethod
       }
 
       if (isNew) {
@@ -474,6 +561,15 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
   const itemsTotal = formData.items.reduce((sum, item) => {
     return sum + (parseFloat(item.price || 0) * parseInt(item.quantity || 1))
   }, 0)
+
+  // Preview de desconto PIX (apenas em criação, com Pix Manual selecionado e desconto ativo).
+  // Cálculo final é responsabilidade do servidor; aqui é apenas para exibição.
+  const applyPixDiscount = isNew && markAsPaid && paymentMethod === 'pix_manual' && !!pixDiscountConfig?.active
+  const pixPreview = applyPixDiscount
+    ? calcPixDiscountUI(itemsTotal, pixDiscountConfig)
+    : { discount: 0, finalItems: itemsTotal }
+  const shippingPreview = isPickup ? 0 : (selectedShipping ? parseFloat(selectedShipping.price) : 0)
+  const finalTotalPreview = pixPreview.finalItems + shippingPreview
 
   // Itens físicos: têm produto do catálogo com ao menos uma dimensão/peso (para cotação de frete)
   const hasPhysicalItems = useMemo(() => {
@@ -909,6 +1005,33 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                     <p className="text-center text-muted-foreground py-8">
                       Este pedido contém apenas itens digitais. Não é necessário selecionar frete.
                     </p>
+                  ) : isPickup ? (
+                    <div className="space-y-4">
+                      <div className="p-4 border rounded-lg bg-primary/5 border-primary">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <Store className="h-5 w-5 text-primary" />
+                              <Badge variant="outline">Retirada</Badge>
+                              <span className="font-semibold">Sem entrega via transportadora</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              O cliente irá retirar o pedido. Nenhum valor de frete será cobrado.
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xl font-bold">{formatCurrency(0)}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setIsPickup(false)}
+                      >
+                        Voltar para cotação de frete
+                      </Button>
+                    </div>
                   ) : (
                     <>
                       {selectedShipping ? (
@@ -941,14 +1064,28 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                           </Button>
                         </div>
                       ) : (
-                        <ShippingSelector
-                          cep={selectedAddress.cep}
-                          produtos={physicalProductsForQuote}
-                          orderValue={itemsTotal}
-                          destinationState={selectedAddress?.state}
-                          onSelect={handleShippingSelect}
-                          showSourceBadge={true}
-                        />
+                        <div className="space-y-3">
+                          <ShippingSelector
+                            cep={selectedAddress.cep}
+                            produtos={physicalProductsForQuote}
+                            orderValue={itemsTotal}
+                            destinationState={selectedAddress?.state}
+                            onSelect={handleShippingSelect}
+                            showSourceBadge={true}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setIsPickup(true)
+                              setSelectedShipping(null)
+                            }}
+                            className="w-full"
+                          >
+                            <Store className="mr-2 h-4 w-4" />
+                            Marcar como Retirada (sem frete)
+                          </Button>
+                        </div>
                       )}
                     </>
                   )}
@@ -1151,7 +1288,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                         <Truck className="h-5 w-5" />
                         <CardTitle>Frete</CardTitle>
                       </div>
-                      {hasPhysicalItems && selectedShipping && (
+                      {hasPhysicalItems && (selectedShipping || isPickup) && (
                         <Button
                           type="button"
                           variant="outline"
@@ -1169,6 +1306,24 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                       <p className="text-sm text-muted-foreground">
                         Este pedido contém apenas itens digitais. Não é necessário frete.
                       </p>
+                    ) : isPickup ? (
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <Store className="h-5 w-5 text-primary" />
+                              <Badge variant="outline">Retirada</Badge>
+                              <span className="font-semibold">Sem entrega via transportadora</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              O cliente irá retirar o pedido. Nenhum valor de frete será cobrado.
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-2xl font-bold">{formatCurrency(0)}</p>
+                          </div>
+                        </div>
+                      </div>
                     ) : selectedShipping ? (
                       <div className="space-y-3">
                         <div className="flex items-start justify-between">
@@ -1267,13 +1422,31 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                         <span className="text-sm text-muted-foreground">Subtotal dos Itens:</span>
                         <span className="font-medium">{formatCurrency(itemsTotal)}</span>
                       </div>
-                      {selectedShipping && (
+                      {applyPixDiscount && pixPreview.discount > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-green-700">
+                            Desconto PIX
+                            {pixDiscountConfig?.discount_type === 'percentage' && pixDiscountConfig.discount_value != null
+                              ? ` (-${Number(pixDiscountConfig.discount_value)}%)`
+                              : ''}
+                            :
+                          </span>
+                          <span className="font-medium text-green-700">
+                            -{formatCurrency(pixPreview.discount)}
+                          </span>
+                        </div>
+                      )}
+                      {isPickup ? (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-muted-foreground">Frete (Retirada):</span>
+                          <span className="font-medium">{formatCurrency(0)}</span>
+                        </div>
+                      ) : selectedShipping ? (
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">Frete:</span>
                           <span className="font-medium">{formatCurrency(parseFloat(selectedShipping.price))}</span>
                         </div>
-                      )}
-                      {!selectedShipping && (
+                      ) : (
                         <div className="flex justify-between items-center text-sm text-muted-foreground">
                           <span>Frete:</span>
                           <span>Não selecionado</span>
@@ -1283,13 +1456,83 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                         <div className="flex justify-between items-center">
                           <span className="text-lg font-semibold">Total do Pedido:</span>
                           <span className="text-2xl font-bold text-primary">
-                            {formatCurrency(calculateTotal())}
+                            {formatCurrency(finalTotalPreview)}
                           </span>
                         </div>
+                        {applyPixDiscount && pixPreview.discount > 0 && (
+                          <p className="text-xs text-muted-foreground mt-1 text-right">
+                            Valor final será confirmado ao salvar (cálculo do servidor).
+                          </p>
+                        )}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* Pedido Pago (apenas em criação) */}
+                {isNew && (
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <Wallet className="h-5 w-5" />
+                        <CardTitle>Pedido Pago</CardTitle>
+                      </div>
+                      <CardDescription>
+                        Marque caso o pagamento já tenha sido realizado fora do sistema.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <Switch
+                          id="mark_as_paid"
+                          checked={markAsPaid}
+                          onCheckedChange={(checked) => {
+                            setMarkAsPaid(checked)
+                            if (!checked) setPaymentMethod('')
+                          }}
+                        />
+                        <Label htmlFor="mark_as_paid" className="cursor-pointer">
+                          Marcar pedido como Pago
+                        </Label>
+                      </div>
+
+                      {markAsPaid && (
+                        <div className="space-y-3 pl-1">
+                          <Label>
+                            Selecione uma forma de Pagamento: <span className="text-destructive">*</span>
+                          </Label>
+                          <RadioGroup
+                            value={paymentMethod}
+                            onValueChange={(value) => setPaymentMethod(value as PaymentMethodOption)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <RadioGroupItem id="pm_pix" value="pix_manual" />
+                              <Label htmlFor="pm_pix" className="cursor-pointer font-normal">
+                                Pix Manual
+                              </Label>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <RadioGroupItem id="pm_cc" value="credit_card_manual" />
+                              <Label htmlFor="pm_cc" className="cursor-pointer font-normal">
+                                Cartão de Crédito
+                              </Label>
+                            </div>
+                          </RadioGroup>
+                          {paymentMethod === 'pix_manual' && pixDiscountConfig?.active && pixPreview.discount > 0 && (
+                            <p className="text-xs text-green-700">
+                              Desconto PIX será aplicado sobre o valor dos itens (não inclui o frete).
+                            </p>
+                          )}
+                          {paymentMethod === 'pix_manual' && (!pixDiscountConfig?.active || pixPreview.discount === 0) && (
+                            <p className="text-xs text-muted-foreground">
+                              Nenhum desconto PIX configurado em Configurações &gt; Pagamento.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Validações e Avisos */}
                 {(!formData.client_id || formData.items.length === 0 || !formData.shipping_address_id) && (
@@ -1341,7 +1584,14 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
               ) : (
                 <Button 
                   type="submit" 
-                  disabled={loading || !formData.client_id || formData.items.length === 0 || !formData.shipping_address_id || !selectedShipping}
+                  disabled={
+                    loading
+                    || !formData.client_id
+                    || formData.items.length === 0
+                    || !formData.shipping_address_id
+                    || (hasPhysicalItems && !selectedShipping && !isPickup)
+                    || (isNew && markAsPaid && !paymentMethod)
+                  }
                 >
                   {loading ? (
                     <>
