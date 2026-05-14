@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
-import { validateCPF } from '@/lib/utils'
+import { validateCPF, validateCNPJ } from '@/lib/utils'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -98,38 +98,62 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { cpf, cnpj, name, email, phone, whatsapp, addresses } = body
 
-    const cleanCPF = cpf?.replace(/\D/g, '')
+    const cleanCPF = cpf ? String(cpf).replace(/\D/g, '') : ''
+    const cleanCNPJ = cnpj ? String(cnpj).replace(/\D/g, '') : ''
     const cleanWhatsApp = whatsapp?.replace(/\D/g, '') // apenas para validação de preenchimento
 
-    if (!cleanCPF || !name?.trim() || !cleanWhatsApp) {
+    // Regra: pelo menos um dos documentos (CPF ou CNPJ) é obrigatório.
+    // Quando CNPJ for informado e válido, CPF é opcional, e vice-versa.
+    if ((!cleanCPF && !cleanCNPJ) || !name?.trim() || !cleanWhatsApp) {
       return NextResponse.json(
-        { error: 'Campos obrigatórios: CPF, nome e WhatsApp' },
+        { error: 'Campos obrigatórios: CPF ou CNPJ, nome e WhatsApp' },
         { status: 400 }
       )
     }
 
-    if (!validateCPF(cleanCPF)) {
+    if (cleanCPF && !validateCPF(cleanCPF)) {
       return NextResponse.json(
         { error: 'CPF inválido' },
         { status: 400 }
       )
     }
 
-    // Verifica se CPF já existe
-    const existingResult = await query('SELECT id FROM clients WHERE cpf = $1', [cleanCPF])
-    if (existingResult.rows.length > 0) {
+    if (cleanCNPJ && !validateCNPJ(cleanCNPJ)) {
       return NextResponse.json(
-        { error: 'CPF já cadastrado' },
+        { error: 'CNPJ inválido' },
         { status: 400 }
       )
     }
 
-    // Insere cliente
+    // Verifica duplicidade de CPF (apenas se informado)
+    if (cleanCPF) {
+      const existingResult = await query('SELECT id FROM clients WHERE cpf = $1', [cleanCPF])
+      if (existingResult.rows.length > 0) {
+        return NextResponse.json(
+          { error: 'CPF já cadastrado' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Verifica duplicidade de CNPJ (apenas se informado)
+    if (cleanCNPJ) {
+      const existingCnpj = await query('SELECT id FROM clients WHERE cnpj = $1', [cleanCNPJ])
+      if (existingCnpj.rows.length > 0) {
+        return NextResponse.json(
+          { error: 'CNPJ já cadastrado' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Insere cliente. CPF/CNPJ vão como NULL quando vazios para respeitar UNIQUE constraints
+    // (em PostgreSQL, NULLs em UNIQUE são considerados distintos).
     const result = await query(
       `INSERT INTO clients (cpf, cnpj, name, email, phone, whatsapp)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
-      [cleanCPF, cnpj?.replace(/\D/g, '') || null, name?.trim() || null, email || null, (phone != null && String(phone).trim() !== '') ? String(phone).trim() : null, (whatsapp != null && String(whatsapp).trim() !== '') ? String(whatsapp).trim() : null]
+      [cleanCPF || null, cleanCNPJ || null, name?.trim() || null, email || null, (phone != null && String(phone).trim() !== '') ? String(phone).trim() : null, (whatsapp != null && String(whatsapp).trim() !== '') ? String(whatsapp).trim() : null]
     )
 
     const clientId = result.rows[0].id
@@ -158,8 +182,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, id: clientId })
   } catch (error: any) {
     if (error.code === '23505') { // Unique violation
+      const detail: string = error.detail || ''
+      const isCnpj = /\bcnpj\b/i.test(detail) || /idx_clients_cnpj/i.test(error.constraint || '')
       return NextResponse.json(
-        { error: 'CPF já cadastrado' },
+        { error: isCnpj ? 'CNPJ já cadastrado' : 'CPF já cadastrado' },
         { status: 400 }
       )
     }

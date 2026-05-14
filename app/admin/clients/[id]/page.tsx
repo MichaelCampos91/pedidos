@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, Save, Plus, Trash2 } from "lucide-react"
 import { clientsApi, cepApi } from "@/lib/api"
-import { formatCPF, formatCNPJ, formatPhone, maskPhone, maskCEP, unmaskPhone, unmaskCEP } from "@/lib/utils"
+import { formatCPF, formatCNPJ, formatPhone, maskPhone, maskCEP, unmaskPhone, unmaskCEP, validateCPF, validateCNPJ } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 
 export default function ClientFormPage() {
@@ -59,6 +59,25 @@ export default function ClientFormPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    // Regra: CPF é opcional quando CNPJ válido for informado, e vice-versa.
+    // Pelo menos um documento (CPF ou CNPJ) é obrigatório.
+    const cleanCpf = formData.cpf.replace(/\D/g, '')
+    const cleanCnpj = formData.cnpj.replace(/\D/g, '')
+
+    if (!cleanCpf && !cleanCnpj) {
+      toast.warning('Informe ao menos CPF ou CNPJ.')
+      return
+    }
+    if (cleanCpf && !validateCPF(cleanCpf)) {
+      toast.warning('CPF inválido.')
+      return
+    }
+    if (cleanCnpj && !validateCNPJ(cleanCnpj)) {
+      toast.warning('CNPJ inválido.')
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -68,8 +87,8 @@ export default function ClientFormPage() {
       const dataToSend = {
         ...formData,
         name: formData.name.trim(),
-        cpf: formData.cpf.replace(/\D/g, ''),
-        cnpj: formData.cnpj ? formData.cnpj.replace(/\D/g, '') : '',
+        cpf: cleanCpf,
+        cnpj: cleanCnpj,
         phone: formData.phone ? formData.phone.trim() : '',
         whatsapp: formData.whatsapp ? formData.whatsapp.trim() : '',
         bling_contact_id: blingContactIdValue,
@@ -161,19 +180,25 @@ export default function ClientFormPage() {
             <CardDescription>Informações básicas do cliente</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Informe ao menos um documento: CPF ou CNPJ.
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="cpf">CPF *</Label>
+                <Label htmlFor="cpf">
+                  CPF{!formData.cnpj.replace(/\D/g, '') ? ' *' : ''}
+                </Label>
                 <Input
                   id="cpf"
                   value={formData.cpf}
                   onChange={(e) => setFormData({ ...formData, cpf: formatCPF(e.target.value) })}
                   placeholder="000.000.000-00"
-                  required
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="cnpj">CNPJ</Label>
+                <Label htmlFor="cnpj">
+                  CNPJ{!formData.cpf.replace(/\D/g, '') ? ' *' : ''}
+                </Label>
                 <Input
                   id="cnpj"
                   value={formData.cnpj}

@@ -102,6 +102,33 @@ export function validateCPF(cpf: string): boolean {
   return true
 }
 
+export function validateCNPJ(cnpj: string): boolean {
+  const cleaned = cnpj.replace(/\D/g, '')
+  if (cleaned.length !== 14) return false
+
+  if (/^(\d)\1{13}$/.test(cleaned)) return false
+
+  const calcCheckDigit = (base: string): number => {
+    const weights = base.length === 12
+      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    let sum = 0
+    for (let i = 0; i < base.length; i++) {
+      sum += parseInt(base.charAt(i)) * weights[i]
+    }
+    const remainder = sum % 11
+    return remainder < 2 ? 0 : 11 - remainder
+  }
+
+  const firstDigit = calcCheckDigit(cleaned.substring(0, 12))
+  if (firstDigit !== parseInt(cleaned.charAt(12))) return false
+
+  const secondDigit = calcCheckDigit(cleaned.substring(0, 13))
+  if (secondDigit !== parseInt(cleaned.charAt(13))) return false
+
+  return true
+}
+
 /**
  * Aplica máscara de telefone brasileiro com código do país
  * Formato: +55 (99) 99999-9999 ou +55 (99) 9999-9999

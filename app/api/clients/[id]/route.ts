@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { query, getDatabase } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
-import { validateCPF } from '@/lib/utils'
+import { validateCPF, validateCNPJ } from '@/lib/utils'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -78,30 +78,52 @@ export async function PUT(
     const whatsappStr = whatsapp != null ? String(whatsapp) : ''
 
     const cleanCPF = cpfStr.replace(/\D/g, '')
+    const cleanCNPJ = cnpjStr.replace(/\D/g, '')
     const cleanWhatsApp = whatsappStr.replace(/\D/g, '')
 
     const nameStr = name != null ? String(name).trim() : ''
-    if (!cleanCPF || !nameStr || !cleanWhatsApp) {
+    // Regra: pelo menos um dos documentos (CPF ou CNPJ) é obrigatório.
+    if ((!cleanCPF && !cleanCNPJ) || !nameStr || !cleanWhatsApp) {
       return NextResponse.json(
-        { error: 'Campos obrigatórios: CPF, nome e WhatsApp' },
+        { error: 'Campos obrigatórios: CPF ou CNPJ, nome e WhatsApp' },
         { status: 400 }
       )
     }
 
-    if (!validateCPF(cleanCPF)) {
+    if (cleanCPF && !validateCPF(cleanCPF)) {
       return NextResponse.json(
         { error: 'CPF inválido' },
         { status: 400 }
       )
     }
 
-    // Verifica se CPF já existe em outro cliente
-    const existingResult = await query('SELECT id FROM clients WHERE cpf = $1 AND id != $2', [cleanCPF, params.id])
-    if (existingResult.rows.length > 0) {
+    if (cleanCNPJ && !validateCNPJ(cleanCNPJ)) {
       return NextResponse.json(
-        { error: 'CPF já cadastrado para outro cliente' },
+        { error: 'CNPJ inválido' },
         { status: 400 }
       )
+    }
+
+    // Verifica duplicidade de CPF em outro cliente (se informado)
+    if (cleanCPF) {
+      const existingResult = await query('SELECT id FROM clients WHERE cpf = $1 AND id != $2', [cleanCPF, params.id])
+      if (existingResult.rows.length > 0) {
+        return NextResponse.json(
+          { error: 'CPF já cadastrado para outro cliente' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Verifica duplicidade de CNPJ em outro cliente (se informado)
+    if (cleanCNPJ) {
+      const existingCnpj = await query('SELECT id FROM clients WHERE cnpj = $1 AND id != $2', [cleanCNPJ, params.id])
+      if (existingCnpj.rows.length > 0) {
+        return NextResponse.json(
+          { error: 'CNPJ já cadastrado para outro cliente' },
+          { status: 400 }
+        )
+      }
     }
 
     const pool = getDatabase()
@@ -118,7 +140,7 @@ export async function PUT(
           whatsapp = $6,
           bling_contact_id = $7
         WHERE id = $8`,
-        [cleanCPF, (cnpjStr.replace(/\D/g, '') || null), nameStr || null, (email != null && String(email).trim() !== '') ? String(email).trim() : null, (phoneStr.trim() !== '') ? phoneStr.trim() : null, (whatsappStr.trim() !== '') ? whatsappStr.trim() : null, blingContactId, params.id]
+        [cleanCPF || null, cleanCNPJ || null, nameStr || null, (email != null && String(email).trim() !== '') ? String(email).trim() : null, (phoneStr.trim() !== '') ? phoneStr.trim() : null, (whatsappStr.trim() !== '') ? whatsappStr.trim() : null, blingContactId, params.id]
       )
       // Endereços: atualizar existentes (com id), inserir novos (sem id), excluir só os removidos da lista
       const idsFromPayload: number[] = []
@@ -192,8 +214,10 @@ export async function PUT(
       console.error('[PUT /api/clients/:id] Erro:', error?.message ?? error)
     }
     if (error.code === '23505') {
+      const detail: string = error.detail || ''
+      const isCnpj = /\bcnpj\b/i.test(detail) || /idx_clients_cnpj/i.test(error.constraint || '')
       return NextResponse.json(
-        { error: 'CPF já cadastrado' },
+        { error: isCnpj ? 'CNPJ já cadastrado' : 'CPF já cadastrado' },
         { status: 400 }
       )
     }
