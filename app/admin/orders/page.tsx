@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { toast } from "@/lib/toast"
@@ -119,8 +119,9 @@ export default function OrdersPage() {
     orderId: number | null
   }>({ open: false, orderId: null })
 
-  const loadOrders = async () => {
-    setLoading(true)
+  const loadOrders = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false
+    if (!silent) setLoading(true)
     try {
       const params: any = {
         page: pagination.current_page,
@@ -159,13 +160,56 @@ export default function OrdersPage() {
         console.error("Erro ao carregar pedidos:", error)
       }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadOrders()
   }, [pagination.current_page, shippingStatusFilter, paymentStatusFilter])
+
+  // Manter sempre a versão mais recente de loadOrders (com filtros/página atuais) para o auto-refresh
+  const loadOrdersRef = useRef(loadOrders)
+  loadOrdersRef.current = loadOrders
+
+  // Auto-refresh silencioso: reflete rapidamente mudanças de status (ex.: PIX confirmado)
+  // sem refresh manual. Pausa quando a aba está oculta para não gerar carga desnecessária.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    const REFRESH_MS = 30000
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const start = () => {
+      if (interval) return
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          loadOrdersRef.current({ silent: true })
+        }
+      }, REFRESH_MS)
+    }
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval)
+        interval = null
+      }
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadOrdersRef.current({ silent: true })
+        start()
+      } else {
+        stop()
+      }
+    }
+
+    start()
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [])
 
   const handleSearch = () => {
     setPagination((prev) => ({ ...prev, current_page: 1 }))

@@ -40,8 +40,8 @@ export async function POST(request: NextRequest) {
       order?: { metadata?: { order_id?: string } }
       id?: string
       amount?: number
-      charge?: { id?: string; status?: string; amount?: number; last_transaction?: { status?: string } }
-      charges?: Array<{ id?: string; amount?: number; last_transaction?: { amount?: number } }>
+      charge?: { id?: string; status?: string; amount?: number; metadata?: { order_id?: string }; last_transaction?: { status?: string } }
+      charges?: Array<{ id?: string; amount?: number; metadata?: { order_id?: string }; last_transaction?: { amount?: number } }>
     }
     const data = (body.data ?? body) as WebhookData
 
@@ -49,8 +49,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Dados inválidos' }, { status: 400 })
     }
 
-    // Buscar order_id no metadata
-    const orderId = data.metadata?.order_id ?? data.order?.metadata?.order_id
+    // Buscar order_id no metadata. Eventos order.* trazem metadata no nível do pedido,
+    // mas eventos charge.* podem trazê-lo apenas dentro da cobrança.
+    const orderId =
+      data.metadata?.order_id ??
+      data.order?.metadata?.order_id ??
+      (Array.isArray(data.charges) ? data.charges[0]?.metadata?.order_id : undefined) ??
+      data.charge?.metadata?.order_id
 
     if (!orderId) {
       await saveLog('warning', 'Webhook Pagar.me sem order_id', { body })

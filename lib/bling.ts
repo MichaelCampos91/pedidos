@@ -171,6 +171,10 @@ export interface OrderForBling {
     quantity: number
     observations?: string | null
   }>
+  /** Valor efetivamente pago (payments.amount do último pagamento pago). Usado para refletir desconto PIX no Bling. */
+  paid_amount?: number | null
+  /** Método do último pagamento pago (ex.: 'pix', 'pix_manual', 'credit_card'). */
+  paid_method?: string | null
 }
 
 /**
@@ -1497,14 +1501,25 @@ export function mapOrderToBlingSale(order: OrderForBling, blingContactId?: numbe
     observacao: item.observations || undefined,
   }))
 
+  // Desconto PIX: refletir o valor efetivamente pago no Bling, preservando os preços dos itens.
+  // payments.amount (paid_amount) é o valor com desconto já aplicado (gateway ou pix_manual).
+  const fullValue = (Number(order.total_items) || 0) + (Number(order.total_shipping) || 0)
+  const isPix = order.paid_method === 'pix' || order.paid_method === 'pix_manual'
+  const paid = order.paid_amount != null ? Number(order.paid_amount) : null
+  const discount = isPix && paid != null ? Math.max(0, Number((fullValue - paid).toFixed(2))) : 0
+
   const payload: Record<string, unknown> = {
     numero,
     data: dataEmissao,
     contato,
     itens,
-    valorTotal: Number(order.total) || 0,
+    valorTotal: discount > 0 && paid != null ? Number(paid.toFixed(2)) : (Number(order.total) || 0),
     valorProdutos: Number(order.total_items) || 0,
     valorFrete: Number(order.total_shipping) || 0,
+  }
+
+  if (discount > 0) {
+    payload.desconto = { valor: discount, unidade: 'REAL' }
   }
 
   if (order.observations) {
@@ -1825,9 +1840,17 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
       `SELECT o.id, o.client_id, o.total, o.total_items, o.total_shipping, o.created_at, o.shipping_address_id,
               o.observations, o.bling_sale_numero,
               c.name as client_name, c.cpf as client_cpf, c.cnpj as client_cnpj, c.email as client_email,
-              c.whatsapp as client_whatsapp, c.phone as client_phone, c.bling_contact_id as client_bling_contact_id
+              c.whatsapp as client_whatsapp, c.phone as client_phone, c.bling_contact_id as client_bling_contact_id,
+              pay.paid_amount, pay.paid_method
        FROM orders o
        JOIN clients c ON o.client_id = c.id
+       LEFT JOIN LATERAL (
+         SELECT p.amount AS paid_amount, p.method AS paid_method
+         FROM payments p
+         WHERE p.order_id = o.id AND p.status = 'paid'
+         ORDER BY p.paid_at DESC NULLS LAST, p.created_at DESC
+         LIMIT 1
+       ) pay ON true
        WHERE o.id = $1`,
       [orderId]
     ) as { rows: Record<string, unknown>[] }
@@ -1893,6 +1916,8 @@ async function fetchOrderForBlingDb(orderId: number): Promise<OrderForBling | nu
       quantity: Number(i.quantity) ?? 1,
       observations: (i.observations as string | null) ?? null,
     })),
+    paid_amount: row.paid_amount != null ? Number(row.paid_amount) : null,
+    paid_method: (row.paid_method as string | null) ?? null,
   }
 
   return orderData

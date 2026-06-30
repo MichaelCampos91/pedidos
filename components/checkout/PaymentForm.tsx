@@ -27,6 +27,25 @@ const FALLBACK_INSTALLMENT_RATES: Array<{ installments: number; rate_percentage:
   { installments: 12, rate_percentage: 20.57 },
 ]
 
+/** Validade padrão do PIX (em segundos) usada na cobrança Pagar.me (expires_in: 3600). */
+const PIX_VALIDITY_SECONDS = 3600
+
+/**
+ * Calcula quantos segundos faltam até a expiração do PIX.
+ * Usa a data real retornada pelo Pagar.me (pix_expiration_date) quando disponível;
+ * caso contrário, assume a validade padrão de 1 hora.
+ */
+function getPixCountdownSeconds(pixExpirationDate?: string | null): number {
+  if (pixExpirationDate) {
+    const expiresAtMs = new Date(pixExpirationDate).getTime()
+    if (!Number.isNaN(expiresAtMs)) {
+      const remaining = Math.floor((expiresAtMs - Date.now()) / 1000)
+      if (remaining > 0) return remaining
+    }
+  }
+  return PIX_VALIDITY_SECONDS
+}
+
 interface PaymentFormProps {
   orderId: number
   total: number
@@ -98,7 +117,7 @@ export function PaymentForm({
   const [searchingCep, setSearchingCep] = useState(false)
   
   // Estados para PIX melhorado
-  const [countdown, setCountdown] = useState(600) // 10 minutos em segundos
+  const [countdown, setCountdown] = useState(PIX_VALIDITY_SECONDS) // validade do PIX em segundos (1h)
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'failed' | 'expired'>('pending')
   const [isChecking, setIsChecking] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -442,6 +461,7 @@ export function PaymentForm({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 transaction_id: pixTransactionId,
+                environment: activeEnvironment,
               }),
             })
             if (!confirmResponse.ok && process.env.NODE_ENV === 'development') {
@@ -573,13 +593,13 @@ export function PaymentForm({
           return
         }
       } catch (error) {
-        // Se erro ao parsear, resetar
+        // Se erro ao parsear, resetar para a validade padrão do PIX (1h)
         localStorage.removeItem(storageKey)
-        setCountdown(600) // Resetar para 10 minutos
+        setCountdown(PIX_VALIDITY_SECONDS)
       }
     } else {
       // Se não há dados salvos mas temos transactionId, resetar countdown
-      setCountdown(600)
+      setCountdown(PIX_VALIDITY_SECONDS)
     }
   }, [pixTransactionId, orderId, checkoutToken])
 
@@ -706,16 +726,17 @@ export function PaymentForm({
 
       // Salvar dados do PIX e iniciar cronômetro
       const transactionId = data.transaction.id
+      const pixValiditySeconds = getPixCountdownSeconds(data.transaction.pix_expiration_date)
       setPixTransactionId(transactionId)
       setPixData(data.transaction)
       setPaymentStatus('pending')
-      setCountdown(600) // 10 minutos
+      setCountdown(pixValiditySeconds) // validade real do PIX (até 1h)
 
       // Salvar timestamp e dados no localStorage para persistência
       if (typeof window !== 'undefined') {
         const tokenPart = checkoutToken ? `${checkoutToken}_` : ''
         const storageKey = `pix_countdown_${orderId}_${tokenPart}${transactionId}`
-        const expiresAt = Date.now() + 10 * 60 * 1000 // 10 minutos
+        const expiresAt = Date.now() + pixValiditySeconds * 1000
         localStorage.setItem(
           storageKey,
           JSON.stringify({
@@ -1062,7 +1083,7 @@ export function PaymentForm({
                       setPixData(null)
                       setPixTransactionId(null)
                       setPaymentStatus('pending')
-                      setCountdown(600)
+                      setCountdown(PIX_VALIDITY_SECONDS)
                       setPaymentMethod(null)
                     }}
                   >
