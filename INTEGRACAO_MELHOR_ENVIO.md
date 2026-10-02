@@ -333,6 +333,14 @@ O sistema trata diversos tipos de erros com diagnósticos específicos:
 
 **Solução**: Reautorizar usando authorization_code flow
 
+### Servidor Bloqueado pelo Firewall (403 em HTML)
+
+**Sintoma**: Mensagem "Acesso do servidor bloqueado pelo firewall do Melhor Envio". A API responde com uma página HTML `403 Forbidden` (nginx) em vez de JSON, inclusive em `GET /shipment/services`.
+
+**Causa**: O Melhor Envio recusa as requisições vindas do IP do servidor antes de avaliar o token. O mesmo token funciona quando chamado de outro IP.
+
+**Solução**: Não reautorize o app (não resolve). Solicite ao suporte do Melhor Envio o desbloqueio do IP público do servidor (`curl -s https://ifconfig.me` no servidor). Enquanto isso, a cotação continua retornando as modalidades do Contrato Correios.
+
 ### CEP Inválido
 
 **Sintoma**: Erro ao calcular frete com CEP inválido
@@ -366,8 +374,9 @@ Para otimizar performance e reduzir chamadas à API, o sistema implementa cache:
 
 1. **Use ambiente correto**: Sandbox para testes, produção para uso real
 2. **Configure CEP de origem**: Defina CEP correto na variável `MELHOR_ENVIO_CEP_ORIGEM`
-3. **Autorize via authorization_code**: Garante todas as permissões
-4. **Mantenha tokens atualizados**: Sistema renova automaticamente
+3. **Configure o e-mail técnico**: Defina `MELHOR_ENVIO_CONTACT_EMAIL`; ele é enviado no header `User-Agent` (`GerenciadorPedidos (email)`), formato exigido pelo Melhor Envio
+4. **Autorize via authorization_code**: Garante todas as permissões
+5. **Mantenha tokens atualizados**: Sistema renova automaticamente
 
 ### Cálculo de Frete
 

@@ -3,6 +3,11 @@ import { refreshOAuth2Token, isTokenExpired } from './melhor-envio-oauth'
 
 const MELHOR_ENVIO_CEP_ORIGEM = process.env.MELHOR_ENVIO_CEP_ORIGEM || '16010000'
 
+// O Melhor Envio exige User-Agent no formato "Nome da aplicação (email para contato técnico)"
+const MELHOR_ENVIO_USER_AGENT = process.env.MELHOR_ENVIO_CONTACT_EMAIL
+  ? `GerenciadorPedidos (${process.env.MELHOR_ENVIO_CONTACT_EMAIL})`
+  : 'GerenciadorPedidos/1.0'
+
 // URL base baseada no environment
 function getBaseUrl(environment: IntegrationEnvironment): string {
   return environment === 'sandbox'
@@ -15,7 +20,7 @@ function getBaseUrl(environment: IntegrationEnvironment): string {
  * Diferencia entre: token inválido/expirado, ambiente errado, falta de escopo/permissão
  */
 export interface Error401Diagnosis {
-  type: 'invalid_token' | 'wrong_environment' | 'missing_scope' | 'expired_token' | 'unknown'
+  type: 'invalid_token' | 'wrong_environment' | 'missing_scope' | 'expired_token' | 'blocked_by_provider' | 'unknown'
   message: string
   details: {
     environment: IntegrationEnvironment
@@ -43,6 +48,21 @@ export async function diagnose401Error(
 
   const errorMessage = errorData.message || errorData.error || errorText || 'Token não autorizado'
   const errorMessageLower = errorMessage.toLowerCase()
+
+  // A API responde erros de token em JSON; um 403 em HTML vem do firewall do Melhor Envio,
+  // que recusa a requisição antes de avaliar o token
+  if (responseStatus === 403 && /^\s*</.test(errorText)) {
+    return {
+      type: 'blocked_by_provider',
+      message: '[Melhor Envio] Acesso do servidor bloqueado pelo firewall do Melhor Envio.',
+      details: {
+        environment,
+        tokenPreview,
+        errorMessage: errorText.trim().substring(0, 300),
+        suggestion: 'O Melhor Envio recusou a conexão vinda deste servidor antes de verificar o token, então o token não é o problema e reautorizar o app não resolve. Solicite ao suporte do Melhor Envio o desbloqueio do IP público do servidor.',
+      },
+    }
+  }
 
   // Verificar se é problema de ambiente (token de sandbox usado em produção ou vice-versa)
   // O Melhor Envio pode retornar mensagens específicas sobre ambiente
@@ -245,7 +265,7 @@ export async function calculateShipping(
     'Authorization': `Bearer ${cleanToken}`,
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    'User-Agent': 'GerenciadorPedidos/1.0',
+    'User-Agent': MELHOR_ENVIO_USER_AGENT,
   }
 
   const requestBody = JSON.stringify(params)
@@ -313,8 +333,13 @@ export async function calculateShipping(
         suggestion: diagnosis.details.suggestion,
       })
       
-      // Tentar renovar token automaticamente (OAuth2) - apenas se não for problema de ambiente ou escopo
-      if (diagnosis.type !== 'wrong_environment' && diagnosis.type !== 'missing_scope' && tokenRecord) {
+      // Tentar renovar token automaticamente (OAuth2) - apenas se não for problema de ambiente, escopo ou bloqueio
+      if (
+        diagnosis.type !== 'wrong_environment' &&
+        diagnosis.type !== 'missing_scope' &&
+        diagnosis.type !== 'blocked_by_provider' &&
+        tokenRecord
+      ) {
         try {
           const refreshToken = tokenRecord.additional_data?.refresh_token
           const clientId = tokenRecord.additional_data?.client_id
@@ -419,7 +444,7 @@ export async function getShippingServices(
     headers: {
       'Authorization': `Bearer ${cleanToken}`,
       'Accept': 'application/json',
-      'User-Agent': 'GerenciadorPedidos/1.0',
+      'User-Agent': MELHOR_ENVIO_USER_AGENT,
     },
   })
 
@@ -478,7 +503,7 @@ export async function validateToken(
       headers: {
         'Authorization': `Bearer ${cleanToken}`,
         'Accept': 'application/json',
-        'User-Agent': 'GerenciadorPedidos/1.0',
+        'User-Agent': MELHOR_ENVIO_USER_AGENT,
       },
     })
 
@@ -499,7 +524,7 @@ export async function validateToken(
           'Authorization': `Bearer ${cleanToken}`,
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'User-Agent': 'GerenciadorPedidos/1.0',
+          'User-Agent': MELHOR_ENVIO_USER_AGENT,
         },
         body: JSON.stringify({
           from: { postal_code: '01310100' },

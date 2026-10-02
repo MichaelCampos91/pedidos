@@ -284,16 +284,23 @@ export async function POST(request: NextRequest) {
 
     console.log('[Shipping Quote] Ambiente selecionado:', environment)
 
-    // Chamar API do Melhor Envio
-    const shippingOptions = await calculateShipping({
-      from: {
-        postal_code: cleanCepOrigem,
-      },
-      to: {
-        postal_code: cleanCepDestino,
-      },
-      products: productsList,
-    }, environment)
+    // Chamar API do Melhor Envio (falha não impede as opções do Contrato Correios)
+    let shippingOptions: ShippingOption[] = []
+    let melhorEnvioError: Error | null = null
+    try {
+      shippingOptions = await calculateShipping({
+        from: {
+          postal_code: cleanCepOrigem,
+        },
+        to: {
+          postal_code: cleanCepDestino,
+        },
+        products: productsList,
+      }, environment)
+    } catch (meError: any) {
+      melhorEnvioError = meError
+      console.error('[Shipping Quote] Erro ao calcular frete com Melhor Envio, seguindo com as demais transportadoras:', meError?.message)
+    }
 
     let allOptions: ShippingOption[] = shippingOptions || []
 
@@ -402,6 +409,9 @@ export async function POST(request: NextRequest) {
 
     // Tratar resposta vazia
     if (!validOptions || validOptions.length === 0) {
+      if (melhorEnvioError) {
+        throw melhorEnvioError
+      }
       return NextResponse.json({
         success: true,
         options: [],
@@ -594,8 +604,9 @@ export async function POST(request: NextRequest) {
 
     // Se for erro 401/403 (mas não missing_scope), atualizar status do token no banco
     // missing_scope não marca como inválido porque o token é válido, só não tem permissão
+    const isBlockedByProvider = error.message.includes('bloqueado pelo firewall do Melhor Envio')
     if ((error.message.includes('401') || error.message.includes('403') || error.message.includes('inválido') || error.message.includes('expirado')) 
-        && !error.message.includes('sem permissões') && !error.message.includes('missing_scope')) {
+        && !error.message.includes('sem permissões') && !error.message.includes('missing_scope') && !isBlockedByProvider) {
       try {
         const token = await getToken('melhor_envio', environment)
         if (token) {
@@ -625,6 +636,13 @@ export async function POST(request: NextRequest) {
       errorSource = 'integration'
     }
     
+    // Servidor bloqueado pelo firewall do Melhor Envio (da integração)
+    else if (isBlockedByProvider) {
+      userFriendlyMessage = error.message
+      statusCode = 502
+      errorSource = 'integration'
+    }
+
     // Erro de permissão/escopo (da integração)
     else if (error.message.includes('sem permissões') || error.message.includes('missing_scope') || error.message.includes('permissões necessárias')) {
       userFriendlyMessage = error.message // Usar mensagem completa do diagnóstico que já inclui sugestão
@@ -662,7 +680,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       error: userFriendlyMessage,
-      details: errorMessage,
+      details: errorMessage !== userFriendlyMessage ? errorMessage : undefined,
       source: errorSource,
       retryable: statusCode === 503 || statusCode === 401 || (statusCode === 403 && !errorMessage.includes('sem permissões')),
     }, { status: statusCode })
