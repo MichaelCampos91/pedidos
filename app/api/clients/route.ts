@@ -3,6 +3,12 @@ import { cookies } from 'next/headers'
 import { query } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { validateCPF, validateCNPJ } from '@/lib/utils'
+import {
+  buildClientSearchFilter,
+  duplicateClientBody,
+  duplicateClientResponse,
+  findExistingClientByField,
+} from '@/lib/client-identity'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -30,12 +36,11 @@ export async function GET(request: NextRequest) {
     const params: any[] = []
     let paramIndex = 1
 
-    // Busca por texto (case-insensitive)
-    if (search) {
-      const searchTerm = `%${search}%`
-      whereClause += ` AND (name ILIKE $${paramIndex} OR cpf ILIKE $${paramIndex + 1} OR phone ILIKE $${paramIndex + 2} OR whatsapp ILIKE $${paramIndex + 3})`
-      params.push(searchTerm, searchTerm, searchTerm, searchTerm)
-      paramIndex += 4
+    if (search && search.trim()) {
+      const filter = buildClientSearchFilter(search, paramIndex)
+      whereClause += ` AND ${filter.sql}`
+      params.push(...filter.params)
+      paramIndex = filter.nextIndex
     }
 
     // Total de registros
@@ -125,25 +130,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verifica duplicidade de CPF (apenas se informado)
     if (cleanCPF) {
-      const existingResult = await query('SELECT id FROM clients WHERE cpf = $1', [cleanCPF])
-      if (existingResult.rows.length > 0) {
-        return NextResponse.json(
-          { error: 'CPF já cadastrado' },
-          { status: 400 }
-        )
+      const existing = await findExistingClientByField('cpf', cleanCPF)
+      if (existing) {
+        return NextResponse.json(duplicateClientBody('cpf', existing), { status: 400 })
       }
     }
 
-    // Verifica duplicidade de CNPJ (apenas se informado)
     if (cleanCNPJ) {
-      const existingCnpj = await query('SELECT id FROM clients WHERE cnpj = $1', [cleanCNPJ])
-      if (existingCnpj.rows.length > 0) {
-        return NextResponse.json(
-          { error: 'CNPJ já cadastrado' },
-          { status: 400 }
-        )
+      const existing = await findExistingClientByField('cnpj', cleanCNPJ)
+      if (existing) {
+        return NextResponse.json(duplicateClientBody('cnpj', existing), { status: 400 })
       }
     }
 
@@ -181,13 +178,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, id: clientId })
   } catch (error: any) {
-    if (error.code === '23505') { // Unique violation
-      const detail: string = error.detail || ''
-      const isCnpj = /\bcnpj\b/i.test(detail) || /idx_clients_cnpj/i.test(error.constraint || '')
-      return NextResponse.json(
-        { error: isCnpj ? 'CNPJ já cadastrado' : 'CPF já cadastrado' },
-        { status: 400 }
-      )
+    if (error.code === '23505') {
+      const body = await duplicateClientResponse(error)
+      return NextResponse.json(body, { status: 400 })
     }
     return NextResponse.json(
       { error: 'Erro ao criar cliente' },

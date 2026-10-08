@@ -6,6 +6,25 @@ interface RequestOptions {
   headers?: Record<string, string>
 }
 
+export class ApiError extends Error {
+  status: number
+  field?: string
+  existingClientId?: number
+  existingName?: string
+
+  constructor(message: string, payload: Record<string, unknown> | null, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    if (!payload) return
+    if (typeof payload.field === 'string') this.field = payload.field
+    const id = payload.existingClientId
+    if (typeof id === 'number' && Number.isFinite(id)) this.existingClientId = id
+    else if (typeof id === 'string' && /^\d+$/.test(id)) this.existingClientId = Number(id)
+    if (typeof payload.existingName === 'string') this.existingName = payload.existingName
+  }
+}
+
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {} } = options
 
@@ -27,7 +46,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Erro desconhecido' }))
     const message = error.message ?? error.error ?? 'Erro na requisição'
-    throw new Error(message)
+    throw new ApiError(message, error, response.status)
   }
 
   return response.json()

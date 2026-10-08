@@ -4,13 +4,13 @@ import { useState, useEffect, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Loader2, User, Search } from "lucide-react"
 import { clientsApi } from "@/lib/api"
-import { formatCPF } from "@/lib/utils"
-import { cn } from "@/lib/utils"
+import { clientSearchQuery, cn, formatClientDocument } from "@/lib/utils"
 
 interface Client {
   id: number
   name: string
-  cpf: string
+  cpf?: string | null
+  cnpj?: string | null
   email?: string
   whatsapp?: string
 }
@@ -26,7 +26,7 @@ interface ClientSearchProps {
 export function ClientSearch({
   value,
   onSelect,
-  placeholder = "Buscar cliente por nome ou CPF...",
+  placeholder = "Buscar cliente por nome, CPF ou CNPJ...",
   className,
   disabled = false,
 }: ClientSearchProps) {
@@ -68,7 +68,8 @@ export function ClientSearch({
     try {
       const client = await clientsApi.get(clientId)
       setSelectedClient(client)
-      setSearchTerm(`${client.name} - ${formatCPF(client.cpf)}`)
+      const document = formatClientDocument(client)
+      setSearchTerm(document ? `${client.name} - ${document}` : client.name)
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
         console.error("Erro ao carregar cliente:", error)
@@ -86,7 +87,7 @@ export function ClientSearch({
     setLoading(true)
     try {
       const response = await clientsApi.list({
-        search: term,
+        search: clientSearchQuery(term),
         per_page: 10,
       })
       setResults(response.data)
@@ -126,7 +127,8 @@ export function ClientSearch({
 
   const handleSelectClient = (client: Client) => {
     setSelectedClient(client)
-    setSearchTerm(`${client.name} - ${formatCPF(client.cpf)}`)
+    const document = formatClientDocument(client)
+    setSearchTerm(document ? `${client.name} - ${document}` : client.name)
     setShowResults(false)
     onSelect(client)
     inputRef.current?.blur()
@@ -191,7 +193,7 @@ export function ClientSearch({
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{client.name}</div>
                 <div className="text-sm text-muted-foreground">
-                  {formatCPF(client.cpf)}
+                  {formatClientDocument(client) || "Sem documento"}
                 </div>
               </div>
             </button>

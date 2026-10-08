@@ -3,6 +3,11 @@ import { cookies } from 'next/headers'
 import { query, getDatabase } from '@/lib/database'
 import { requireAuth, authErrorResponse } from '@/lib/auth'
 import { validateCPF, validateCNPJ } from '@/lib/utils'
+import {
+  duplicateClientBody,
+  duplicateClientResponse,
+  findExistingClientByField,
+} from '@/lib/client-identity'
 
 // Marca a rota como dinâmica porque usa cookies para autenticação
 export const dynamic = 'force-dynamic'
@@ -104,25 +109,24 @@ export async function PUT(
       )
     }
 
-    // Verifica duplicidade de CPF em outro cliente (se informado)
     if (cleanCPF) {
-      const existingResult = await query('SELECT id FROM clients WHERE cpf = $1 AND id != $2', [cleanCPF, params.id])
-      if (existingResult.rows.length > 0) {
-        return NextResponse.json(
-          { error: 'CPF já cadastrado para outro cliente' },
-          { status: 400 }
-        )
+      const existing = await findExistingClientByField('cpf', cleanCPF, params.id)
+      if (existing) {
+        return NextResponse.json(duplicateClientBody('cpf', existing), { status: 400 })
       }
     }
 
-    // Verifica duplicidade de CNPJ em outro cliente (se informado)
     if (cleanCNPJ) {
-      const existingCnpj = await query('SELECT id FROM clients WHERE cnpj = $1 AND id != $2', [cleanCNPJ, params.id])
-      if (existingCnpj.rows.length > 0) {
-        return NextResponse.json(
-          { error: 'CNPJ já cadastrado para outro cliente' },
-          { status: 400 }
-        )
+      const existing = await findExistingClientByField('cnpj', cleanCNPJ, params.id)
+      if (existing) {
+        return NextResponse.json(duplicateClientBody('cnpj', existing), { status: 400 })
+      }
+    }
+
+    if (blingContactId != null) {
+      const existing = await findExistingClientByField('bling_contact_id', String(blingContactId), params.id)
+      if (existing) {
+        return NextResponse.json(duplicateClientBody('bling_contact_id', existing), { status: 400 })
       }
     }
 
@@ -214,12 +218,8 @@ export async function PUT(
       console.error('[PUT /api/clients/:id] Erro:', error?.message ?? error)
     }
     if (error.code === '23505') {
-      const detail: string = error.detail || ''
-      const isCnpj = /\bcnpj\b/i.test(detail) || /idx_clients_cnpj/i.test(error.constraint || '')
-      return NextResponse.json(
-        { error: isCnpj ? 'CNPJ já cadastrado' : 'CPF já cadastrado' },
-        { status: 400 }
-      )
+      const body = await duplicateClientResponse(error)
+      return NextResponse.json(body, { status: 400 })
     }
     return NextResponse.json(
       { error: error?.message || 'Erro ao atualizar cliente' },

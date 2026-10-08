@@ -204,3 +204,28 @@ export function capitalizeName(value: string): string {
 export function toUpperCase(value: string): string {
   return value.toUpperCase()
 }
+
+/** CPF e/ou CNPJ formatados para exibição. */
+export function formatClientDocument(client: { cpf?: string | null; cnpj?: string | null }): string {
+  const parts: string[] = []
+  if (client.cpf) {
+    const formatted = formatCPF(client.cpf)
+    if (formatted) parts.push(`CPF ${formatted}`)
+  }
+  if (client.cnpj) {
+    const formatted = formatCNPJ(client.cnpj)
+    if (formatted) parts.push(`CNPJ ${formatted}`)
+  }
+  return parts.join(' · ')
+}
+
+/**
+ * Termo enviado à busca de clientes.
+ * Documento ou telefone (só dígitos e pontuação) vai sem máscara, para casar com o que está no banco.
+ */
+export function clientSearchQuery(term: string): string {
+  const trimmed = term.trim()
+  if (!trimmed || /[a-zA-Z@]/.test(trimmed)) return trimmed
+  const digits = trimmed.replace(/\D/g, '')
+  return digits.length >= 2 ? digits : trimmed
+}

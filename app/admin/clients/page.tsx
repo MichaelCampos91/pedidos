@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Search, MessageCircle, Plus, Edit, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Send } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { clientsApi, blingApi } from "@/lib/api"
-import { formatPhone, formatCPF, formatDateTime } from "@/lib/utils"
+import { formatPhone, formatCPF, formatCNPJ, formatDateTime } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 
 export default function ClientsPage() {
@@ -17,10 +17,13 @@ export default function ClientsPage() {
   const [clients, setClients] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
+  const [appliedSearch, setAppliedSearch] = useState("")
   const [sortBy, setSortBy] = useState<string>("created_at")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
   const [actionsOpenClientId, setActionsOpenClientId] = useState<number | null>(null)
   const [blingSyncingClientId, setBlingSyncingClientId] = useState<number | null>(null)
+  const [reloadToken, setReloadToken] = useState(0)
+  const requestSeq = useRef(0)
   const [pagination, setPagination] = useState({
     current_page: 1,
     per_page: 20,
@@ -30,44 +33,52 @@ export default function ClientsPage() {
     to: 0,
   })
 
-  const loadClients = async () => {
-    setLoading(true)
-    try {
-      const params: any = {
-        page: pagination.current_page,
-        per_page: pagination.per_page,
-        sort: sortBy,
-        order: sortOrder,
-      }
-
-      if (search) {
-        params.search = search
-      }
-
-      const response = await clientsApi.list(params)
-      setClients(response.data)
-      setPagination({
-        current_page: response.current_page,
-        per_page: response.per_page,
-        total: response.total,
-        last_page: response.last_page,
-        from: response.from,
-        to: response.to,
-      })
-    } catch (error) {
-      console.error("Erro ao carregar clientes:", error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    loadClients()
-  }, [pagination.current_page, sortBy, sortOrder])
+    const seq = ++requestSeq.current
+    let cancelled = false
+
+    const run = async () => {
+      setLoading(true)
+      try {
+        const params: Record<string, string | number> = {
+          page: pagination.current_page,
+          per_page: pagination.per_page,
+          sort: sortBy,
+          order: sortOrder,
+        }
+        if (appliedSearch) params.search = appliedSearch
+
+        const response = await clientsApi.list(params)
+        if (cancelled || seq !== requestSeq.current) return
+        setClients(response.data)
+        setPagination((prev) => ({
+          ...prev,
+          current_page: response.current_page,
+          per_page: response.per_page,
+          total: response.total,
+          last_page: response.last_page,
+          from: response.from,
+          to: response.to,
+        }))
+      } catch (error) {
+        if (!cancelled && seq === requestSeq.current) {
+          console.error("Erro ao carregar clientes:", error)
+        }
+      } finally {
+        if (!cancelled && seq === requestSeq.current) setLoading(false)
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [pagination.current_page, pagination.per_page, appliedSearch, sortBy, sortOrder, reloadToken])
 
   const handleSearch = () => {
-    setPagination((prev) => ({ ...prev, current_page: 1 }))
-    loadClients()
+    const term = search.trim()
+    setAppliedSearch(term)
+    setPagination((prev) => (prev.current_page === 1 ? prev : { ...prev, current_page: 1 }))
   }
 
   const handlePageChange = (page: number) => {
@@ -114,7 +125,7 @@ export default function ClientsPage() {
     try {
       const res = await blingApi.syncClient(clientId)
       toast.success(res.message ?? "Cliente enviado ao Bling com sucesso.")
-      loadClients() // Recarregar lista para atualizar bling_contact_id
+      setReloadToken((token) => token + 1)
     } catch (err: any) {
       const message = err.message ?? "Erro ao enviar cliente ao Bling."
       toast.error(message)
@@ -142,7 +153,7 @@ export default function ClientsPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar por nome, CPF, telefone ou WhatsApp..."
+              placeholder="Buscar por nome, e-mail, CPF, CNPJ ou telefone..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -183,7 +194,7 @@ export default function ClientsPage() {
                         onClick={() => handleSort("cpf")}
                         className="flex items-center hover:text-primary transition-colors"
                       >
-                        CPF
+                        Documento
                         {getSortIcon("cpf")}
                       </button>
                     </TableHead>
@@ -207,7 +218,11 @@ export default function ClientsPage() {
                   {clients.map((client) => (
                     <TableRow key={client.id}>
                       <TableCell className="font-medium">{client.name}</TableCell>
-                      <TableCell>{formatCPF(client.cpf) || "—"}</TableCell>
+                      <TableCell>
+                        {[client.cpf ? formatCPF(client.cpf) : null, client.cnpj ? formatCNPJ(client.cnpj) : null]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </TableCell>
                     <TableCell>
                       <a
                         href={`https://wa.me/${client.whatsapp.replace(/\D/g, "")}`}

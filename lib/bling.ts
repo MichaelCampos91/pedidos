@@ -747,6 +747,38 @@ export async function fetchBlingContactDetail(
   }
 }
 
+const DETAIL_CONFIRM_LIMIT = 1
+
+/**
+ * Aceita o contato da listagem se o documento já veio no payload.
+ * Se a lista trouxer um único contato sem documento, confirma com GET /contatos/{id}.
+ * Não confirma listas grandes: o filtro pode ter sido ignorado e a página é a geral.
+ */
+async function resolveListedContactId(
+  contacts: unknown[],
+  cleanDoc: string,
+  accessToken: string
+): Promise<number | null> {
+  const missingDocument: number[] = []
+
+  for (const item of contacts) {
+    if (typeof item !== 'object' || item === null) continue
+    const contact = item as Record<string, unknown>
+    if (contact.id == null) continue
+    const id = Number(contact.id)
+    if (!Number.isInteger(id) || id <= 0) continue
+    const doc = getContactDocumentDigits(contact)
+    if (doc === cleanDoc) return id
+    if (!doc) missingDocument.push(id)
+  }
+
+  if (missingDocument.length !== DETAIL_CONFIRM_LIMIT) return null
+
+  const detail = await fetchBlingContactDetail(missingDocument[0], accessToken)
+  if (detail && detail.numeroDocumento === cleanDoc) return detail.id
+  return null
+}
+
 /**
  * Busca um contato no Bling por CPF/CNPJ usando filtro numeroDocumento.
  * Estratégia A: busca direta por documento.
@@ -774,21 +806,13 @@ async function findBlingContactByDocument(
     if (response.ok) {
       const searchData = await response.json().catch(() => null)
       const contacts = parseBlingContactsList(searchData)
-      const count = contacts.length
-      
-      for (const c of contacts) {
-        if (typeof c === 'object' && c !== null) {
-          const contact = c as Record<string, unknown>
-          const contactDoc = getContactDocumentDigits(contact)
-          // Comparar sempre com documento normalizado (apenas dígitos)
-          if (contactDoc === cleanCpf && contact.id != null) {
-            logBlingRequest('Busca por numeroDocumento', 'GET', searchUrl, response.status, { encontrado: true, id: contact.id })
-            return Number(contact.id)
-          }
-        }
+      const foundId = await resolveListedContactId(contacts, cleanCpf, accessToken)
+      if (foundId != null) {
+        logBlingRequest('Busca por numeroDocumento', 'GET', searchUrl, response.status, { encontrado: true, id: foundId })
+        return foundId
       }
       
-      logBlingRequest('Busca por numeroDocumento', 'GET', searchUrl, response.status, { encontrados: count, match: false })
+      logBlingRequest('Busca por numeroDocumento', 'GET', searchUrl, response.status, { encontrados: contacts.length, match: false })
     } else {
       logBlingRequest('Busca por numeroDocumento', 'GET', searchUrl, response.status, { erro: 'Filtro pode não ser suportado' })
     }
@@ -831,21 +855,13 @@ async function findBlingContactBySearch(
       if (response.ok) {
         const searchData = await response.json().catch(() => null)
         const contacts = parseBlingContactsList(searchData)
-        const count = contacts.length
-        
-        for (const c of contacts) {
-          if (typeof c === 'object' && c !== null) {
-            const contact = c as Record<string, unknown>
-            const contactDoc = getContactDocumentDigits(contact)
-            // Comparar sempre com documento normalizado (apenas dígitos)
-            if (contactDoc === cleanCpf && contact.id != null) {
-              logBlingRequest(`Busca por pesquisa (${param})`, 'GET', searchUrl, response.status, { encontrado: true, id: contact.id })
-              return Number(contact.id)
-            }
-          }
+        const foundId = await resolveListedContactId(contacts, cleanCpf, accessToken)
+        if (foundId != null) {
+          logBlingRequest(`Busca por pesquisa (${param})`, 'GET', searchUrl, response.status, { encontrado: true, id: foundId })
+          return foundId
         }
         
-        logBlingRequest(`Busca por pesquisa (${param})`, 'GET', searchUrl, response.status, { encontrados: count, match: false })
+        logBlingRequest(`Busca por pesquisa (${param})`, 'GET', searchUrl, response.status, { encontrados: contacts.length, match: false })
       } else if (response.status === 400 || response.status === 422) {
         // Parâmetro não suportado, tentar próximo
         logBlingRequest(`Busca por pesquisa (${param})`, 'GET', searchUrl, response.status, { erro: 'Parâmetro não suportado' })
@@ -931,21 +947,15 @@ async function findBlingContactByPagination(
       pagesChecked++
       totalContactsChecked += contacts.length
 
-      for (const c of contacts) {
-        if (typeof c === 'object' && c !== null) {
-          const contact = c as Record<string, unknown>
-          const contactDoc = getContactDocumentDigits(contact)
-          // Comparar sempre com documento normalizado (apenas dígitos)
-          if (contactDoc === cleanCpf && contact.id != null) {
-            logBlingRequest('Busca paginada', 'GET', listUrl, listResponse.status, {
-              encontrado: true,
-              id: contact.id,
-              pagina: page,
-              contatosVerificados: totalContactsChecked
-            })
-            return Number(contact.id)
-          }
-        }
+      const foundId = await resolveListedContactId(contacts, cleanCpf, accessToken)
+      if (foundId != null) {
+        logBlingRequest('Busca paginada', 'GET', listUrl, listResponse.status, {
+          encontrado: true,
+          id: foundId,
+          pagina: page,
+          contatosVerificados: totalContactsChecked
+        })
+        return foundId
       }
 
       // Log periódico a cada 10 páginas
@@ -994,11 +1004,15 @@ async function findBlingContactWithFallback(
   // Verificar cache primeiro
   const cachedId = getCachedContactId(cleanCpf)
   if (cachedId != null) {
-    logBlingRequest('findBlingContactWithFallback', 'CACHE', 'Contato encontrado no cache', null, { 
-      id: cachedId, 
-      cpf: maskSensitiveData(cleanCpf) 
-    })
-    return { id: cachedId, strategy: 'cache', attempts: 0 }
+    const detail = await fetchBlingContactDetail(cachedId, accessToken)
+    if (detail && detail.numeroDocumento === cleanCpf) {
+      logBlingRequest('findBlingContactWithFallback', 'CACHE', 'Contato encontrado no cache', null, { 
+        id: cachedId, 
+        cpf: maskSensitiveData(cleanCpf) 
+      })
+      return { id: cachedId, strategy: 'cache', attempts: 0 }
+    }
+    contactCache.delete(cleanCpf)
   }
 
   // Estratégia A: Busca por numeroDocumento
@@ -1047,6 +1061,82 @@ function getBlingErrorMessage(responseData: unknown): string {
     return decodeUnicodeEscapes((responseData as { message: string }).message)
   }
   return ''
+}
+
+interface BlingFieldError {
+  element: string
+  msg: string
+}
+
+function getBlingFieldErrors(responseData: unknown): BlingFieldError[] {
+  if (!responseData || typeof responseData !== 'object') return []
+  const root = responseData as Record<string, unknown>
+  const errorObj = root.error && typeof root.error === 'object'
+    ? root.error as Record<string, unknown>
+    : root
+  const fields = errorObj.fields
+  if (!Array.isArray(fields)) return []
+  const parsed: BlingFieldError[] = []
+  for (const field of fields) {
+    if (!field || typeof field !== 'object') continue
+    const record = field as Record<string, unknown>
+    const element = String(record.element ?? record.campo ?? record.field ?? '')
+    const msg = decodeUnicodeEscapes(String(record.msg ?? record.message ?? ''))
+    if (element || msg) parsed.push({ element, msg })
+  }
+  return parsed
+}
+
+function formatBlingErrorDetails(responseData: unknown): string {
+  const top = getBlingErrorMessage(responseData)
+  const fieldText = getBlingFieldErrors(responseData)
+    .map((field) => [field.element, field.msg].filter(Boolean).join(': '))
+    .filter(Boolean)
+    .join('; ')
+  return [top, fieldText].filter(Boolean).join('. ')
+}
+
+function textLooksLikeDuplicate(text: string): boolean {
+  return /j[aá] cadastr|j[aá] est[aá] cadastr|j[aá] existe|duplic/.test(text.toLowerCase())
+}
+
+function textLooksLikeDocument(text: string): boolean {
+  return /cpf|cnpj|documento|numerodocumento/.test(text.toLowerCase())
+}
+
+function textLooksLikeEmail(text: string): boolean {
+  return /e-?mail/.test(text.toLowerCase())
+}
+
+type BlingContactWriteFailure = 'document_duplicate' | 'email_duplicate' | 'other'
+
+/**
+ * Duplicata de documento só quando o campo ou a mensagem citam CPF/CNPJ,
+ * ou quando um 409 fala de contato já existente sem ser e-mail.
+ * "Não foi possível salvar o contato" sozinho é validação genérica.
+ */
+function classifyBlingContactWriteError(status: number, responseData: unknown): BlingContactWriteFailure {
+  const fields = getBlingFieldErrors(responseData)
+  for (const field of fields) {
+    const text = `${field.element} ${field.msg}`
+    if (textLooksLikeDocument(text) && textLooksLikeDuplicate(text)) return 'document_duplicate'
+  }
+  for (const field of fields) {
+    const text = `${field.element} ${field.msg}`
+    if (textLooksLikeEmail(text) && textLooksLikeDuplicate(text)) return 'email_duplicate'
+  }
+
+  const top = getBlingErrorMessage(responseData)
+  if (textLooksLikeDocument(top) && textLooksLikeDuplicate(top)) return 'document_duplicate'
+  if (textLooksLikeEmail(top) && textLooksLikeDuplicate(top)) return 'email_duplicate'
+  if (
+    status === 409 &&
+    textLooksLikeDuplicate(top) &&
+    !textLooksLikeEmail(top)
+  ) {
+    return 'document_duplicate'
+  }
+  return 'other'
 }
 
 /**
@@ -1120,16 +1210,8 @@ async function findBlingContactAggressively(
       }
 
       pagesChecked++
-      for (const c of contacts) {
-        if (typeof c === 'object' && c !== null) {
-          const contact = c as Record<string, unknown>
-          const contactDoc = getContactDocumentDigits(contact)
-          // Se o documento bate, retornar o ID (documento é único)
-          if (contactDoc === cleanCpf && contact.id != null) {
-            return Number(contact.id)
-          }
-        }
-      }
+      const foundId = await resolveListedContactId(contacts, cleanCpf, accessToken)
+      if (foundId != null) return foundId
     } catch (err) {
       console.warn(`[Bling] Erro na busca agressiva (página ${page}):`, err)
       if (page === 1) break
@@ -1140,38 +1222,40 @@ async function findBlingContactAggressively(
   return null
 }
 
-/**
- * Verifica se a resposta indica que o contato já está cadastrado no Bling.
- * Inclui a mensagem "não foi possível salvar o contato" pois o Bling pode devolver
- * apenas isso quando o CPF já está cadastrado (sem a frase "já cadastrado").
- */
-function isAlreadyRegisteredError(responseStatus: number, responseData: unknown): boolean {
-  if (responseStatus === 409) return true
-  if (responseStatus === 422) {
-    // 422 Unprocessable Entity pode indicar validação de duplicata
-    const msg = getBlingErrorMessage(responseData).toLowerCase()
-    if (msg.includes('cadastrado') || msg.includes('existe') || msg.includes('duplicat')) {
-      return true
+function collectClientDocuments(source: { client_cpf?: string | null; client_cnpj?: string | null }): string[] {
+  const cpf = String(source.client_cpf || '').replace(/\D/g, '')
+  const cnpj = String(source.client_cnpj || '').replace(/\D/g, '')
+  const docs: string[] = []
+  if (cpf) docs.push(cpf)
+  if (cnpj && cnpj !== cpf) docs.push(cnpj)
+  return docs
+}
+
+async function findContactAcrossDocuments(
+  docs: string[],
+  accessToken: string
+): Promise<ContactSearchResult> {
+  let attempts = 0
+  for (const doc of docs) {
+    const result = await findBlingContactWithFallback(doc, accessToken)
+    attempts += result.attempts
+    if (result.id != null) {
+      return { id: result.id, strategy: result.strategy, attempts }
     }
   }
-  if (responseData && typeof responseData === 'object' && 'error' in responseData) {
-    const msg = getBlingErrorMessage(responseData).toLowerCase()
-    if (msg.includes('cadastrado') || msg.includes('existe') || msg.includes('duplicat')) {
-      return true
-    }
+  return { id: null, strategy: null, attempts }
+}
+
+async function findContactAcrossDocumentsAggressively(
+  docs: string[],
+  clientName: string,
+  accessToken: string
+): Promise<number | null> {
+  for (const doc of docs) {
+    const id = await findBlingContactAggressively(doc, clientName, accessToken)
+    if (id != null) return id
   }
-  const msg = getBlingErrorMessage(responseData).toLowerCase()
-  return (
-    responseStatus >= 400 &&
-    responseStatus < 500 &&
-    (msg.includes('já cadastrado') ||
-      msg.includes('já está cadastrado') ||
-      msg.includes('cpf já cadastrado') ||
-      msg.includes('cnpj já cadastrado') ||
-      msg.includes('documento já existe') ||
-      msg.includes('não foi possível salvar o contato') ||
-      msg.includes('contato já existe'))
-  )
+  return null
 }
 
 /**
@@ -1212,15 +1296,16 @@ async function createOrGetContactId(
     throw new Error('[Sistema] Token Bling não configurado.')
   }
 
-  const cleanDoc = (order.client_cpf || order.client_cnpj || '').replace(/\D/g, '')
-  if (!cleanDoc) {
+  const docs = collectClientDocuments(order)
+  if (docs.length === 0) {
     throw new Error('[Sistema] CPF/CNPJ do cliente é obrigatório para criar contato no Bling.')
   }
+  const cleanDoc = docs[0]
 
-  logBlingRequest('createOrGetContactId', 'INICIO', 'Criar/obter contato', null, { cpf: maskSensitiveData(cleanDoc) })
+  logBlingRequest('createOrGetContactId', 'INICIO', 'Criar/obter contato', null, { cpf: maskSensitiveData(cleanDoc), documentos: docs.length })
 
-  // Passo 1: Buscar primeiro usando todas as estratégias (A → B → C)
-  const searchResult = await findBlingContactWithFallback(cleanDoc, accessToken)
+  // Passo 1: Buscar CPF e CNPJ (quando os dois existirem) antes de criar
+  const searchResult = await findContactAcrossDocuments(docs, accessToken)
   if (searchResult.id != null) {
     logBlingRequest('createOrGetContactId', 'SUCESSO', 'Contato encontrado', null, {
       id: searchResult.id,
@@ -1368,7 +1453,11 @@ async function createOrGetContactId(
         await new Promise(resolve => setTimeout(resolve, 500))
         
         // Tentar buscar usando estratégia A (mais rápida) primeiro
-        const fallbackSearchResult = await findBlingContactByDocument(cleanDoc, accessToken)
+        let fallbackSearchResult: number | null = null
+        for (const doc of docs) {
+          fallbackSearchResult = await findBlingContactByDocument(doc, accessToken)
+          if (fallbackSearchResult != null) break
+        }
         if (fallbackSearchResult != null) {
           contactId = fallbackSearchResult
           logBlingRequest('createOrGetContactId', 'FALLBACK_SUCESSO', 'Contato encontrado após criação', null, {
@@ -1378,7 +1467,7 @@ async function createOrGetContactId(
         } else {
           // Se estratégia A não funcionou, tentar busca completa (A→B→C)
           logBlingRequest('createOrGetContactId', 'FALLBACK', 'Estratégia A falhou, tentando busca completa', null)
-          const fullSearchResult = await findBlingContactWithFallback(cleanDoc, accessToken)
+          const fullSearchResult = await findContactAcrossDocuments(docs, accessToken)
           if (fullSearchResult.id != null) {
             contactId = fullSearchResult.id
             logBlingRequest('createOrGetContactId', 'FALLBACK_SUCESSO', 'Contato encontrado após criação', null, {
@@ -1411,16 +1500,21 @@ async function createOrGetContactId(
       )
     }
 
-    // Passo 3: Se criação falhou por duplicidade, refazer busca completa
-    if (isAlreadyRegisteredError(response.status, responseData)) {
-      const errorMsg = getBlingErrorMessage(responseData) || response.statusText
-      logBlingRequest('createOrGetContactId', 'DUPLICIDADE', 'Criação falhou, refazendo busca', response.status, {
-        erro: errorMsg,
+    const writeFailure = classifyBlingContactWriteError(response.status, responseData)
+    const errorDetails = formatBlingErrorDetails(responseData) || response.statusText
+
+    if (writeFailure === 'email_duplicate') {
+      logBlingRequest('createOrGetContactId', 'ERRO', 'E-mail já cadastrado no Bling', response.status, { erro: errorDetails })
+      throw new Error(`E-mail já cadastrado no Bling em outro contato. ${errorDetails}`)
+    }
+
+    if (writeFailure === 'document_duplicate') {
+      logBlingRequest('createOrGetContactId', 'DUPLICIDADE', 'Criação falhou por documento, refazendo busca', response.status, {
+        erro: errorDetails,
         refazendoBusca: true
       })
-      
-      // Refazer busca completa (A+B+C) após erro de duplicidade
-      const retrySearchResult = await findBlingContactWithFallback(cleanDoc, accessToken)
+
+      const retrySearchResult = await findContactAcrossDocuments(docs, accessToken)
       if (retrySearchResult.id != null) {
         logBlingRequest('createOrGetContactId', 'SUCESSO', 'Contato encontrado após duplicidade', null, {
           id: retrySearchResult.id,
@@ -1436,26 +1530,32 @@ async function createOrGetContactId(
         }
       }
 
-      // Não encontrou após refazer busca - erro explícito com detalhes
-      const totalAttempts = searchResult.attempts + retrySearchResult.attempts + 1
-      const strategiesTried = [
-        searchResult.strategy ? `busca inicial (${searchResult.strategy})` : null,
-        retrySearchResult.strategy ? `busca após duplicidade (${retrySearchResult.strategy})` : null
-      ].filter(Boolean).join(', ') || 'todas as estratégias'
+      const aggressiveId = await findContactAcrossDocumentsAggressively(
+        docs,
+        order.client_name || 'Cliente',
+        accessToken
+      )
+      if (aggressiveId != null) {
+        logBlingRequest('createOrGetContactId', 'SUCESSO', 'Contato encontrado na busca agressiva', null, { id: aggressiveId })
+        return {
+          id: aggressiveId,
+          found: true,
+          created: false,
+          strategy: 'paginacao',
+          attempts: searchResult.attempts + retrySearchResult.attempts + 2
+        }
+      }
 
+      const totalAttempts = searchResult.attempts + retrySearchResult.attempts + 2
       throw new Error(
         `Contato com CPF/CNPJ ${maskSensitiveData(cleanDoc)} já existe no Bling mas não foi possível obter o ID após ${totalAttempts} tentativas. ` +
-        `Estratégias tentadas: ${strategiesTried}. ` +
         `Verifique se o app Bling tem escopo 'Gerenciar Contatos' (ID: 318257565) habilitado e reautorize a integração se necessário. ` +
-        `Erro original do Bling: ${errorMsg}`
+        `Erro original do Bling: ${errorDetails}`
       )
     }
 
-    // Outros erros de criação
-    const errMsg = getBlingErrorMessage(responseData) || `Erro HTTP ${response.status}.`
-    const snippet = decodeUnicodeEscapes(responseText.trim().slice(0, 300))
-    logBlingRequest('createOrGetContactId', 'ERRO', 'Falha ao criar contato', response.status, { erro: errMsg })
-    throw new Error(`Não foi possível criar contato no Bling: ${errMsg}${snippet ? `. Detalhes: ${snippet}` : ''}`)
+    logBlingRequest('createOrGetContactId', 'ERRO', 'Falha ao criar contato', response.status, { erro: errorDetails })
+    throw new Error(`Não foi possível criar contato no Bling: ${errorDetails}`)
   } catch (err: unknown) {
     if (err instanceof Error) {
       logBlingRequest('createOrGetContactId', 'EXCEPTION', 'Exceção ao criar/obter contato', null, { erro: err.message })
@@ -1956,9 +2056,12 @@ export async function syncClientToBling(clientId: number): Promise<SyncClientToB
   }
 
   const client = clientResult.rows[0] as Record<string, unknown>
-  const cleanDoc = (String(client.cpf || client.cnpj || '')).replace(/\D/g, '')
+  const docs = collectClientDocuments({
+    client_cpf: client.cpf != null ? String(client.cpf) : null,
+    client_cnpj: client.cnpj != null ? String(client.cnpj) : null,
+  })
 
-  if (!cleanDoc) {
+  if (docs.length === 0) {
     return { success: false, error: 'CPF/CNPJ do cliente é obrigatório para sincronizar com o Bling.' }
   }
 
@@ -2292,18 +2395,21 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
     return { success: false, syncedCount: 0, error: '[Sistema] Token Bling não configurado.' }
   }
   const clientsResult = await query(
-    `SELECT c.id, c.name, c.cpf, c.email, c.phone, c.whatsapp, c.created_at
+    `SELECT c.id, c.name, c.cpf, c.cnpj, c.email, c.phone, c.whatsapp, c.created_at
      FROM clients c WHERE c.created_at >= $1::date ORDER BY c.id`,
     [sinceDate]
   )
   let syncedCount = 0
   const url = `${BLING_API_BASE}/contatos`
   for (const row of clientsResult.rows as Record<string, unknown>[]) {
-    const cleanCpf = String(row.cpf || '').replace(/\D/g, '')
-    if (!cleanCpf) continue
+    const docs = collectClientDocuments({
+      client_cpf: row.cpf != null ? String(row.cpf) : null,
+      client_cnpj: row.cnpj != null ? String(row.cnpj) : null,
+    })
+    if (docs.length === 0) continue
+    const cleanCpf = docs[0]
 
-    // Buscar antes de criar usando todas as estratégias (A→B→C)
-    const searchResult = await findBlingContactWithFallback(cleanCpf, accessToken)
+    const searchResult = await findContactAcrossDocuments(docs, accessToken)
     if (searchResult.id != null) {
       syncedCount++
       continue
@@ -2421,14 +2527,30 @@ export async function syncContactsToBling(sinceDate: string, accessToken: string
         }
       })()
       // Se o erro for "já cadastrado", tentar buscar novamente com todas as estratégias
-      if (isAlreadyRegisteredError(response.status, responseData)) {
-        const retrySearchResult = await findBlingContactWithFallback(cleanCpf, accessToken)
-        if (retrySearchResult.id != null) {
+      const writeFailure = classifyBlingContactWriteError(response.status, responseData)
+      if (writeFailure === 'document_duplicate') {
+        const retrySearchResult = await findContactAcrossDocuments(docs, accessToken)
+        const aggressiveId = retrySearchResult.id != null
+          ? retrySearchResult.id
+          : await findContactAcrossDocumentsAggressively(docs, String(row.name || 'Cliente'), accessToken)
+        if (aggressiveId != null) {
           syncedCount++
           continue
         }
       }
-      return { success: false, syncedCount, error: buildBlingError(responseText, response) }
+      if (writeFailure === 'email_duplicate') {
+        return {
+          success: false,
+          syncedCount,
+          error: `[Bling] E-mail já cadastrado em outro contato. ${formatBlingErrorDetails(responseData)}`,
+        }
+      }
+      const details = formatBlingErrorDetails(responseData)
+      return {
+        success: false,
+        syncedCount,
+        error: details ? `[Bling] ${details}` : buildBlingError(responseText, response),
+      }
     }
     syncedCount++
   }

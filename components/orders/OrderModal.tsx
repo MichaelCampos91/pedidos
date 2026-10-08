@@ -19,7 +19,7 @@ import { Switch } from "@/components/ui/switch"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Loader2, Save, Plus, Trash2, MessageCircle, Truck, User, Package, MapPin, ArrowLeft, ArrowRight, AlertCircle, Edit, CheckCircle2, FileText, Store, Wallet } from "lucide-react"
 import { ordersApi, clientsApi, productsApi } from "@/lib/api"
-import { formatCurrency, formatCPF, formatPhone } from "@/lib/utils"
+import { formatCurrency, formatClientDocument, formatPhone } from "@/lib/utils"
 import { ShippingSelector, type ShippingOption } from "@/components/shipping/ShippingSelector"
 import { Badge } from "@/components/ui/badge"
 import { EnvironmentBadge } from "@/components/integrations/EnvironmentBadge"
@@ -650,7 +650,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                     <ClientSearch
                       value={selectedClient?.id || null}
                       onSelect={handleClientSelect}
-                      placeholder="Buscar cliente por nome ou CPF..."
+                      placeholder="Buscar cliente por nome, CPF ou CNPJ..."
                     />
                   </div>
                   {selectedClient && (
@@ -659,7 +659,7 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                         <div>
                           <p className="font-medium">{selectedClient.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            CPF: {formatCPF(selectedClient.cpf)}
+                            {formatClientDocument(selectedClient) || "Sem documento"}
                           </p>
                           {selectedClient.email && (
                             <p className="text-sm text-muted-foreground">
@@ -1122,8 +1122,8 @@ export function OrderModal({ open, onOpenChange, orderId, onSuccess }: OrderModa
                         <p className="font-medium text-lg">{selectedClient.name}</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                           <div>
-                            <span className="text-muted-foreground">CPF: </span>
-                            <span>{formatCPF(selectedClient.cpf)}</span>
+                            <span className="text-muted-foreground">Documento: </span>
+                            <span>{formatClientDocument(selectedClient) || "—"}</span>
                           </div>
                           {selectedClient.email && (
                             <div>

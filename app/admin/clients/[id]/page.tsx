@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, Save, Plus, Trash2 } from "lucide-react"
-import { clientsApi, cepApi } from "@/lib/api"
+import { clientsApi, cepApi, ApiError } from "@/lib/api"
 import { formatCPF, formatCNPJ, formatPhone, maskPhone, maskCEP, unmaskPhone, unmaskCEP, validateCPF, validateCNPJ } from "@/lib/utils"
 import { toast } from "@/lib/toast"
 
@@ -105,8 +105,23 @@ export default function ClientFormPage() {
       }
       toast.success(isNew ? 'Cliente cadastrado com sucesso.' : 'Cliente atualizado com sucesso.')
       router.push('/admin/clients')
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao salvar cliente')
+    } catch (error: unknown) {
+      const apiError = error instanceof ApiError ? error : null
+      const message = error instanceof Error ? error.message : 'Erro ao salvar cliente'
+      if (apiError?.existingClientId) {
+        toast.error(message, {
+          description: apiError.existingName
+            ? `Cadastro existente: ${apiError.existingName}`
+            : 'Abra o cadastro existente para continuar.',
+          duration: 10000,
+          action: {
+            label: 'Abrir cadastro',
+            onClick: () => router.push(`/admin/clients/${apiError.existingClientId}`),
+          },
+        })
+      } else {
+        toast.error(message)
+      }
       setLoading(false)
     }
   }

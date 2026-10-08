@@ -5,6 +5,7 @@ import { getTokenWithFallback } from '@/lib/integrations'
 import { fetchAllBlingContacts, fetchBlingContactDetail, type BlingContactForImport } from '@/lib/bling'
 import { query } from '@/lib/database'
 import { maskPhone, capitalizeName } from '@/lib/utils'
+import { findExistingClientByField } from '@/lib/client-identity'
 
 export const dynamic = 'force-dynamic'
 
@@ -273,13 +274,10 @@ export async function POST(request: NextRequest) {
 
         const mappedAddress = mapBlingAddressToDb(fullContact.endereco)
 
-        // Buscar cliente existente por documento (cpf ou cnpj conforme tamanho)
-        const existingByCpf = isCpf
-          ? await query('SELECT id, bling_contact_id FROM clients WHERE cpf = $1', [cleanDoc])
-          : { rows: [] as { id: number; bling_contact_id: number | null }[] }
-        const existingByCnpj = !isCpf
-          ? await query('SELECT id, bling_contact_id FROM clients WHERE cnpj = $1', [cleanDoc])
-          : { rows: [] as { id: number; bling_contact_id: number | null }[] }
+        const existingCpfRow = isCpf ? await findExistingClientByField('cpf', cleanDoc) : null
+        const existingCnpjRow = !isCpf ? await findExistingClientByField('cnpj', cleanDoc) : null
+        const existingByCpf = { rows: existingCpfRow ? [existingCpfRow] : [] }
+        const existingByCnpj = { rows: existingCnpjRow ? [existingCnpjRow] : [] }
         const existingByBlingId = await query(
           'SELECT id, cpf, cnpj FROM clients WHERE bling_contact_id = $1',
           [fullContact.id]
@@ -344,22 +342,16 @@ export async function POST(request: NextRequest) {
           const existingClient = existingByBlingId.rows[0] as { id: number; cpf: string | null; cnpj: string | null }
           // Conflito: outro cliente já tem este CPF ou CNPJ
           if (cpfValue) {
-            const conflict = await query(
-              'SELECT id FROM clients WHERE cpf = $1 AND id != $2',
-              [cpfValue, existingClient.id]
-            )
-            if (conflict.rows.length > 0) {
+            const conflict = await findExistingClientByField('cpf', cpfValue, existingClient.id)
+            if (conflict) {
               skippedCount++
               errors.push(`Contato "${formattedName}" (ID Bling: ${fullContact.id}) ignorado: CPF já pertence a outro cliente`)
               continue
             }
           }
           if (cnpjValue) {
-            const conflict = await query(
-              'SELECT id FROM clients WHERE cnpj = $1 AND id != $2',
-              [cnpjValue, existingClient.id]
-            )
-            if (conflict.rows.length > 0) {
+            const conflict = await findExistingClientByField('cnpj', cnpjValue, existingClient.id)
+            if (conflict) {
               skippedCount++
               errors.push(`Contato "${formattedName}" (ID Bling: ${fullContact.id}) ignorado: CNPJ já pertence a outro cliente`)
               continue
